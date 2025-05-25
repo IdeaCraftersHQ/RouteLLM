@@ -14,6 +14,7 @@ Our core features include:
 - Trained routers are provided out of the box, which we have shown to **reduce costs by up to 85%** while maintaining **95% GPT-4 performance** on widely-used benchmarks like MT Bench.
 - Benchmarks also demonstrate that these routers achieve the same performance as commercial offerings while being **>40% cheaper**. 
 - Easily extend the framework to include new routers and compare the performance of routers across multiple benchmarks.
+- **NEW**: Intent-based routing middleware that allows you to route queries to specialized models based on detected intents.
 
 ## Installation
 
@@ -52,6 +53,8 @@ client = Controller(
 Above, we pick `gpt-4-1106-preview` as the strong model and `anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1` as the weak model, setting the API keys accordingly. You can route between different model pairs or providers by updating the model names as described in [Model Support](#model-support).
 
 Want to route to local models? Check out [Routing to Local Models](examples/routing_to_local_models.md).
+
+You can also use our intent-based routing middleware to route queries to specialized models based on detected intents (see [Intent-Based Routing](#intent-based-routing) below).
 
 2. Each routing request has a *cost threshold* that controls the tradeoff between cost and quality. We should calibrate this based on the types of queries we receive to maximize routing performance. As an example, let's calibrate our threshold for 50% GPT-4 calls using data from Chatbot Arena.
 ```
@@ -184,6 +187,83 @@ While these routers have been trained on the `gpt-4-1106-preview` and `mixtral-8
 We also provide detailed instructions on how to train the LLM-based classifier in the following [notebook](https://github.com/anyscale/llm-router/blob/main/README.ipynb).
 
 For the full details, refer to our [paper](https://arxiv.org/abs/2406.18665).
+
+## Intent-Based Routing
+
+RouteLLM now supports intent-based routing, which allows you to route queries to specialized models based on detected intents. This is particularly useful when you have domain-specific models that excel at particular types of tasks.
+
+### Quickstart with Intent-Based Routing
+
+```python
+from routellm.controller import Controller
+from routellm.middleware.intent_model_selector import IntentModelSelector
+
+# Create an intent-based model selector
+intent_selector = IntentModelSelector()
+
+# Add mappings for different intents
+intent_selector.add_mapping(
+    intent="coding",
+    strong_model="gpt-4-1106-preview",
+    weak_model="anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1"
+)
+intent_selector.add_mapping(
+    intent="math",
+    strong_model="gpt-4-1106-preview",
+    weak_model="claude-3-opus-20240229"
+)
+
+# Initialize controller with the intent selector as middleware
+client = Controller(
+    routers=["mf"],
+    strong_model="gpt-4-1106-preview",
+    weak_model="anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1",
+    middleware=[intent_selector]
+)
+
+# Now when you make requests, they'll be routed based on detected intent
+response = client.chat.completions.create(
+    model="router-mf-0.11593",
+    messages=[
+        {"role": "user", "content": "Write a Python function to calculate the Fibonacci sequence"}
+    ]
+)
+```
+
+### Web UI for Intent-Based Routing
+
+You can also use our web UI to configure and test intent-based routing:
+
+```
+python -m routellm.examples.intent_web_ui
+```
+
+This will launch a Gradio interface where you can:
+- Define intents and add example prompts
+- Configure model mappings for each intent
+- Test routing with different prompts
+- Save and load configurations
+
+### Domain-Specific Intent Detection
+
+For more advanced use cases, you can use our `DomainIntentDetector` to fine-tune intent detection with domain-specific examples:
+
+```python
+from routellm.middleware.domain_intent_detector import DomainIntentDetector
+
+# Create a detector with custom intents
+detector = DomainIntentDetector(intents=["coding", "math", "creative"])
+
+# Add examples for each intent
+detector.add_examples("coding", [
+    "Write a Python function to sort a list",
+    "Debug this JavaScript code",
+    "How do I implement a binary search tree?"
+])
+
+# Use in your intent selector
+intent_selector = IntentModelSelector(intent_detector=detector)
+```
 
 ## Configuration
 
