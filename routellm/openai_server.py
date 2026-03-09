@@ -33,6 +33,13 @@ count = defaultdict(lambda: defaultdict(int))
 async def lifespan(app):
     global CONTROLLER
 
+    gateway = None
+    if args.payment_provider == "x402":
+        from routellm.payment.x402 import X402Adapter
+        key = os.environ.get(args.wallet_key_env or "ROUTELLM_WALLET_KEY", "")
+        if key:
+            gateway = X402Adapter(private_key=key)
+
     CONTROLLER = Controller(
         routers=args.routers,
         config=yaml.safe_load(open(args.config, "r")) if args.config else None,
@@ -41,6 +48,7 @@ async def lifespan(app):
         api_base=args.base_url,
         api_key=args.api_key,
         progress_bar=True,
+        payment_gateway=gateway,
     )
     yield
     CONTROLLER = None
@@ -178,6 +186,17 @@ parser.add_argument(
 parser.add_argument("--strong-model", type=str, default="gpt-4-1106-preview")
 parser.add_argument(
     "--weak-model", type=str, default="anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1"
+)
+parser.add_argument(
+    "--payment-provider",
+    default=None,
+    choices=["x402"],
+    help="Enable payment gateway (e.g. x402)",
+)
+parser.add_argument(
+    "--wallet-key-env",
+    default="ROUTELLM_WALLET_KEY",
+    help="Env var holding wallet private key",
 )
 args = parser.parse_args()
 
