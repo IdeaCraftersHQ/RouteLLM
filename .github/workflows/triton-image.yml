@@ -1,0 +1,118 @@
+name: Triton Image — Export & Push
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "models/**"
+      - ".github/workflows/triton-image.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ideacrafterslabs/routellm-triton
+
+jobs:
+  # -------------------------------------------------------------------
+  # Job 1: export ONNX models, upload as artifacts
+  # -------------------------------------------------------------------
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install export dependencies (CPU torch)
+        run: |
+          pip install --no-cache-dir \
+            --extra-index-url https://download.pytorch.org/whl/cpu \
+            -r models/export/requirements.txt
+
+      - name: Export MF model
+        run: |
+          python models/export/export_mf.py \
+            --output models/triton/mf/1/model.onnx \
+            --skip-validation
+
+      - name: Export BERT model
+        run: |
+          python models/export/export_bert.py \
+            --output models/triton/bert/1/model.onnx \
+            --skip-validation
+
+      - name: Upload ONNX artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: onnx-models
+          path: |
+            models/triton/mf/1/model.onnx
+            models/triton/bert/1/model.onnx
+          retention-days: 7
+
+  # -------------------------------------------------------------------
+  # Job 2: build Triton image with baked models, push to GHCR
+  # -------------------------------------------------------------------
+  build-push:
+    runs-on: ubuntu-latest
+    needs: export
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download ONNX artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: onnx-models
+          path: models/triton
+
+      - name: Verify ONNX files present
+        run: |
+          ls -lh models/triton/mf/1/model.onnx
+          ls -lh models/triton/bert/1/model.onnx
+
+      - name: Generate serve-only Dockerfile
+        run: |
+          cat > Dockerfile.ci <<'DOCKERFILE'
+          FROM nvcr.io/nvidia/tritonserver:24.12-py3
+          COPY models/triton/mf/config.pbtxt  /models/mf/config.pbtxt
+          COPY models/triton/bert/config.pbtxt /models/bert/config.pbtxt
+          COPY models/triton/mf/1/model.onnx   /models/mf/1/model.onnx
+          COPY models/triton/bert/1/model.onnx  /models/bert/1/model.onnx
+          EXPOSE 8000 8001 8002
+          ENTRYPOINT ["tritonserver", "--model-repository=/models"]
+          DOCKERFILE
+
+      - name: Set image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=v${{ github.run_number }}-{{date 'YYYYMMDD'}}
+            type=sha,prefix=
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Triton image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.ci
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
