@@ -7,6 +7,8 @@ import pandas as pd
 from litellm import acompletion, completion
 from tqdm import tqdm
 
+from routellm.payment.gateway import PaymentGateway
+from routellm.payment.types import PaymentChallenge
 from routellm.routers.routers import ROUTER_CLS
 
 # Default config for routers augmented using golden label data from GPT-4.
@@ -57,6 +59,7 @@ class Controller:
         api_key: Optional[str] = None,
         progress_bar: bool = False,
         middleware: Optional[List[Middleware]] = None,
+        payment_gateway: Optional[PaymentGateway] = None,
     ):
         self.default_model_pair = ModelPair(strong=strong_model, weak=weak_model)
         self.routers = {}
@@ -65,6 +68,7 @@ class Controller:
         self.model_counts = defaultdict(lambda: defaultdict(int))
         self.progress_bar = progress_bar
         self.middleware = middleware or []
+        self.payment_gateway = payment_gateway
 
         if config is None:
             config = GPT_4_AUGMENTED_CONFIG
@@ -85,6 +89,35 @@ class Controller:
                 create=self.completion, acreate=self.acompletion
             )
         )
+
+    @staticmethod
+    def _parse_402_challenge(response_body: dict) -> PaymentChallenge:
+        """Extract a PaymentChallenge from a raw 402 response body."""
+        return PaymentChallenge(
+            scheme=response_body.get("scheme", "x402"),
+            network=response_body.get("network", ""),
+            amount=response_body.get("amount", "0"),
+            currency=response_body.get("currency", ""),
+            payload=response_body,
+        )
+
+    async def _request_with_payment(self, make_request, extra_headers: dict | None = None):
+        """Call make_request; on 402 pay via gateway and retry once."""
+        try:
+            return await make_request(extra_headers=extra_headers or {})
+        except Exception as e:
+            if getattr(e, "status_code", None) == 402 and self.payment_gateway is not None:
+                body = {}
+                response = getattr(e, "response", None)
+                if response is not None:
+                    try:
+                        body = response.json()
+                    except Exception:
+                        pass
+                challenge = self._parse_402_challenge(body)
+                receipt = await self.payment_gateway.pay(challenge)
+                return await make_request(extra_headers={"X-PAYMENT": receipt.tx_hash})
+            raise
 
     def _validate_router_threshold(
         self, router: Optional[str], threshold: Optional[float]
@@ -209,4 +242,15 @@ class Controller:
         kwargs["model"] = self._get_routed_model_for_completion(
             kwargs["messages"], router, threshold
         )
-        return await acompletion(api_base=self.api_base, api_key=self.api_key, **kwargs)
+        api_base = self.api_base
+        api_key = self.api_key
+
+        async def _call(extra_headers):
+            return await acompletion(
+                api_base=api_base,
+                api_key=api_key,
+                extra_headers=extra_headers,
+                **kwargs,
+            )
+
+        return await self._request_with_payment(_call)

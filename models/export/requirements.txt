@@ -1,0 +1,5 @@
+torch
+onnx
+onnxruntime
+transformers
+huggingface_hub

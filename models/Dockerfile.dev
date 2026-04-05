@@ -1,0 +1,55 @@
+# models/Dockerfile.dev — multi-stage: export ONNX models then serve via Triton
+#
+# Build:  docker compose -f models/docker-compose.yml build
+# Run:    docker compose -f models/docker-compose.yml up
+
+# ============================================================================
+# Stage 1: export — produce ONNX artifacts from HuggingFace checkpoints
+# ============================================================================
+FROM python:3.11-slim AS export
+
+WORKDIR /workspace
+
+# Install export dependencies (CPU-only torch keeps image small)
+COPY models/export/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    -r /tmp/requirements.txt
+
+# Copy routellm package (needed by export_mf.py for model class)
+COPY routellm/ /workspace/routellm/
+
+# Copy export scripts
+COPY models/export/ /workspace/models/export/
+
+# Run export scripts; --skip-validation keeps stage hermetic
+# (validation downloads the same model twice — wasteful in build)
+ARG MF_CHECKPOINT=routellm/routellm_mf
+ARG BERT_CHECKPOINT=routellm/routellm_bert
+
+RUN python models/export/export_mf.py \
+      --checkpoint "${MF_CHECKPOINT}" \
+      --output /models/triton/mf/1/model.onnx \
+      --skip-validation
+
+RUN python models/export/export_bert.py \
+      --checkpoint "${BERT_CHECKPOINT}" \
+      --output /models/triton/bert/1/model.onnx \
+      --skip-validation
+
+# ============================================================================
+# Stage 2: serve — Triton Inference Server with baked-in models
+# ============================================================================
+FROM nvcr.io/nvidia/tritonserver:24.12-py3 AS serve
+
+# Copy Triton model repository configs
+COPY models/triton/mf/config.pbtxt  /models/mf/config.pbtxt
+COPY models/triton/bert/config.pbtxt /models/bert/config.pbtxt
+
+# Copy exported ONNX artifacts from export stage
+COPY --from=export /models/triton/mf/1/model.onnx   /models/mf/1/model.onnx
+COPY --from=export /models/triton/bert/1/model.onnx  /models/bert/1/model.onnx
+
+EXPOSE 8000 8001 8002
+
+ENTRYPOINT ["tritonserver", "--model-repository=/models"]
