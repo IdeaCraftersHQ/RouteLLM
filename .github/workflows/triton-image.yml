@@ -47,13 +47,18 @@ jobs:
             --output models/triton/bert/1/model.onnx \
             --skip-validation
 
-      - name: Upload ONNX artifacts
+      - name: Upload MF ONNX artifact
         uses: actions/upload-artifact@v4
         with:
-          name: onnx-models
-          path: |
-            models/triton/mf/1/model.onnx
-            models/triton/bert/1/model.onnx
+          name: onnx-mf
+          path: models/triton/mf/1/model.onnx
+          retention-days: 7
+
+      - name: Upload BERT ONNX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: onnx-bert
+          path: models/triton/bert/1/model.onnx
           retention-days: 7
 
   # -------------------------------------------------------------------
@@ -65,11 +70,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download ONNX artifacts
+      - name: Download MF ONNX artifact
         uses: actions/download-artifact@v4
         with:
-          name: onnx-models
-          path: models/triton
+          name: onnx-mf
+          path: models/triton/mf/1
+
+      - name: Download BERT ONNX artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: onnx-bert
+          path: models/triton/bert/1
 
       - name: Verify ONNX files present
         run: |
