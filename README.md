@@ -1,6 +1,6 @@
 # RouteLLM
 
-RouteLLM is a framework for serving and evaluating LLM routers.
+The probabilistic quality router. A framework for serving and evaluating LLM routers.
 
 [ [Blog](http://lmsys.org/blog/2024-07-01-routellm/) ] [ [Paper](https://arxiv.org/abs/2406.18665) ]
 
@@ -15,6 +15,76 @@ Our core features include:
 - Benchmarks also demonstrate that these routers achieve the same performance as commercial offerings while being **>40% cheaper**. 
 - Easily extend the framework to include new routers and compare the performance of routers across multiple benchmarks.
 - **NEW**: Intent-based routing middleware that allows you to route queries to specialized models based on detected intents.
+- **NEW**: Advanced reliability and performance features including auto-retry, circuit breaker, semantic caching, load balancing, and canary testing.
+
+## Advanced Features
+
+RouteLLM now supports a suite of enterprise-grade features for reliability, performance, and quality management:
+
+### Reliability & Resilience
+Ensure your system remains operational even when providers fail:
+- **Auto-Retry**: Exponential backoff for transient failures (e.g., 429, 5xx).
+- **Circuit Breaker**: Prevents cascading failures by opening when success rates drop, automatically entering `HALF_OPEN` state to test recovery.
+- **Fallbacks**: Automatically falls back to the alternative model in your pair if the routed model fails after retries.
+- **Timeouts**: Enforce strict latency requirements on every call.
+
+### Performance Optimization
+Reduce costs and latency with intelligent data management:
+- **Simple Caching**: Persistent exact-match caching using SQLite.
+- **Semantic Caching**: Intelligent caching based on prompt similarity using vector embeddings. Avoid redundant calls for semantically identical queries.
+- **Load Balancing**: Rotate between multiple endpoints, providers, or API keys with **Weighted** or **Round-Robin** strategies.
+
+### Quality & Continuous Improvement
+Maintain high standards and automate model improvement:
+- **Canary Testing**: Safely split a percentage of traffic to a new model candidate for live validation.
+- **Trace Collection**: Standardized request/response recording for fine-tuning with **Fit**.
+- **Contract Enforcement**: conceptual integration points for **Eva** to enforce output quality contracts.
+
+## Usage: Advanced Configuration
+
+Configure these features by passing specialized config objects to the `Controller`:
+
+```python
+from routellm.controller import Controller
+from routellm.resilience import ResilienceConfig
+from routellm.caching import CacheConfig
+from routellm.traffic import TrafficManager, TrafficRule, LoadBalancer, LoadBalancerConfig, LoadBalancerEndpoint
+from routellm.quality import QualityManager, FineTuneConfig, CanaryConfig
+
+# 1. Configure Load Balancing for a specific model name
+lb_config = LoadBalancerConfig(
+    strategy="round-robin",
+    endpoints=[
+        LoadBalancerEndpoint(model="openai/gpt-4-turbo", api_key="KEY_A"),
+        LoadBalancerEndpoint(model="azure/gpt-4", api_base="https://endpoint-b.com")
+    ]
+)
+
+# 2. Setup Traffic Management with Rules
+traffic_manager = TrafficManager(
+    rules=[
+        # Route requests containing "code" to a specific pair
+        TrafficRule(pattern=".*code.*", strong_model="codellama-34b", weak_model="gpt-3.5-turbo")
+    ],
+    load_balancers={"gpt-4": LoadBalancer(lb_config)}
+)
+
+client = Controller(
+    routers=["mf"],
+    strong_model="gpt-4",
+    weak_model="gpt-3.5-turbo",
+    # Resilience: 3 retries, 30s timeout, circuit breaker enabled
+    resilience_config=ResilienceConfig(max_retries=3, timeout_ms=30000),
+    # Caching: Enable semantic caching with 95% similarity threshold
+    cache_config=CacheConfig(semantic_enabled=True, semantic_threshold=0.95),
+    traffic_manager=traffic_manager,
+    # Quality: 5% Canary traffic and record traces for fine-tuning
+    quality_manager=QualityManager(
+        canary_config=CanaryConfig(enabled=True, canary_model="gpt-4o", weight=0.05),
+        fine_tune_config=FineTuneConfig(enabled=True)
+    )
+)
+```
 
 ## Installation
 

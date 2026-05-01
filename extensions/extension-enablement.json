@@ -1,0 +1,77 @@
+{
+  "gemini-cli-jules": {
+    "overrides": [
+      "/Users/jadb/*"
+    ]
+  },
+  "context7": {
+    "overrides": [
+      "/Users/jadb/*"
+    ]
+  },
+  "chrome-devtools-mcp": {
+    "overrides": [
+      "/Users/jadb/*"
+    ]
+  },
+  "mcp-toolbox-for-databases": {
+    "overrides": [
+      "/Users/jadb/*"
+    ]
+  },
+  "stripe": {
+    "overrides": [
+      "/Users/jadb/*"
+    ]
+  },
+  "huggingface-skills": {
+    "overrides": [
+      "/Users/jadb/*"
+    ]
+  },
+  "nanobanana": {
+    "overrides": [
+      "/Users/jadb/*"
+    ]
+  },
+  "redis": {
+    "overrides": [
+      "/Users/jadb/*"
+    ]
+  },
+  "code-review": {
+    "overrides": [
+      "/Users/jadb/*"
+    ]
+  },
+  "huggingface": {
+    "overrides": [
+      "/Users/jadb/*"
+    ]
+  },
+  "google-maps-platform": {
+    "overrides": [
+      "/Users/jadb/*"
+    ]
+  },
+  "google-workspace-developer-tools": {
+    "overrides": [
+      "/Users/jadb/*"
+    ]
+  },
+  "canva": {
+    "overrides": [
+      "/Users/jadb/*"
+    ]
+  },
+  "Stitch": {
+    "overrides": [
+      "/Users/jadb/*"
+    ]
+  },
+  "conductor": {
+    "overrides": [
+      "/Users/jadb/*"
+    ]
+  }
+}

@@ -1,0 +1,46 @@
+{
+  extends: [
+    'config:recommended',
+    ':semanticCommitTypeAll(chore)',
+    ':ignoreUnstable',
+    ':separateMajorReleases',
+    ':prConcurrentLimitNone',
+    ':prHourlyLimitNone',
+    ':preserveSemverRanges',
+  ],
+  minimumReleaseAge: '3',
+  rebaseWhen: 'conflicted',
+  dependencyDashboardLabels: [
+    'type: process',
+  ],
+  "postUpdateOptions": [
+    "gomodTidy"
+  ],
+  packageRules: [
+    {
+      groupName: 'GitHub Actions',
+      matchManagers: [
+        'github-actions',
+      ],
+      pinDigests: true,
+    },
+    {
+      groupName: 'Go',
+      matchManagers: [
+        'gomod',
+      ],
+    },
+    {
+      groupName: 'Node',
+      matchManagers: [
+        'npm',
+      ],
+    },
+    {
+      groupName: 'Pip',
+      matchManagers: [
+        'pip_requirements',
+      ],
+    },
+  ],
+}

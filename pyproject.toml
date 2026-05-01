@@ -26,8 +26,8 @@ dependencies = [
 
 [project.optional-dependencies]
 serve = ["fastapi", "shortuuid", "uvicorn"]
-eval = ["matplotlib", "pandarallel", "sglang", 'tiktoken']
-dev = ["black", "isort", "pre-commit", "pytest-asyncio"]
+eval = ["matplotlib", "pandarallel", "sglang", 'tiktoken', "psutil"]
+dev = ["black", "isort", "pre-commit", "pytest", "pytest-asyncio"]
 
 [project.urls]
 "Homepage" = "https://github.com/lm-sys/RouteLLM"

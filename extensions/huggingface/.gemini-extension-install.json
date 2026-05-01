@@ -1,0 +1,5 @@
+{
+  "source": "https://github.com/huggingface/hf-mcp-server",
+  "type": "github-release",
+  "releaseTag": "v0.3.5"
+}

@@ -1,0 +1,1 @@
+-read(~/.agents/AGENTS.md)

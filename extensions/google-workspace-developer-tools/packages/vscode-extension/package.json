@@ -1,0 +1,83 @@
+{
+  "name": "google-workspace-developer-tools",
+  "displayName": "Google Workspace Developer Tools",
+  "description": "Lint Google Workspace OAuth2 scopes and more.",
+  "version": "0.6.2",
+  "publisher": "google-workspace",
+  "license": "Apache-2.0",
+  "private": true,
+  "author": {
+    "name": "Justin Poehnelt",
+    "email": "jpoehnelt@google.com",
+    "url": "https://justin.poehnelt.com"
+  },
+  "categories": [
+    "Linters",
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "google",
+    "workspace",
+    "card",
+    "json",
+    "scopes",
+    "oauth2"
+  ],
+  "icon": "assets/icon_128.png",
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
+  "repository": "https://github.com/googleworkspace/developer-tools",
+  "bugs": {
+    "url": "https://github.com/googleworkspace/developer-tools/issues"
+  },
+  "homepage": "https://github.com/googleworkspace/developer-tools",
+  "engines": {
+    "vscode": "^1.50.0"
+  },
+  "type": "module",
+  "main": "./out/extension.cjs",
+  "contributes": {
+    "commands": [],
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "google-workspace-developer",
+        "label": "Google Workspace Developer Tools"
+      }
+    ]
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "check": "tsc --noEmit",
+    "ci:package": "vsce package --no-dependencies",
+    "ci:publish": "ovsx publish --skip-duplicate --no-dependencies && vsce publish --skip-duplicate --no-dependencies",
+    "ci:version": "changeset version && pnpm i --lockfile-only --engine-strict=false",
+    "ci:update": "tsx scripts/fetch-apis.ts",
+    "dev": "tsup --watch",
+    "pretest": "pnpm build",
+    "test": "vscode-test",
+    "vscode:prepublish": "tsup"
+  },
+  "devDependencies": {
+    "@types/mocha": "catalog:",
+    "@types/node": "catalog:",
+    "@types/vscode": "^1.50.0",
+    "@vscode/test-cli": "catalog:",
+    "@vscode/test-electron": "catalog:",
+    "@vscode/vsce": "catalog:",
+    "googleapis": "catalog:",
+    "ky": "catalog:",
+    "ovsx": "catalog:",
+    "tsup": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:"
+  },
+  "dependencies": {
+    "vitest": "^4.0.4"
+  }
+}

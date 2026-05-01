@@ -249,8 +249,9 @@ class RandomRouter(Router):
         self,
         prompt,
     ):
-        del prompt
-        return random.uniform(0, 1)
+        res = random.uniform(0, 1)
+        print(f"[RANDOM_ROUTER] calculated win_rate={res}")
+        return res
 
 
 ROUTER_CLS = {

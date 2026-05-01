@@ -3,7 +3,7 @@ import os
 from dataclasses import dataclass, asdict
 from typing import Dict, List, Optional, Tuple, Any
 
-from routellm.controller import ModelPair
+from routellm.types import ModelPair
 
 
 @dataclass
