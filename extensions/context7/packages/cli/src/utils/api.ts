@@ -16,32 +16,73 @@ import { downloadSkillFromGitHub } from "./github.js";
 
 let baseUrl = "https://context7.com";
 
+/**
+ * Get the current base URL for API requests.
+ *
+ * @returns {string} The configured API base URL.
+ */
 export function getBaseUrl(): string {
   return baseUrl;
 }
 
+/**
+ * Set the base URL for API requests.
+ *
+ * Useful for testing or using alternative API endpoints.
+ *
+ * @param {string} url - The new base URL (e.g., "https://api.context7.local").
+ */
 export function setBaseUrl(url: string): void {
   baseUrl = url;
 }
 
+/**
+ * List all skills available in a project.
+ *
+ * @param {string} project - The project identifier.
+ * @returns {Promise<ListSkillsResponse>} Response containing list of skills.
+ */
 export async function listProjectSkills(project: string): Promise<ListSkillsResponse> {
   const params = new URLSearchParams({ project });
   const response = await fetch(`${baseUrl}/api/v2/skills?${params}`);
   return (await response.json()) as ListSkillsResponse;
 }
 
+/**
+ * Get details for a specific skill.
+ *
+ * @param {string} project - The project identifier.
+ * @param {string} skillName - The skill name or identifier.
+ * @returns {Promise<SingleSkillResponse>} Response with skill details.
+ */
 export async function getSkill(project: string, skillName: string): Promise<SingleSkillResponse> {
   const params = new URLSearchParams({ project, skill: skillName });
   const response = await fetch(`${baseUrl}/api/v2/skills?${params}`);
   return (await response.json()) as SingleSkillResponse;
 }
 
+/**
+ * Search for skills by query.
+ *
+ * @param {string} query - Search query for skills.
+ * @returns {Promise<SearchResponse>} Search results.
+ */
 export async function searchSkills(query: string): Promise<SearchResponse> {
   const params = new URLSearchParams({ query });
   const response = await fetch(`${baseUrl}/api/v2/skills?${params}`);
   return (await response.json()) as SearchResponse;
 }
 
+/**
+ * Get skill suggestions based on project dependencies.
+ *
+ * Analyzes the provided dependencies and suggests relevant skills that may
+ * be useful for the project.
+ *
+ * @param {string[]} dependencies - List of project dependencies.
+ * @param {string} [accessToken] - Optional access token for authentication.
+ * @returns {Promise<SuggestResponse>} Suggestions response.
+ */
 export async function suggestSkills(
   dependencies: string[],
   accessToken?: string
@@ -58,6 +99,16 @@ export async function suggestSkills(
   return (await response.json()) as SuggestResponse;
 }
 
+/**
+ * Download a skill and its associated files from GitHub.
+ *
+ * Fetches skill metadata and clones the GitHub repository containing the skill
+ * source code.
+ *
+ * @param {string} project - The project identifier.
+ * @param {string} skillName - The skill name or identifier.
+ * @returns {Promise<DownloadResponse>} Download result with skill info and files.
+ */
 export async function downloadSkill(project: string, skillName: string): Promise<DownloadResponse> {
   const skillData = await getSkill(project, skillName);
 
@@ -85,12 +136,24 @@ export async function downloadSkill(project: string, skillName: string): Promise
   return { skill, files };
 }
 
+/**
+ * Response from skill generation with generated code and library information.
+ */
 export interface GenerateSkillResponse {
   content: string;
   libraryName: string;
   error?: string;
 }
 
+/**
+ * Search for libraries matching a query.
+ *
+ * Uses semantic search to find documentation libraries relevant to the query.
+ *
+ * @param {string} query - Search query or topic.
+ * @param {string} [accessToken] - Optional access token for authentication.
+ * @returns {Promise<LibrarySearchResponse>} Search results.
+ */
 export async function searchLibraries(
   query: string,
   accessToken?: string
@@ -104,6 +167,15 @@ export async function searchLibraries(
   return (await response.json()) as LibrarySearchResponse;
 }
 
+/**
+ * Get the current skill generation quota for a user.
+ *
+ * Returns usage information including total quota, used amount, remaining quota,
+ * and plan tier.
+ *
+ * @param {string} accessToken - Access token for authentication (required).
+ * @returns {Promise<SkillQuotaResponse>} Quota information.
+ */
 export async function getSkillQuota(accessToken: string): Promise<SkillQuotaResponse> {
   const response = await fetch(`${baseUrl}/api/v2/skills/quota`, {
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -124,6 +196,17 @@ export async function getSkillQuota(accessToken: string): Promise<SkillQuotaResp
   return (await response.json()) as SkillQuotaResponse;
 }
 
+/**
+ * Get guided questions for skill generation based on selected libraries.
+ *
+ * Generates contextual questions to help guide the user through the skill
+ * generation process, tailored to the selected libraries and use case.
+ *
+ * @param {Array<{ id: string; name: string }>} libraries - Selected libraries.
+ * @param {string} motivation - User motivation or use case description.
+ * @param {string} [accessToken] - Optional access token for authentication.
+ * @returns {Promise<SkillQuestionsResponse>} Questions and guidance.
+ */
 export async function getSkillQuestions(
   libraries: Array<{ id: string; name: string }>,
   motivation: string,
@@ -151,6 +234,17 @@ export async function getSkillQuestions(
   return (await response.json()) as SkillQuestionsResponse;
 }
 
+/**
+ * Generate a skill using structured input from a guided form.
+ *
+ * Streams generation progress via optional event callback. Returns final
+ * generated code when complete.
+ *
+ * @param {StructuredGenerateInput} input - Structured generation parameters.
+ * @param {Function} [onEvent] - Optional callback for streaming events.
+ * @param {string} [accessToken] - Optional access token for authentication.
+ * @returns {Promise<GenerateSkillResponse>} Generated skill code and metadata.
+ */
 export async function generateSkillStructured(
   input: StructuredGenerateInput,
   onEvent?: (event: GenerateStreamEvent) => void,
