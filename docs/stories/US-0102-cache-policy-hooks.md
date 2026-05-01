@@ -20,6 +20,15 @@ policy per request class. c12n classifies on PII / Domain /
 Complexity / CodeContent / Toxicity / Jailbreak / CostEstimate /
 OutputFormat — these labels should drive cache behavior.
 
+Primary namespace key = `workspace_id` (resolved from request auth
+token → aps profile → WorkspaceLink). Tenant-scoped is too coarse:
+one tenant can hold multiple workspaces (client-A vs client-B);
+shared `tenant_id` namespace leaks `Domain: legal` / `PII` rows
+across client engagements within a single employee profile. See
+wsm audit T-0179. `tenant_id` remains a valid override when sister
+workspaces under one tenant want shared cache (analogous spec
+move: bus envelope T-0192 carries `workspace_id` from day one).
+
 Hook point: a callable `cache_policy: Callable[[Request,
 ClassificationResult], CachePolicy]` invoked between request
 intake and cache lookup. Returns:
@@ -28,13 +37,15 @@ intake and cache lookup. Returns:
 CachePolicy:
   action: skip | lookup_only | lookup_and_store | store_only
   ttl: seconds (overrides config default)
-  namespace: str (default: tenant_id; can override for global-safe)
+  namespace: str (default: workspace_id; can override — e.g.
+              tenant_id for sister-workspace shared cache, or
+              "global:domain:math" for cross-tenant reuse)
   match: exact | semantic | both
 ```
 
-Default policy = today's behavior (lookup_and_store, default TTL,
-tenant namespace, both match strategies). Custom policy fully
-overrides.
+Default policy = today's behavior except namespace defaults to
+`workspace_id` (lookup_and_store, default TTL, both match
+strategies). Custom policy fully overrides.
 
 ## Acceptance criteria
 
@@ -46,8 +57,11 @@ overrides.
 - [ ] `action=lookup_and_store` (default) → existing US-0002/3
       behavior
 - [ ] Policy `ttl` overrides config TTL on store
-- [ ] Policy `namespace` overrides tenant default (e.g.,
-      `namespace="global:domain:math"` → cross-tenant reuse)
+- [ ] Default cache namespace is `workspace_id` resolved from
+      request's auth token → aps profile → `WorkspaceLink.name`
+- [ ] Policy `namespace` overrides workspace default (e.g.,
+      `tenant_id` for sister-workspace shared cache;
+      `"global:domain:math"` for cross-tenant reuse)
 - [ ] Policy `match=exact` → semantic disabled for this request
       even if globally enabled
 - [ ] Policy hook receives request + classification result;
@@ -72,14 +86,17 @@ overrides.
 - planned: `routellm/tests/test_cache_policy.py::test_store_only_no_lookup`
 - planned: `routellm/tests/test_cache_policy.py::test_ttl_override`
 - planned: `routellm/tests/test_cache_policy.py::test_namespace_override`
+- planned: `routellm/tests/test_cache_policy.py::test_cross_workspace_namespace_isolation`
 - planned: `routellm/tests/test_cache_policy.py::test_match_strategy_override`
 
 ## Related
 
 - US-0002 — exact-match cache (consumer of policy)
 - US-0003 — semantic cache (consumer of policy)
-- US-0100 — auth (provides tenant_id for default namespace)
-- US-0101 — audit (records `cache_namespace` per row)
+- US-0100 — auth (provides profile + WorkspaceLink → workspace_id)
+- US-0101 — audit (records `cache_namespace` + `workspace_id` per row)
 - c12n integration — classification produces `ClassificationResult`
   consumed by policy
 - showcase scenario 3 — class-aware LLM gateway (consumer)
+- wsm audit (T-0179): `~/.ops/docs/research/wsm-integration-audit-2026-04-30.md`
+- T-0192 — bus envelope `workspace_id` (analogous spec move)
