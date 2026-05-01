@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "routellm-policy-routing"
+version = "0.1.0"
+description = "Class-aware cache + routing policy mapping for routellm. Wires c12n classification labels to routellm CachePolicy decisions."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Jad Bitar" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    # Routellm core (sibling package); installed via local path / editable in dev
+    "routellm",
+]
+
+[project.optional-dependencies]
+# c12n Python bindings — drop in once they ship; currently the mapping
+# layer is c12n-shape-agnostic (consumers pass any object exposing the
+# documented signal attrs). Keep the extra so downstream pin sites have
+# a single dep name to track.
+c12n = []
+dev = ["pytest", "pytest-asyncio"]
+
+[project.urls]
+"Showcase scenario" = "https://github.com/jadb-admin/.ops/tree/main/.tlc/tracks/tools-showcase-scenarios"
+
+[tool.setuptools.packages.find]
+include = ["policy_routing*"]
+exclude = ["tests*"]
