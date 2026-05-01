@@ -1,0 +1,34 @@
+flowchart LR
+    subgraph LAN["Office LAN (10.0.0.0/24)"]
+        EmpA["Employee A<br/>OpenAI client"]
+        EmpB["Employee B<br/>IDE plugin"]
+    end
+
+    subgraph VPN["VPN (10.8.0.0/24)"]
+        EmpC["Remote employee<br/>OpenAI client"]
+    end
+
+    subgraph Host["Bare LAN host (gateway.lan)"]
+        Proxy["Reverse proxy<br/>caddy / nginx<br/>:443 TLS"]
+        RLM["routellm.openai_server<br/>:6060 (loopback)"]
+        Ollama["Ollama<br/>:11434 (loopback)<br/>weak model"]
+        AuthDB[("token store<br/>SQLite<br/>US-0100")]
+        AuditDB[("audit log<br/>SQLite<br/>US-0101")]
+        CacheDB[("cache<br/>US-0002 / US-0003")]
+    end
+
+    subgraph Cloud["Cloud egress"]
+        OAI["OpenAI API<br/>strong model"]
+        Anth["Anthropic API<br/>strong model"]
+    end
+
+    EmpA -->|HTTPS bearer| Proxy
+    EmpB -->|HTTPS bearer| Proxy
+    EmpC -->|HTTPS bearer over VPN| Proxy
+    Proxy --> RLM
+    RLM --> AuthDB
+    RLM --> AuditDB
+    RLM --> CacheDB
+    RLM -->|weak: localhost| Ollama
+    RLM -->|strong: egress| OAI
+    RLM -->|strong: egress| Anth
