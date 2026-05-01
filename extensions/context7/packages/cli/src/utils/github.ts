@@ -79,6 +79,17 @@ function parseGitHubUrl(url: string): {
   }
 }
 
+/**
+ * Download skill files from a GitHub repository.
+ *
+ * Parses the GitHub URL to extract owner, repo, branch, and path information.
+ * Fetches the repository tree via GitHub API and downloads all skill files
+ * from the specified path.
+ *
+ * @param {Skill & { project: string }} skill - Skill metadata with GitHub URL.
+ * @returns {Promise<{ files: SkillFile[]; error?: string }>} Array of downloaded
+ * files or error message if fetch fails.
+ */
 export async function downloadSkillFromGitHub(
   skill: Skill & { project: string }
 ): Promise<{ files: SkillFile[]; error?: string }> {

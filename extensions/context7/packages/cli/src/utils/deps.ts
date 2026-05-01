@@ -91,6 +91,20 @@ async function parsePyprojectToml(cwd: string): Promise<string[]> {
   return deps;
 }
 
+/**
+ * Detect project dependencies from manifest files.
+ *
+ * Scans for multiple dependency manifest formats and aggregates results:
+ * - package.json (Node.js)
+ * - requirements.txt (Python pip)
+ * - pyproject.toml (Python Poetry/setuptools)
+ *
+ * Filters out @types/* packages and duplicates. Returns a deduplicated list
+ * of all discovered project dependencies.
+ *
+ * @param {string} cwd - Directory to search for dependency files.
+ * @returns {Promise<string[]>} Sorted array of unique dependency names.
+ */
 export async function detectProjectDependencies(cwd: string): Promise<string[]> {
   const results = await Promise.all([
     parsePackageJson(cwd),
