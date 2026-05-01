@@ -33,6 +33,11 @@ from aps story 004.
 ### Server
 - [US-0010](US-0010-openai-compatible-server.md) — OpenAI-compatible server
 
+### Auth + observability (gap series — paper)
+- [US-0100](US-0100-multi-tenant-auth.md) — multi-tenant API auth
+- [US-0101](US-0101-audit-log.md) — audit log of routed requests
+- [US-0102](US-0102-cache-policy-hooks.md) — pluggable cache policy hooks
+
 ## Status legend
 
 - **shipped** — code present + e2e green
