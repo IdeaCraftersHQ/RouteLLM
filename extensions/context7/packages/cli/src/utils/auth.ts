@@ -7,6 +7,18 @@ import * as os from "os";
 const CONFIG_DIR = path.join(os.homedir(), ".context7");
 const CREDENTIALS_FILE = path.join(CONFIG_DIR, "credentials.json");
 
+/**
+ * OAuth 2.0 token data from authentication server.
+ *
+ * Includes access token, optional refresh token, and expiration information.
+ *
+ * @property {string} access_token - The access token for API requests.
+ * @property {string} [refresh_token] - Optional refresh token for renewing access.
+ * @property {string} token_type - Token type (typically "Bearer").
+ * @property {number} [expires_in] - Seconds until token expires.
+ * @property {number} [expires_at] - Unix timestamp when token expires.
+ * @property {string} [scope] - Space-separated scopes granted by server.
+ */
 export interface TokenData {
   access_token: string;
   refresh_token?: string;
@@ -16,17 +28,41 @@ export interface TokenData {
   scope?: string;
 }
 
+/**
+ * PKCE (Proof Key for Public Clients) challenge and verifier pair.
+ *
+ * Used in OAuth 2.0 authorization flow to enhance security for public clients.
+ *
+ * @property {string} codeVerifier - Random 43-character string (base64url).
+ * @property {string} codeChallenge - SHA256 hash of verifier (base64url).
+ */
 export interface PKCEChallenge {
   codeVerifier: string;
   codeChallenge: string;
 }
 
+/**
+ * Generate a PKCE challenge pair for OAuth authorization.
+ *
+ * Creates a random code verifier and its corresponding challenge via SHA256
+ * hashing. Used to secure the authorization code flow.
+ *
+ * @returns {PKCEChallenge} Challenge and verifier pair.
+ */
 export function generatePKCE(): PKCEChallenge {
   const codeVerifier = crypto.randomBytes(32).toString("base64url");
   const codeChallenge = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
   return { codeVerifier, codeChallenge };
 }
 
+/**
+ * Generate a random state parameter for OAuth authorization.
+ *
+ * The state value is returned from the authorization server and must match
+ * to prevent CSRF attacks.
+ *
+ * @returns {string} Random 16-byte state value (base64url).
+ */
 export function generateState(): string {
   return crypto.randomBytes(16).toString("base64url");
 }
@@ -37,6 +73,14 @@ function ensureConfigDir(): void {
   }
 }
 
+/**
+ * Save OAuth tokens to local credentials file.
+ *
+ * Stores tokens in ~/.context7/credentials.json with restricted permissions (0o600).
+ * Automatically calculates expires_at from expires_in if not provided.
+ *
+ * @param {TokenData} tokens - Token data to save.
+ */
 export function saveTokens(tokens: TokenData): void {
   ensureConfigDir();
   const data = {
@@ -47,6 +91,13 @@ export function saveTokens(tokens: TokenData): void {
   fs.writeFileSync(CREDENTIALS_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
 }
 
+/**
+ * Load OAuth tokens from local credentials file.
+ *
+ * Returns null if credentials file does not exist or is malformed.
+ *
+ * @returns {TokenData | null} Saved token data or null if not found.
+ */
 export function loadTokens(): TokenData | null {
   if (!fs.existsSync(CREDENTIALS_FILE)) {
     return null;
@@ -59,6 +110,11 @@ export function loadTokens(): TokenData | null {
   }
 }
 
+/**
+ * Clear saved OAuth tokens from credentials file.
+ *
+ * @returns {boolean} True if tokens were deleted, false if file did not exist.
+ */
 export function clearTokens(): boolean {
   if (fs.existsSync(CREDENTIALS_FILE)) {
     fs.unlinkSync(CREDENTIALS_FILE);
@@ -67,6 +123,15 @@ export function clearTokens(): boolean {
   return false;
 }
 
+/**
+ * Check if OAuth tokens have expired or are about to expire.
+ *
+ * Considers a token expired if its expiration time is within 60 seconds
+ * of the current time, allowing time for token refresh.
+ *
+ * @param {TokenData} tokens - Token data to check.
+ * @returns {boolean} True if tokens are expired or expiration is missing.
+ */
 export function isTokenExpired(tokens: TokenData): boolean {
   if (!tokens.expires_at) {
     return false;
@@ -74,6 +139,15 @@ export function isTokenExpired(tokens: TokenData): boolean {
   return Date.now() > tokens.expires_at - 60000;
 }
 
+/**
+ * OAuth authorization callback parameters from redirect URL.
+ *
+ * Received from the authorization server as query parameters in the
+ * redirect URI after user authorization.
+ *
+ * @property {string} code - Authorization code to exchange for tokens.
+ * @property {string} state - CSRF protection state parameter (must match request).
+ */
 export interface CallbackResult {
   code: string;
   state: string;
