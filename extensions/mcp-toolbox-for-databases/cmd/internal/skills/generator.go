@@ -57,16 +57,18 @@ All scripts can be executed using Node.js. Replace ` + "`" + `<param_name>` + "`
 {{end}}
 `
 
+// toolTemplateData holds data for rendering a tool in skill documentation.
 type toolTemplateData struct {
-	Name             string
-	Description      string
-	ParametersSchema string
+	Name             string // tool name
+	Description      string // tool description
+	ParametersSchema string // JSON schema string for parameters
 }
 
+// skillTemplateData holds all data needed to render the complete skill documentation.
 type skillTemplateData struct {
-	SkillName        string
-	SkillDescription string
-	Tools            []toolTemplateData
+	SkillName        string              // skill display name
+	SkillDescription string              // skill description for documentation
+	Tools            []toolTemplateData  // list of tools in the skill
 }
 
 // generateSkillMarkdown generates the content of the SKILL.md file.
@@ -171,9 +173,10 @@ child.on('error', (err) => {
 });
 `
 
+// scriptData holds data for rendering a Node.js wrapper script template.
 type scriptData struct {
-	Name          string
-	ToolsFileName string
+	Name          string // tool name
+	ToolsFileName string // generated tools YAML filename
 }
 
 // generateScriptContent creates the content for a Node.js wrapper script.

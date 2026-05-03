@@ -29,17 +29,20 @@ import (
 	"github.com/googleapis/genai-toolbox/internal/server"
 )
 
+// ToolsFile represents the structure of a tools configuration YAML file.
+// Aggregates all resource types (sources, auth, tools, etc.) in one file.
 type ToolsFile struct {
-	Sources         server.SourceConfigs         `yaml:"sources"`
-	AuthServices    server.AuthServiceConfigs    `yaml:"authServices"`
-	EmbeddingModels server.EmbeddingModelConfigs `yaml:"embeddingModels"`
-	Tools           server.ToolConfigs           `yaml:"tools"`
-	Toolsets        server.ToolsetConfigs        `yaml:"toolsets"`
-	Prompts         server.PromptConfigs         `yaml:"prompts"`
+	Sources         server.SourceConfigs         `yaml:"sources"`         // database sources
+	AuthServices    server.AuthServiceConfigs    `yaml:"authServices"`    // authentication configurations
+	EmbeddingModels server.EmbeddingModelConfigs `yaml:"embeddingModels"` // embedding model definitions
+	Tools           server.ToolConfigs           `yaml:"tools"`           // tool definitions
+	Toolsets        server.ToolsetConfigs        `yaml:"toolsets"`        // groupings of tools
+	Prompts         server.PromptConfigs         `yaml:"prompts"`         // prompt definitions
 }
 
-// parseEnv replaces environment variables ${ENV_NAME} with their values.
-// also support ${ENV_NAME:default_value}.
+// parseEnv substitutes environment variable references in input.
+// Supports ${VAR_NAME} and ${VAR_NAME:default_value} syntax.
+// Returns error if referenced variable not found and no default provided.
 func parseEnv(input string) (string, error) {
 	re := regexp.MustCompile(`\$\{(\w+)(:([^}]*))?\}`)
 
@@ -61,7 +64,8 @@ func parseEnv(input string) (string, error) {
 	return output, err
 }
 
-// parseToolsFile parses the provided yaml into appropriate configs.
+// parseToolsFile parses and converts YAML bytes into a ToolsFile structure.
+// Handles environment variable substitution and v1-to-v2 format conversion.
 func parseToolsFile(ctx context.Context, raw []byte) (ToolsFile, error) {
 	var toolsFile ToolsFile
 	// Replace environment variables if found
@@ -84,6 +88,8 @@ func parseToolsFile(ctx context.Context, raw []byte) (ToolsFile, error) {
 	return toolsFile, nil
 }
 
+// convertToolsFile converts tools configuration from v1 to v2 YAML format.
+// Transforms v1 flat structure into v2 multi-document format with kind/name headers.
 func convertToolsFile(raw []byte) ([]byte, error) {
 	var input yaml.MapSlice
 	decoder := yaml.NewDecoder(bytes.NewReader(raw), yaml.UseOrderedMap())
@@ -148,8 +154,8 @@ func convertToolsFile(raw []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// transformDocs transforms the configuration file from v1 format to v2
-// yaml.MapSlice will preserve the order in a map
+// transformDocs converts v1 resource entries to v2 YAML documents.
+// Each entry becomes a document with kind and name fields. Preserves YAML field order.
 func transformDocs(kind string, input yaml.MapSlice) ([]yaml.MapSlice, error) {
 	var transformed []yaml.MapSlice
 	for _, entry := range input {
@@ -175,7 +181,8 @@ func transformDocs(kind string, input yaml.MapSlice) ([]yaml.MapSlice, error) {
 	return transformed, nil
 }
 
-// ProcessValue recursively looks for MapSlices to rename 'kind' -> 'type'
+// ProcessValue recursively transforms YAML values during v1-to-v2 format migration.
+// Renames 'kind' fields to 'type' and wraps toolset lists in a 'tools' key for proper nesting.
 func ProcessValue(v any, isToolset bool) any {
 	switch val := v.(type) {
 	case yaml.MapSlice:
@@ -207,9 +214,9 @@ func ProcessValue(v any, isToolset bool) any {
 	}
 }
 
-// mergeToolsFiles merges multiple ToolsFile structs into one.
-// Detects and raises errors for resource conflicts in sources, authServices, tools, and toolsets.
-// All resource names (sources, authServices, tools, toolsets) must be unique across all files.
+// mergeToolsFiles combines multiple ToolsFile structs into a single structure.
+// Returns error if any resource name is duplicated across files.
+// All resource names must be globally unique.
 func mergeToolsFiles(files ...ToolsFile) (ToolsFile, error) {
 	merged := ToolsFile{
 		Sources:         make(server.SourceConfigs),
@@ -286,7 +293,8 @@ func mergeToolsFiles(files ...ToolsFile) (ToolsFile, error) {
 	return merged, nil
 }
 
-// LoadAndMergeToolsFiles loads multiple YAML files and merges them
+// LoadAndMergeToolsFiles reads multiple YAML files, parses them, and merges into one config.
+// Errors if files cannot be read, parsed, or contain duplicate resource names.
 func LoadAndMergeToolsFiles(ctx context.Context, filePaths []string) (ToolsFile, error) {
 	var toolsFiles []ToolsFile
 
@@ -312,7 +320,8 @@ func LoadAndMergeToolsFiles(ctx context.Context, filePaths []string) (ToolsFile,
 	return mergedFile, nil
 }
 
-// LoadAndMergeToolsFolder loads all YAML files from a directory and merges them
+// LoadAndMergeToolsFolder discovers all .yaml/.yml files in a directory, parses, and merges them.
+// Errors if directory does not exist, is not a directory, or contains no YAML files.
 func LoadAndMergeToolsFolder(ctx context.Context, folderPath string) (ToolsFile, error) {
 	// Check if directory exists
 	info, err := os.Stat(folderPath)

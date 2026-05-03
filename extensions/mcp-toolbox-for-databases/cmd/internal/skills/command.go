@@ -30,16 +30,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// skillsCmd is the command for generating skills.
+// skillsCmd wraps the skills-generate command with configuration options.
 type skillsCmd struct {
 	*cobra.Command
-	name        string
-	description string
-	toolset     string
-	outputDir   string
+	name        string // skill display name
+	description string // skill description for documentation
+	toolset     string // optional toolset to include; if empty, uses all tools
+	outputDir   string // directory path for generated skill output
 }
 
-// NewCommand creates a new Command.
+// NewCommand creates the "skills-generate" subcommand to generate skill packages from tools.
 func NewCommand(opts *internal.ToolboxOptions) *cobra.Command {
 	cmd := &skillsCmd{}
 	cmd.Command = &cobra.Command{
@@ -60,6 +60,8 @@ func NewCommand(opts *internal.ToolboxOptions) *cobra.Command {
 	return cmd.Command
 }
 
+// run executes skills generation: collects tools, creates directories, generates config files.
+// Outputs skill directory with SKILL.md, assets/, and scripts/ subdirectories.
 func run(cmd *skillsCmd, opts *internal.ToolboxOptions) error {
 	ctx, cancel := context.WithCancel(cmd.Context())
 	defer cancel()
@@ -183,6 +185,8 @@ func run(cmd *skillsCmd, opts *internal.ToolboxOptions) error {
 	return nil
 }
 
+// collectTools initializes resources and returns tools for the skill.
+// Returns all tools if toolset is empty; filters to toolset otherwise.
 func (c *skillsCmd) collectTools(ctx context.Context, opts *internal.ToolboxOptions) (map[string]tools.Tool, error) {
 	// Initialize Resources
 	sourcesMap, authServicesMap, embeddingModelsMap, toolsMap, toolsetsMap, promptsMap, promptsetsMap, err := server.InitializeConfigs(ctx, opts.Cfg)

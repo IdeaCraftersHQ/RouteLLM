@@ -22,9 +22,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// PersistentFlags sets up flags that are available for all commands and
-// subcommands
-// It is also used to set up persistent flags during subcommand unit tests
+// PersistentFlags registers persistent CLI flags on a cobra command for all subcommands.
+// Flags control tool configuration sources, logging, and telemetry (also used in tests).
 func PersistentFlags(parentCmd *cobra.Command, opts *ToolboxOptions) {
 	persistentFlags := parentCmd.PersistentFlags()
 

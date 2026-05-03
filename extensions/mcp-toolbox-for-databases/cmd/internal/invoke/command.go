@@ -26,6 +26,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// NewCommand creates the "invoke" subcommand to execute a tool directly with parameters.
 func NewCommand(opts *internal.ToolboxOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "invoke <tool-name> [params]",
@@ -42,6 +43,8 @@ Example:
 	return cmd
 }
 
+// runInvoke initializes resources, parses parameters, and executes a tool directly.
+// Outputs result as JSON to stdout. Requires tool name and optional JSON parameters.
 func runInvoke(cmd *cobra.Command, args []string, opts *internal.ToolboxOptions) error {
 	ctx, cancel := context.WithCancel(cmd.Context())
 	defer cancel()

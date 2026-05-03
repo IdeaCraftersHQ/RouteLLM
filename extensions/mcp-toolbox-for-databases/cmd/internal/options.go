@@ -29,28 +29,29 @@ import (
 	"github.com/googleapis/genai-toolbox/internal/util"
 )
 
+// IOStreams groups standard input and output streams used by commands.
 type IOStreams struct {
-	In     io.Reader
-	Out    io.Writer
-	ErrOut io.Writer
+	In     io.Reader  // standard input stream
+	Out    io.Writer  // standard output stream
+	ErrOut io.Writer  // error output stream
 }
 
 // ToolboxOptions holds dependencies shared by all commands.
 type ToolboxOptions struct {
-	IOStreams       IOStreams
-	Logger          log.Logger
-	Cfg             server.ServerConfig
-	ToolsFile       string
-	ToolsFiles      []string
-	ToolsFolder     string
-	PrebuiltConfigs []string
+	IOStreams       IOStreams            // standard input/output streams
+	Logger          log.Logger           // application logger
+	Cfg             server.ServerConfig  // server configuration
+	ToolsFile       string               // single tool configuration file path
+	ToolsFiles      []string             // multiple tool configuration file paths
+	ToolsFolder     string               // directory containing tool configuration files
+	PrebuiltConfigs []string             // prebuilt configuration sources to load
 }
 
-// Option defines a function that modifies the ToolboxOptions struct.
+// Option is a function that modifies ToolboxOptions (option pattern for flexible initialization).
 type Option func(*ToolboxOptions)
 
-// NewToolboxOptions creates a new instance with defaults, then applies any
-// provided options.
+// NewToolboxOptions creates a new ToolboxOptions with defaults and applies option functions.
+// Default streams: stdin, stdout, stderr.
 func NewToolboxOptions(opts ...Option) *ToolboxOptions {
 	o := &ToolboxOptions{
 		IOStreams: IOStreams{
@@ -66,15 +67,15 @@ func NewToolboxOptions(opts ...Option) *ToolboxOptions {
 	return o
 }
 
-// Apply allows you to update an EXISTING ToolboxOptions instance.
-// This is useful for "late binding".
+// Apply updates an existing ToolboxOptions instance by applying option functions.
+// Useful for late binding and modifying options after creation.
 func (o *ToolboxOptions) Apply(opts ...Option) {
 	for _, opt := range opts {
 		opt(o)
 	}
 }
 
-// WithIOStreams updates the IO streams.
+// WithIOStreams returns an option that sets custom output and error streams.
 func WithIOStreams(out, err io.Writer) Option {
 	return func(o *ToolboxOptions) {
 		o.IOStreams.Out = out
@@ -82,7 +83,8 @@ func WithIOStreams(out, err io.Writer) Option {
 	}
 }
 
-// Setup create logger and telemetry instrumentations.
+// Setup initializes logger and OpenTelemetry instrumentation.
+// Returns updated context, shutdown function, and any initialization error.
 func (opts *ToolboxOptions) Setup(ctx context.Context) (context.Context, func(context.Context) error, error) {
 	// If stdio, set logger's out stream (usually DEBUG and INFO logs) to
 	// errStream
@@ -130,7 +132,8 @@ func (opts *ToolboxOptions) Setup(ctx context.Context) (context.Context, func(co
 	return ctx, shutdownFunc, nil
 }
 
-// LoadConfig checks and merge files that should be loaded into the server
+// LoadConfig loads and merges prebuilt and/or custom tool configurations.
+// Returns true if custom config was loaded, error if parsing or validation fails.
 func (opts *ToolboxOptions) LoadConfig(ctx context.Context) (bool, error) {
 	// Determine if Custom Files should be loaded
 	// Check for explicit custom flags
