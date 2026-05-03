@@ -14,14 +14,22 @@ from routellm.middleware.intent_model_selector import IntentModelMapping, Intent
 
 
 def load_intent_config(config_path: str) -> IntentModelSelector:
-    """
-    Load intent configuration from a YAML file.
-    
-    Args:
-        config_path: Path to the YAML configuration file
-        
-    Returns:
-        An IntentModelSelector configured with the mappings from the file
+    """Load intent configuration from a YAML file.
+
+    Parameters
+    ----------
+    config_path : str
+        Path to the YAML configuration file.
+
+    Returns
+    -------
+    IntentModelSelector
+        Configured selector with mappings from the file.
+
+    Raises
+    ------
+    FileNotFoundError
+        If configuration file does not exist.
     """
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Config file not found: {config_path}")
@@ -60,12 +68,14 @@ def load_intent_config(config_path: str) -> IntentModelSelector:
 
 
 def save_intent_config(selector: IntentModelSelector, config_path: str) -> None:
-    """
-    Save intent configuration to a YAML file.
-    
-    Args:
-        selector: The IntentModelSelector to save
-        config_path: Path to save the YAML configuration file
+    """Save intent configuration to a YAML file.
+
+    Parameters
+    ----------
+    selector : IntentModelSelector
+        The IntentModelSelector instance to save.
+    config_path : str
+        Path to save the YAML configuration file to.
     """
     # Create config dictionary
     config = {
@@ -94,11 +104,15 @@ def save_intent_config(selector: IntentModelSelector, config_path: str) -> None:
 
 
 def create_example_config(config_path: str) -> None:
-    """
-    Create an example intent configuration file.
-    
-    Args:
-        config_path: Path to save the example configuration
+    """Create an example intent configuration file.
+
+    Generates a sample YAML configuration file with example intents,
+    model mappings, and settings.
+
+    Parameters
+    ----------
+    config_path : str
+        Path to save the example configuration file to.
     """
     example_config = {
         "intent_detection_model": "gpt-3.5-turbo",

@@ -1,3 +1,8 @@
+"""Intent-based model selection middleware.
+
+Provides middleware for selecting model pairs based on detected user intent.
+"""
+
 import json
 import os
 from dataclasses import dataclass, asdict
@@ -8,14 +13,28 @@ from routellm.types import ModelPair
 
 @dataclass
 class IntentModelMapping:
-    """Maps intents to specific model pairs."""
+    """Maps intents to specific model pairs.
+
+    Attributes
+    ----------
+    intent : str
+        Intent label (e.g., "math", "code", "general").
+    model_pair : ModelPair
+        Model pair for this intent.
+    description : str, optional
+        Human-readable description of intent mapping (default "").
+    """
+
     intent: str
     model_pair: ModelPair
     description: str = ""
 
 
 class IntentModelSelector:
-    """Middleware that selects models based on detected intent."""
+    """Middleware for intent-based model pair selection.
+
+    Detects user intent and routes to appropriate model pair.
+    """
     
     def __init__(
         self,
@@ -23,13 +42,16 @@ class IntentModelSelector:
         default_model_pair: ModelPair,
         intent_detection_model: str = "gpt-3.5-turbo",
     ):
-        """
-        Initialize the intent-based model selector.
-        
-        Args:
-            intent_mappings: List of mappings from intents to model pairs
-            default_model_pair: Default model pair to use when no intent matches
-            intent_detection_model: Model to use for intent detection
+        """Initialize the intent-based model selector.
+
+        Parameters
+        ----------
+        intent_mappings : list[IntentModelMapping]
+            List of mappings from intents to model pairs.
+        default_model_pair : ModelPair
+            Default model pair to use when no intent matches.
+        intent_detection_model : str, optional
+            Model to use for intent detection (default "gpt-3.5-turbo").
         """
         self.intent_mappings = intent_mappings
         self.default_model_pair = default_model_pair
@@ -40,14 +62,20 @@ class IntentModelSelector:
         self.intent_lookup = {mapping.intent: mapping.model_pair for mapping in intent_mappings}
     
     def detect_intent(self, prompt: str) -> str:
-        """
-        Detect the intent of a prompt using an LLM.
-        
-        Args:
-            prompt: The user prompt to analyze
-            
-        Returns:
-            The detected intent as a string
+        """Detect the intent of a prompt using an LLM.
+
+        Caches results to avoid repeated LLM calls for identical prompts.
+
+        Parameters
+        ----------
+        prompt : str
+            The user prompt to analyze.
+
+        Returns
+        -------
+        str
+            The detected intent as a string. Returns "general" if detection
+            fails.
         """
         # Check cache first
         if prompt in self.intent_cache:
@@ -122,17 +150,21 @@ Respond with ONLY the category name in lowercase, nothing else. If none of the c
         return detected_intent
     
     def analyze_intent_confidence(self, prompt: str) -> dict:
-        """
-        Analyze the confidence of intent classification for a prompt.
-        
-        This method uses a more detailed prompt to get confidence scores
+        """Analyze the confidence of intent classification for a prompt.
+
+        Uses a more detailed LLM prompt to get confidence scores
         for each possible intent category.
-        
-        Args:
-            prompt: The user prompt to analyze
-            
-        Returns:
-            A dictionary with confidence scores for each intent
+
+        Parameters
+        ----------
+        prompt : str
+            The user prompt to analyze.
+
+        Returns
+        -------
+        dict
+            Dictionary with keys "analysis", "scores", and "best_match".
+            Returns {"error": str, "best_match": "general"} on failure.
         """
         # Get available intents and their descriptions
         intents = [mapping.intent for mapping in self.intent_mappings]
@@ -200,33 +232,41 @@ Respond in JSON format like this:
             return {"error": str(e), "best_match": "general"}
 
     def get_model_pair(self, prompt: str) -> ModelPair:
-        """
-        Get the appropriate model pair based on the detected intent.
-        
-        Args:
-            prompt: The user prompt to analyze
-            
-        Returns:
-            A ModelPair with strong and weak models appropriate for the intent
+        """Get the appropriate model pair based on the detected intent.
+
+        Parameters
+        ----------
+        prompt : str
+            The user prompt to analyze.
+
+        Returns
+        -------
+        ModelPair
+            Model pair appropriate for the detected intent. Returns
+            default_model_pair if intent not found.
         """
         intent = self.detect_intent(prompt)
         return self.intent_lookup.get(intent, self.default_model_pair)
         
     def get_available_intents(self) -> List[str]:
-        """
-        Get a list of all available intents.
-        
-        Returns:
-            List of intent names
+        """Get a list of all available intents.
+
+        Returns
+        -------
+        list[str]
+            List of intent names configured in this selector.
         """
         return [mapping.intent for mapping in self.intent_mappings]
     
     def save_mappings(self, filepath: str) -> None:
-        """
-        Save intent mappings to a JSON file.
-        
-        Args:
-            filepath: Path to save the mappings
+        """Save intent mappings to a JSON file.
+
+        Serializes all intent mappings and configuration to JSON format.
+
+        Parameters
+        ----------
+        filepath : str
+            Path to save the mappings to.
         """
         # Convert mappings to a serializable format
         serializable_mappings = []
@@ -257,14 +297,22 @@ Respond in JSON format like this:
             
     @classmethod
     def load_mappings(cls, filepath: str) -> 'IntentModelSelector':
-        """
-        Load intent mappings from a JSON file.
-        
-        Args:
-            filepath: Path to the mappings file
-            
-        Returns:
-            An IntentModelSelector instance with the loaded mappings
+        """Load intent mappings from a JSON file.
+
+        Parameters
+        ----------
+        filepath : str
+            Path to the mappings file.
+
+        Returns
+        -------
+        IntentModelSelector
+            New instance with loaded mappings and configuration.
+
+        Raises
+        ------
+        FileNotFoundError
+            If mappings file does not exist.
         """
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"Mappings file not found: {filepath}")

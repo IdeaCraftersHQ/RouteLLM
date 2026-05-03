@@ -1,3 +1,9 @@
+"""Causal language model-based prompt difficulty classifier.
+
+Implements a fine-tuned LLM that predicts prompt difficulty scores
+for routing decisions.
+"""
+
 import re
 import time
 from typing import List
@@ -11,6 +17,11 @@ from routellm.routers.causal_llm.prompt_format import PromptFormat
 
 
 class CausalLLMClassifier:
+    """Fine-tuned LLM for predicting prompt difficulty scores.
+
+    Uses special tokens [[1]] through [[5]] to indicate difficulty level.
+    Higher scores indicate harder prompts requiring strong model.
+    """
     def __init__(
         self,
         config: RouterModelConfig,
@@ -22,12 +33,30 @@ class CausalLLMClassifier:
         additional_fields: List[str] = list(["label", "pidx"]),
         max_new_tokens: int = 6,
     ):
-        """
-        This model is trained to predict a score [1, 5] for a given user query.
-        Higher score means higher chance the simple model will perform well (think score of it's response)
+        """Initialize causal LLM classifier.
 
-        score_threshold: defines probability of routing as follows
-            P(routing=1) := sum(prob(score)) for all score (in [1,5]) s.t. score >= score_threshold
+        Predicts prompt difficulty on scale [1, 5]. Higher scores indicate
+        stronger model is needed. Routing probability is computed as:
+        P(route_to_strong) = sum(prob(score) for score >= score_threshold).
+
+        Parameters
+        ----------
+        config : RouterModelConfig
+            Model configuration.
+        ckpt_local_path : str
+            Path to fine-tuned model checkpoint.
+        prompt_format : PromptFormat
+            Prompt formatting template.
+        score_threshold : int
+            Score threshold for routing decision.
+        prompt_field : str, optional
+            Field name for prompts in input (default "messages").
+        use_last_turn : bool, optional
+            Whether to use only last turn (default False).
+        additional_fields : list[str], optional
+            Additional fields to include (default ["label", "pidx"]).
+        max_new_tokens : int, optional
+            Maximum tokens to generate (default 6).
         """
         # Initialize the batch generator
         print(f"Loading model checkpoint from {ckpt_local_path} ...")
@@ -63,7 +92,22 @@ class CausalLLMClassifier:
         print(f"Done loading model in {time.time() - s} seconds.")
 
     def preprocess(self, row):
-        """prepare each prompt before feeding it to the model"""
+        """Prepare prompt before feeding to the model.
+
+        Extracts messages from the specified field, formats them according
+        to the prompt template, tokenizes, and encodes into input IDs.
+
+        Parameters
+        ----------
+        row : dict
+            Input row containing prompt data with keys matching prompt_field
+            and additional_fields.
+
+        Returns
+        -------
+        dict
+            Preprocessed data with 'input_ids' and additional fields.
+        """
         # add additional fields to the final output (e.g. for later evaluation)
         data_row = {}
         for field in self.additinal_fields:
@@ -120,14 +164,49 @@ class CausalLLMClassifier:
         return row
 
     def compute_routing_prob(self, score_logits):
-        """convert score_logits to binary probability of routing the query"""
+        """Convert score logits to binary routing probability.
+
+        Applies softmax to score logits and sums probabilities of scores
+        at or above the routing threshold to produce binary probability.
+
+        Parameters
+        ----------
+        score_logits : np.ndarray
+            Raw logit scores from the model for each difficulty level.
+
+        Returns
+        -------
+        tuple
+            (binary_prob, softmax_scores) where binary_prob is the
+            probability of routing to strong model and softmax_scores
+            are the normalized probabilities for each difficulty level.
+        """
         exp_scores = np.exp(score_logits - np.max(score_logits))
         softmax_scores = exp_scores / np.sum(exp_scores)
         binary_prob = np.sum(softmax_scores[self.score_threshold - 1 :])
         return binary_prob, softmax_scores
 
     def postprocess(self, row):
-        """process model's predictions"""
+        """Post-process model predictions into readable format.
+
+        Decodes output tokens to strings, parses score from output,
+        and validates consistency between logits and generation predictions.
+
+        Parameters
+        ----------
+        row : dict
+            Row containing model output IDs and score logits.
+
+        Returns
+        -------
+        dict
+            Row with decoded output_str, output_tokens, and parsed score_pred.
+
+        Raises
+        ------
+        AssertionError
+            If logits prediction does not match generated score prediction.
+        """
 
         output_str = self.tokenizer.decode(row["output_ids"])
         row["output_tokens"] = self.tokenizer.convert_ids_to_tokens(row["output_ids"])
@@ -143,7 +222,26 @@ class CausalLLMClassifier:
         return row
 
     def parse_score(self, text):
-        """Extract int score from the predicted string with the format [[5]]"""
+        """Extract integer score from model output string.
+
+        Parses text for pattern [[N]] where N is a float-formatted integer
+        (1-5) indicating difficulty level prediction.
+
+        Parameters
+        ----------
+        text : str
+            Decoded model output string.
+
+        Returns
+        -------
+        int
+            Parsed difficulty score.
+
+        Raises
+        ------
+        Exception
+            If text does not contain valid [[N]] pattern.
+        """
         match = re.search(r"\[\[([\d\.]+)\]\]", text)
         if match:
             return int(float(match.group(1)))

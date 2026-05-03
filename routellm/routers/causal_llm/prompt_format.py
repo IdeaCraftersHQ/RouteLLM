@@ -1,4 +1,9 @@
-# As a prototype, copied over from vllm.
+"""Prompt formatting utilities for causal language models.
+
+Handles conversion of OpenAI-style message dictionaries to formatted prompts
+compatible with various causal LLM templates.
+"""
+
 import copy
 from typing import Dict, List
 
@@ -6,6 +11,25 @@ from pydantic import BaseModel, validator
 
 
 class PromptFormat(BaseModel):
+    """Format template for converting messages to model-specific prompts.
+
+    Attributes
+    ----------
+    system : str
+        System message template with {instruction} placeholder.
+    assistant : str
+        Assistant message template with {instruction} placeholder.
+    trailing_assistant : str
+        Trailing assistant message appended to prompt (usually empty).
+    user : str
+        User message template with {instruction} placeholder.
+    default_system_message : str, optional
+        Default system message if none provided (default "").
+    system_in_user : bool, optional
+        Whether to embed system message within user message (default False).
+    is_generation : bool, optional
+        Whether format is for generation (vs training/eval) (default False).
+    """
     system: str
     assistant: str
     trailing_assistant: str
@@ -57,8 +81,24 @@ class PromptFormat(BaseModel):
         return value
 
     def generate_prompt_turns(self, messages: List[Dict]) -> List[Dict]:
-        """
-        Returns formatted system/user/assistant messages
+        """Convert OpenAI-style messages to formatted prompt turns.
+
+        Parameters
+        ----------
+        messages : list[dict]
+            OpenAI-style message list with 'role' and 'content' keys.
+            Roles: 'system', 'user', 'assistant'.
+
+        Returns
+        -------
+        list[dict]
+            List of formatted messages with 'role' and 'content' keys.
+
+        Raises
+        ------
+        ValueError
+            If messages don't follow alternating user/assistant pattern or
+            if last message is not from assistant (when not in generation mode).
         """
         messages = copy.deepcopy(messages)
         system_message = None
@@ -142,8 +182,20 @@ class PromptFormat(BaseModel):
         return prompt
 
     def generate_prompt(self, messages: List[Dict]) -> str:
-        """
-        concatenates 'content' of all formatted prompts
+        """Convert messages to single formatted prompt string.
+
+        Applies formatting and concatenates all message contents into a
+        single string suitable for model input.
+
+        Parameters
+        ----------
+        messages : list[dict]
+            OpenAI-style message list with 'role' and 'content' keys.
+
+        Returns
+        -------
+        str
+            Formatted prompt string with all messages concatenated.
         """
         prompt = self.generate_prompt_turns(messages)
         return "".join(turn["content"] for turn in prompt)

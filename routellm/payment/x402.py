@@ -1,3 +1,8 @@
+"""HTTP 402 Payment Required adapter using x402 library.
+
+Implements W3C Payment Handler for fulfilling 402 challenges via blockchain.
+"""
+
 import os
 import time
 
@@ -6,15 +11,16 @@ from .types import PaymentChallenge, PaymentReceipt
 
 
 class X402Adapter(PaymentGateway):
-    """Wraps the x402 PyPI package (coinbase/x402) to fulfill 402 payment challenges.
+    """x402-based payment gateway for EVM blockchains.
 
-    Requires x402[evm] installed and ROUTELLM_WALLET_PRIVATE_KEY set.
+    Wraps the x402 PyPI package (coinbase/x402) to fulfill 402 payment
+    challenges. Requires x402[evm] installed and ROUTELLM_WALLET_PRIVATE_KEY set.
 
     Internal flow for pay():
-      1. Construct x402.schemas.PaymentRequired from challenge.payload
-      2. Register EVM signer mechanism on the x402Client
-      3. Call x402HTTPClient.create_payment_payload(payment_required)
-      4. Map signed PaymentPayload back to RouteLLM PaymentReceipt
+    1. Construct x402.schemas.PaymentRequired from challenge.payload
+    2. Register EVM signer mechanism on the x402Client
+    3. Call x402HTTPClient.create_payment_payload(payment_required)
+    4. Map signed PaymentPayload back to RouteLLM PaymentReceipt
     """
 
     def __init__(
@@ -22,11 +28,28 @@ class X402Adapter(PaymentGateway):
         private_key: str | None = None,
         networks: list[str] | None = None,
     ):
+        """Initialize x402 payment adapter.
+
+        Parameters
+        ----------
+        private_key : str, optional
+            EVM private key for signing transactions. If not provided,
+            uses ROUTELLM_WALLET_PRIVATE_KEY environment variable.
+        networks : list[str], optional
+            Supported EVM networks (default ["base", "ethereum", "polygon"]).
+        """
         self._private_key = private_key or os.environ.get("ROUTELLM_WALLET_PRIVATE_KEY", "")
         self._networks = networks or ["base", "ethereum", "polygon"]
 
     @property
     def name(self) -> str:
+        """Get provider name.
+
+        Returns
+        -------
+        str
+            "x402"
+        """
         return "x402"
 
     @property

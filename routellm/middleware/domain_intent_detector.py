@@ -30,14 +30,19 @@ class DomainIntentDetector:
         examples_per_intent: int = 5,
         cache_path: Optional[str] = None,
     ):
-        """
-        Initialize the domain-specific intent detector.
-        
-        Args:
-            intent_mappings: List of intent mappings
-            embedding_model: Model to use for generating embeddings
-            examples_per_intent: Number of examples to use per intent for fine-tuning
-            cache_path: Path to cache embeddings
+        """Initialize the domain-specific intent detector.
+
+        Parameters
+        ----------
+        intent_mappings : list[IntentModelMapping]
+            List of intent mappings.
+        embedding_model : str, optional
+            Model to use for generating embeddings (default
+            "text-embedding-ada-002").
+        examples_per_intent : int, optional
+            Number of examples to use per intent for fine-tuning (default 5).
+        cache_path : str, optional
+            Path to cache embeddings (default None).
         """
         self.intent_mappings = intent_mappings
         self.embedding_model = embedding_model
@@ -52,12 +57,14 @@ class DomainIntentDetector:
             self._load_cache()
     
     def add_examples(self, intent: str, examples: List[str]) -> None:
-        """
-        Add examples for a specific intent.
-        
-        Args:
-            intent: The intent to add examples for
-            examples: List of example prompts for the intent
+        """Add examples for a specific intent.
+
+        Parameters
+        ----------
+        intent : str
+            The intent to add examples for.
+        examples : list[str]
+            List of example prompts for the intent.
         """
         if intent not in self.intent_examples:
             self.intent_examples[intent] = []
@@ -72,14 +79,17 @@ class DomainIntentDetector:
             self._save_cache()
     
     def _get_embedding(self, text: str) -> np.ndarray:
-        """
-        Get embedding for a text using the specified embedding model.
-        
-        Args:
-            text: Text to get embedding for
-            
-        Returns:
-            Embedding as numpy array
+        """Get embedding for a text using the specified embedding model.
+
+        Parameters
+        ----------
+        text : str
+            Text to get embedding for.
+
+        Returns
+        -------
+        np.ndarray
+            Embedding as numpy array.
         """
         # Check cache first
         if text in self.embedding_cache:
@@ -108,11 +118,12 @@ class DomainIntentDetector:
             return np.zeros(1536)  # Default size for text-embedding-ada-002
     
     def _update_intent_embeddings(self, intent: str) -> None:
-        """
-        Update embeddings for a specific intent.
-        
-        Args:
-            intent: The intent to update embeddings for
+        """Update embeddings for a specific intent.
+
+        Parameters
+        ----------
+        intent : str
+            The intent to update embeddings for.
         """
         if intent not in self.intent_examples or not self.intent_examples[intent]:
             return
@@ -125,7 +136,11 @@ class DomainIntentDetector:
         self.intent_embeddings[intent] = embeddings
     
     def _save_cache(self) -> None:
-        """Save embeddings cache to file."""
+        """Save embeddings cache to file.
+
+        Serializes embedding cache to JSON format and writes to the cache path
+        specified during initialization.
+        """
         if not self.cache_path:
             return
         
@@ -141,7 +156,11 @@ class DomainIntentDetector:
             json.dump(serializable_cache, f)
     
     def _load_cache(self) -> None:
-        """Load embeddings cache from file."""
+        """Load embeddings cache from file.
+
+        Reads cached embeddings from JSON file and deserializes into
+        embedding_cache dictionary.
+        """
         if not self.cache_path or not os.path.exists(self.cache_path):
             return
         
@@ -158,14 +177,21 @@ class DomainIntentDetector:
             print(f"Error loading cache: {e}")
     
     def detect_intent(self, prompt: str) -> str:
-        """
-        Detect the intent of a prompt using embeddings similarity.
-        
-        Args:
-            prompt: The prompt to detect intent for
-            
-        Returns:
-            The detected intent
+        """Detect the intent of a prompt using embeddings similarity.
+
+        Computes embedding for the prompt and compares against intent
+        embeddings using cosine similarity. Returns intent with highest
+        average similarity score.
+
+        Parameters
+        ----------
+        prompt : str
+            The prompt to detect intent for.
+
+        Returns
+        -------
+        str
+            The detected intent. Returns "general" if no intents have examples.
         """
         # If no intents have examples, return "general"
         if not self.intent_embeddings:
@@ -199,14 +225,22 @@ class DomainIntentDetector:
         return max(intent_scores.items(), key=lambda x: x[1])[0]
     
     def get_intent_confidence(self, prompt: str) -> Dict[str, float]:
-        """
-        Get confidence scores for each intent.
-        
-        Args:
-            prompt: The prompt to analyze
-            
-        Returns:
-            Dictionary mapping intents to confidence scores
+        """Get confidence scores for each intent.
+
+        Computes normalized confidence scores for each intent by comparing
+        the prompt embedding against all intent embeddings using cosine
+        similarity. Scores sum to 1.0.
+
+        Parameters
+        ----------
+        prompt : str
+            The prompt to analyze.
+
+        Returns
+        -------
+        dict[str, float]
+            Dictionary mapping intent names to normalized confidence scores
+            in [0.0, 1.0].
         """
         # If no intents have examples, return empty dict
         if not self.intent_embeddings:
@@ -244,21 +278,25 @@ class DomainIntentDetector:
         return intent_scores
     
     def export_examples(self, filepath: str) -> None:
-        """
-        Export intent examples to a JSON file.
-        
-        Args:
-            filepath: Path to save examples to
+        """Export intent examples to a JSON file.
+
+        Parameters
+        ----------
+        filepath : str
+            Path to save examples to.
         """
         with open(filepath, 'w') as f:
             json.dump(self.intent_examples, f, indent=2)
     
     def import_examples(self, filepath: str) -> None:
-        """
-        Import intent examples from a JSON file.
-        
-        Args:
-            filepath: Path to load examples from
+        """Import intent examples from a JSON file.
+
+        Loads intent examples from file and adds them via add_examples().
+
+        Parameters
+        ----------
+        filepath : str
+            Path to load examples from.
         """
         with open(filepath, 'r') as f:
             examples = json.load(f)

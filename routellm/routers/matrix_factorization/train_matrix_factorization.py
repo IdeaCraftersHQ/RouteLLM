@@ -1,3 +1,8 @@
+"""Training script for matrix factorization router model.
+
+Implements pairwise loss training for factorized model-text embeddings.
+"""
+
 import json
 import random
 
@@ -17,7 +22,31 @@ random.seed(42)
 
 
 class PairwiseDataset(Dataset):
+    """Dataset for pairwise ranking loss training.
+
+    Stores model battle outcomes and creates (winner, loser, prompt) tuples
+    where winner is always the model that won the battle.
+
+    Attributes
+    ----------
+    models_a : torch.Tensor
+        Model A IDs for each battle.
+    models_b : torch.Tensor
+        Model B IDs for each battle.
+    prompt_id : list
+        Prompt indices for each battle.
+    winners : list[str]
+        Winner labels ("model_a" or "model_b") for each battle.
+    """
+
     def __init__(self, data):
+        """Initialize dataset from battle data.
+
+        Parameters
+        ----------
+        data : list[dict]
+            List of samples with keys: model_a, model_b, idx, winner.
+        """
         self.models_a = torch.tensor(
             [MODEL_IDS[sample["model_a"]] for sample in data], dtype=torch.int64
         )
@@ -28,9 +57,34 @@ class PairwiseDataset(Dataset):
         self.winners = [sample["winner"] for sample in data]
 
     def __len__(self):
+        """Return number of samples in dataset.
+
+        Returns
+        -------
+        int
+            Number of battle records.
+        """
         return len(self.models_a)
 
     def __getitem__(self, index):
+        """Get single sample as (winner_id, loser_id, prompt_id) tuple.
+
+        Parameters
+        ----------
+        index : int
+            Sample index.
+
+        Returns
+        -------
+        tuple
+            (winner_model_id, loser_model_id, prompt_id) ensuring
+            winner is always first model.
+
+        Raises
+        ------
+        AssertionError
+            If winner not in ["model_a", "model_b"].
+        """
         assert self.winners[index] in ["model_a", "model_b"], self.winners[index]
         if self.winners[index] == "model_a":
             return self.models_a[index], self.models_b[index], self.prompt_id[index]
@@ -38,10 +92,41 @@ class PairwiseDataset(Dataset):
             return self.models_b[index], self.models_a[index], self.prompt_id[index]
 
     def get_dataloaders(self, batch_size, shuffle=True):
+        """Create DataLoader for batching.
+
+        Parameters
+        ----------
+        batch_size : int
+            Number of samples per batch.
+        shuffle : bool, optional
+            Whether to shuffle batches (default True).
+
+        Returns
+        -------
+        DataLoader
+            PyTorch DataLoader for iterating batches.
+        """
         return DataLoader(self, batch_size, shuffle=shuffle)
 
 
 class MFModel_Train(torch.nn.Module):
+    """Training-time matrix factorization model with cached embeddings.
+
+    Similar to MFModel but uses cached prompt embeddings during training
+    instead of fetching from OpenAI API. Q embedding is frozen (non-trainable).
+
+    Attributes
+    ----------
+    P : torch.nn.Embedding
+        Model embedding matrix (num_models x dim).
+    Q : torch.nn.Embedding
+        Prompt embedding matrix (num_prompts x text_dim) - frozen.
+    text_proj : torch.nn.Linear, optional
+        Projection layer from text_dim to dim (if use_proj=True).
+    classifier : torch.nn.Linear
+        Linear classifier producing output score.
+    """
+
     def __init__(
         self,
         dim,
@@ -52,6 +137,26 @@ class MFModel_Train(torch.nn.Module):
         use_proj=True,
         npy_path=None,
     ):
+        """Initialize training-time matrix factorization model.
+
+        Parameters
+        ----------
+        dim : int
+            Latent embedding dimension.
+        num_models : int
+            Number of models in factorization.
+        num_prompts : int
+            Number of prompts in training set.
+        text_dim : int, optional
+            Text embedding dimension (default 1536 for text-embedding-3-small).
+        num_classes : int, optional
+            Number of output classes (default 1).
+        use_proj : bool, optional
+            Whether to use projection layer (default True).
+        npy_path : str, optional
+            Path to .npy file containing cached prompt embeddings.
+            Required if npy_path is provided.
+        """
         super().__init__()
         self.use_proj = use_proj
         self.P = torch.nn.Embedding(num_models, dim)
@@ -73,9 +178,40 @@ class MFModel_Train(torch.nn.Module):
         )  # bias should be False!
 
     def get_device(self):
+        """Get device where model parameters reside.
+
+        Returns
+        -------
+        torch.device
+            Device (cpu or cuda) of embedding matrix.
+        """
         return self.P.weight.device
 
     def forward(self, model_win, model_loss, prompt, test=False, alpha=0.05):
+        """Forward pass computing win probability logits.
+
+        Computes difference between winner and loser embeddings, factorizes
+        with prompt embedding, and classifies result. Adds noise to prompt
+        embeddings during training for regularization.
+
+        Parameters
+        ----------
+        model_win : torch.Tensor
+            Winner model ID(s).
+        model_loss : torch.Tensor
+            Loser model ID(s).
+        prompt : torch.Tensor
+            Prompt ID(s).
+        test : bool, optional
+            Whether in test mode (no noise added) (default False).
+        alpha : float, optional
+            Noise standard deviation during training (default 0.05).
+
+        Returns
+        -------
+        torch.Tensor
+            Logits for win probability (positive = win likely).
+        """
         model_win = model_win.to(self.get_device())
         model_loss = model_loss.to(self.get_device())
         prompt = prompt.to(self.get_device())
@@ -97,11 +233,47 @@ class MFModel_Train(torch.nn.Module):
 
     @torch.no_grad()
     def predict(self, model_win, model_loss, prompt):
+        """Predict winner in test mode (no training noise).
+
+        Parameters
+        ----------
+        model_win : torch.Tensor
+            Candidate winner model ID(s).
+        model_loss : torch.Tensor
+            Candidate loser model ID(s).
+        prompt : torch.Tensor
+            Prompt ID(s).
+
+        Returns
+        -------
+        torch.Tensor
+            Boolean tensor indicating predicted win (logit > 0).
+        """
         logits = self.forward(model_win, model_loss, prompt, test=True)
         return logits > 0
 
 
 def evaluator(net, test_iter, device):
+    """Evaluate model on test set.
+
+    Computes loss and accuracy on all test batches. Model is set to eval
+    mode during evaluation and back to train mode after.
+
+    Parameters
+    ----------
+    net : MFModel_Train
+        Model to evaluate.
+    test_iter : DataLoader
+        Test data loader yielding (model_a, model_b, prompt) batches.
+    device : torch.device
+        Device to run evaluation on.
+
+    Returns
+    -------
+    tuple
+        (average_loss, accuracy) where accuracy is fraction of correct
+        predictions (logit > 0 matches binary label).
+    """
     net.eval()
     ls_fn = nn.BCEWithLogitsLoss(reduction="sum")
     ls_list = []
@@ -140,6 +312,36 @@ def train_loops(
     evaluator=evaluator,
     **kwargs,
 ):
+    """Train matrix factorization model with optional evaluation.
+
+    Runs training loop for specified epochs, evaluating on test set after
+    each epoch if evaluator is provided. Uses Adam optimizer with binary
+    cross-entropy loss.
+
+    Parameters
+    ----------
+    net : MFModel_Train
+        Matrix factorization model to train.
+    train_iter : DataLoader
+        Training data loader yielding (model_a, model_b, prompt) batches.
+    test_iter : DataLoader
+        Test data loader for evaluation.
+    lr : float
+        Learning rate for Adam optimizer.
+    weight_decay : float
+        L2 regularization coefficient for optimizer.
+    alpha : float
+        Noise standard deviation for training regularization.
+    num_epochs : int
+        Number of training epochs.
+    device : str, optional
+        Device for training ("cuda" or "cpu") (default "cuda").
+    evaluator : callable, optional
+        Function to evaluate model on test set. Called after each epoch
+        if provided (default evaluator function).
+    **kwargs
+        Additional keyword arguments (unused).
+    """
     optimizer = Adam(net.parameters(), lr=lr, weight_decay=weight_decay)
     loss = nn.BCEWithLogitsLoss(reduction="mean")
 
