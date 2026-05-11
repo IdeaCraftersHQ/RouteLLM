@@ -1,3 +1,9 @@
+"""MMLU benchmark domain definitions.
+
+Lists all domains covered by the Massive Multitask Language Understanding
+(MMLU) benchmark.
+"""
+
 ALL_MMLU_DOMAINS = [
     "high_school_european_history",
     "business_ethics",

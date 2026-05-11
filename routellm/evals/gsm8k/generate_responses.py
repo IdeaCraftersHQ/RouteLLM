@@ -1,3 +1,9 @@
+"""GSM8K benchmark evaluation script.
+
+Generates and evaluates responses for GSM8K (Grade School Math 8K) benchmark
+with router-based model selection. Adapted from SGLang implementation.
+"""
+
 import ast
 import json
 import os
@@ -11,10 +17,8 @@ from openai import OpenAI
 
 from routellm.controller import ModelPair
 
-"""
-The core code is based heavily on the original SGLang implementation.
-https://github.com/sgl-project/sglang/blob/main/benchmark/gsm8k/bench_sglang.py
-"""
+# Core code adapted from SGLang:
+# https://github.com/sgl-project/sglang/blob/main/benchmark/gsm8k/bench_sglang.py
 
 INVALID = -9999999
 ROUTED_PAIR = ModelPair(

@@ -1,3 +1,8 @@
+"""Generate embeddings for similarity-weighted router training.
+
+Computes text embeddings for battle conversations using OpenAI's API.
+"""
+
 import argparse
 import json
 import os
@@ -11,6 +16,18 @@ from routellm.routers.similarity_weighted.utils import preprocess_battles
 
 
 def get_embeddings(battles_df):
+    """Compute embeddings for battle dataset prompts.
+
+    Parameters
+    ----------
+    battles_df : pd.DataFrame
+        Battle dataset with 'prompt' column.
+
+    Returns
+    -------
+    list
+        Embeddings for each prompt's first turn.
+    """
     battles_df = preprocess_battles(battles_df)
     print(f"Battles after preprocessing: {battles_df.shape[0]}")
     battles_df["first_turn"] = battles_df["prompt"].apply(

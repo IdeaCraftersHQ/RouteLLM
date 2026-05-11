@@ -1,3 +1,9 @@
+"""Utilities for similarity-weighted ranking router.
+
+Provides functions for computing Elo ratings, tiering models, and
+preprocessing battle datasets.
+"""
+
 import json
 import math
 import os
@@ -12,6 +18,23 @@ OPENAI_CLIENT = OpenAI()
 
 
 def compute_tiers(model_ratings, num_tiers):
+    """Partition models into tiers using dynamic programming.
+
+    Minimizes within-tier variance while maintaining tier ordering by
+    Elo rating.
+
+    Parameters
+    ----------
+    model_ratings : pd.Series
+        Elo ratings indexed by model name.
+    num_tiers : int
+        Number of tiers to create.
+
+    Returns
+    -------
+    dict
+        Mapping from model name to tier index.
+    """
     n = len(model_ratings)
     m = num_tiers
     # pd series to list
@@ -54,6 +77,33 @@ def compute_tiers(model_ratings, num_tiers):
 def compute_elo_mle_with_tie(
     df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None
 ):
+    """Compute Elo ratings using maximum likelihood estimation with ties.
+
+    Fits a logistic regression model to battle outcomes, treating ties as
+    split wins. Returns calibrated Elo scores for each model.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Battle dataset with columns: model_a, model_b, winner.
+    SCALE : float, optional
+        Scaling factor for Elo differences (default 400).
+    BASE : float, optional
+        Base for logarithmic scaling (default 10).
+    INIT_RATING : float, optional
+        Initial baseline rating (default 1000).
+    sample_weight : np.ndarray, optional
+        Per-battle importance weights (default None).
+
+    Returns
+    -------
+    pd.Series
+        Elo ratings indexed by model name, sorted descending.
+
+    Notes
+    -----
+    Llama-2-70B-Chat is calibrated to 1082 if present in dataset.
+    """
     models = pd.concat([df["model_a"], df["model_b"]]).unique()
     models = pd.Series(np.arange(len(models)), index=models)
 
@@ -91,6 +141,23 @@ def compute_elo_mle_with_tie(
 
 
 def preprocess_battles(battles_df):
+    """Preprocess battle dataset for Elo computation.
+
+    Extracts first turn from JSON prompts, determines winners, and filters
+    for minimum prompt length. Returns dataset with essential columns only.
+
+    Parameters
+    ----------
+    battles_df : pd.DataFrame
+        Raw battle dataset with columns: prompt, winner_model_a,
+        winner_model_b, model_a, model_b.
+
+    Returns
+    -------
+    pd.DataFrame
+        Filtered dataset with columns: model_a, model_b, winner.
+        Only includes battles with first_turn length >= 16 characters.
+    """
     MIN_LEN = 16
 
     def get_first_turn(prompt_str):

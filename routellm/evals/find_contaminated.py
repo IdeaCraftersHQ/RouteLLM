@@ -1,3 +1,8 @@
+"""Data contamination detection for evaluation datasets.
+
+Identifies and removes evaluation samples that are too similar to training data.
+"""
+
 import argparse
 import os
 
@@ -14,6 +19,20 @@ client = OpenAI()
 
 
 def check_data_contamination_similarity(train_embeddings, eval_prompts):
+    """Check if evaluation prompts are contaminated by training data.
+
+    Parameters
+    ----------
+    train_embeddings : np.ndarray
+        Embeddings of training samples.
+    eval_prompts : list[str]
+        Evaluation prompts to check.
+
+    Returns
+    -------
+    list[bool]
+        Boolean mask indicating contaminated samples.
+    """
     eval_embeddings = []
 
     batch_size = 2000

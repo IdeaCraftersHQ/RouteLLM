@@ -1,3 +1,9 @@
+"""Benchmarking infrastructure for router evaluation.
+
+Defines abstract benchmark class for evaluating routers against various
+difficulty prediction datasets.
+"""
+
 import abc
 import os
 from collections import Counter
@@ -15,10 +21,9 @@ pd.options.mode.copy_on_write = True
 
 
 class Benchmark(abc.ABC):
-    """
-    Benchmark class for evaluating models.
+    """Abstract base class for benchmark evaluation.
 
-    Internally, class should handle init and manage own cache (if needed).
+    Implementations should handle dataset loading and caching internally.
     """
 
     @abc.abstractmethod

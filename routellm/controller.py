@@ -1,3 +1,10 @@
+"""Main controller for intelligent model routing.
+
+Implements a router-based system that selects between strong and weak
+models based on prompt difficulty. Supports caching, resilience,
+quality management, and payment gateway integration.
+"""
+
 from collections import defaultdict
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -35,10 +42,17 @@ GPT_4_AUGMENTED_CONFIG = {
 
 
 class RoutingError(Exception):
+    """Raised when routing configuration or parameters are invalid."""
     pass
 
 
 class Controller:
+    """Main router controller for intelligent model routing.
+
+    Orchestrates routing decisions, caching, resilience, quality management,
+    and payment handling. Matches OpenAI API while supporting advanced
+    routing features.
+    """
     def __init__(
         self,
         routers: list[str],
@@ -55,6 +69,38 @@ class Controller:
         traffic_manager: Optional[TrafficManager] = None,
         quality_manager: Optional[QualityManager] = None,
     ):
+        """Initialize controller with routers and configuration.
+
+        Parameters
+        ----------
+        routers : list[str]
+            List of router names to initialize (e.g., ["sw_ranking", "bert"]).
+        strong_model : str
+            Name of strong/expensive model (e.g., "gpt-4").
+        weak_model : str
+            Name of weak/cheap model (e.g., "gpt-3.5-turbo").
+        config : dict, optional
+            Router-specific configurations. Uses GPT-4 augmented defaults
+            if None.
+        api_base : str, optional
+            LiteLLM API base URL.
+        api_key : str, optional
+            LiteLLM API key.
+        progress_bar : bool
+            Show progress bar during router initialization. Default: False.
+        middleware : list[Middleware], optional
+            Custom middleware for prompt-based routing override.
+        payment_gateway : PaymentGateway, optional
+            Gateway for 402 payment challenges.
+        resilience_config : ResilienceConfig, optional
+            Configuration for circuit breaker and retry logic.
+        cache_config : CacheConfig, optional
+            Configuration for completion caching.
+        traffic_manager : TrafficManager, optional
+            Traffic management and load balancing.
+        quality_manager : QualityManager, optional
+            Quality and canary testing manager.
+        """
         self.default_model_pair = ModelPair(strong=strong_model, weak=weak_model)
         self.routers = {}
         self.api_base = api_base
@@ -148,8 +194,6 @@ class Controller:
                 return await call_fn({"X-Payment-Receipt": receipt.tx_hash})
             raise
 
-    # Matches OpenAI's Chat Completions interface, but also supports optional router and threshold args
-    # If model name is present, attempt to parse router and threshold using it, otherwise, use the router and threshold args
     def completion(
         self,
         *,
@@ -157,6 +201,37 @@ class Controller:
         threshold: Optional[float] = None,
         **kwargs,
     ):
+        """Synchronous completion with intelligent routing.
+
+        Matches OpenAI Chat Completions API with extensions for router-based
+        model selection. Routes prompts to strong/weak models based on
+        difficulty score and threshold.
+
+        Router and threshold can be specified explicitly or parsed from
+        model name using format "router-{router}-{threshold}" (e.g.,
+        "router-sw_ranking-0.5").
+
+        Parameters
+        ----------
+        router : str, optional
+            Router name. Parsed from model name if not provided.
+        threshold : float, optional
+            Routing threshold in [0, 1]. Parsed from model name if not
+            provided.
+        **kwargs
+            Standard OpenAI completion parameters (messages, temperature,
+            top_p, etc.). model field can encode router and threshold.
+
+        Returns
+        -------
+        ModelResponse
+            Completion response matching OpenAI format.
+
+        Raises
+        ------
+        RoutingError
+            If router/threshold invalid or model name malformed.
+        """
         if "model" in kwargs:
             router, threshold = self._parse_model_name(kwargs["model"])
 

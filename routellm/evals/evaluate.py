@@ -1,3 +1,9 @@
+"""Evaluation framework for router performance on multiple benchmarks.
+
+Provides functions for running benchmarks, generating results, and
+visualizing routing performance.
+"""
+
 import os
 import random
 

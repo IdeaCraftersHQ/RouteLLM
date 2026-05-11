@@ -1,3 +1,9 @@
+"""Traffic management and load balancing for model endpoints.
+
+Provides load balancing strategies and traffic rules for distributing
+requests across multiple model endpoints.
+"""
+
 import re
 import random
 import logging
@@ -7,24 +13,73 @@ from routellm.types import ModelPair
 
 logger = logging.getLogger(__name__)
 
+
 class LoadBalancerEndpoint(BaseModel):
+    """Configuration for a single load balancer endpoint.
+
+    Attributes
+    ----------
+    model : str
+        Model name at this endpoint.
+    weight : float, optional
+        Weight for weighted strategy (default 1.0).
+    api_key : str, optional
+        API key for this endpoint (default None).
+    api_base : str, optional
+        API base URL for this endpoint (default None).
+    """
+
     model: str
     weight: float = 1.0
     api_key: Optional[str] = None
     api_base: Optional[str] = None
 
+
 class LoadBalancerConfig(BaseModel):
-    strategy: str = "weighted" # weighted, round-robin
+    """Configuration for load balancer.
+
+    Attributes
+    ----------
+    strategy : str, optional
+        Load balancing strategy: "weighted" or "round-robin" (default "weighted").
+    endpoints : list[LoadBalancerEndpoint]
+        List of available endpoints.
+    """
+
+    strategy: str = "weighted"  # weighted, round-robin
     endpoints: List[LoadBalancerEndpoint]
 
+
 class LoadBalancer:
-    """Simple load balancer for rotating between endpoints or providers."""
+    """Load balancer for distributing requests across endpoints.
+
+    Supports weighted random and round-robin strategies for endpoint selection.
+    """
     
     def __init__(self, config: LoadBalancerConfig):
+        """Initialize load balancer.
+
+        Parameters
+        ----------
+        config : LoadBalancerConfig
+            Load balancer configuration.
+        """
         self.config = config
         self._current_index = 0
 
     def select(self) -> LoadBalancerEndpoint:
+        """Select endpoint based on configured strategy.
+
+        Returns
+        -------
+        LoadBalancerEndpoint
+            Selected endpoint.
+
+        Raises
+        ------
+        ValueError
+            If no endpoints are configured.
+        """
         if not self.config.endpoints:
             raise ValueError("No endpoints configured for load balancer")
             

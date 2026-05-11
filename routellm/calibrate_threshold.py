@@ -1,3 +1,9 @@
+"""Threshold calibration utility for router-based routing.
+
+Generates router scores on benchmark datasets and calibrates routing
+thresholds to target specific percentages of strong model usage.
+"""
+
 import argparse
 import json
 

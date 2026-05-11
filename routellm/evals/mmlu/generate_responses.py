@@ -1,3 +1,9 @@
+"""MMLU benchmark evaluation script.
+
+Generates and evaluates model responses on MMLU (Massive Multitask Language
+Understanding) benchmark with router-based model selection.
+"""
+
 import argparse
 import os
 import time

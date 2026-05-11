@@ -1,8 +1,15 @@
+"""Matrix factorization model for router prediction.
+
+Implements a neural network-based router that factorizes model and text
+embeddings to predict win rates for model pairs.
+"""
+
 import torch
 from huggingface_hub import PyTorchModelHubMixin
 
 from routellm.routers.similarity_weighted.utils import OPENAI_CLIENT
 
+# Mapping from model names to unique IDs for factorization
 MODEL_IDS = {
     "RWKV-4-Raven-14B": 0,
     "alpaca-13b": 1,
@@ -72,6 +79,23 @@ MODEL_IDS = {
 
 
 class MFModel(torch.nn.Module, PyTorchModelHubMixin):
+    """Matrix factorization model for router win rate prediction.
+
+    Factorizes model embeddings with text embeddings to predict win rates
+    for model pairs. Supports optional projection layer for text embeddings.
+
+    Attributes
+    ----------
+    P : torch.nn.Embedding
+        Model embedding matrix (num_models x dim).
+    text_proj : torch.nn.Sequential, optional
+        Projection layer from text_dim to dim (if use_proj=True).
+    classifier : torch.nn.Sequential
+        Linear classifier producing output score.
+    embedding_model : str
+        OpenAI embedding model ID for text encoding.
+    """
+
     def __init__(
         self,
         dim,
@@ -80,6 +104,22 @@ class MFModel(torch.nn.Module, PyTorchModelHubMixin):
         num_classes,
         use_proj,
     ):
+        """Initialize matrix factorization model.
+
+        Parameters
+        ----------
+        dim : int
+            Latent embedding dimension.
+        num_models : int
+            Number of models in factorization.
+        text_dim : int
+            Text embedding dimension (OpenAI embedding size).
+        num_classes : int
+            Number of output classes (typically 1 for binary classification).
+        use_proj : bool
+            Whether to use projection layer for text embeddings.
+            If False, text_dim must equal dim.
+        """
         super().__init__()
         self._name = "TextMF"
         self.use_proj = use_proj
@@ -101,9 +141,33 @@ class MFModel(torch.nn.Module, PyTorchModelHubMixin):
         )
 
     def get_device(self):
+        """Get device where model parameters reside.
+
+        Returns
+        -------
+        torch.device
+            Device (cpu or cuda) of embedding matrix.
+        """
         return self.P.weight.device
 
     def forward(self, model_id, prompt):
+        """Forward pass computing score for model(s) on prompt.
+
+        Embeds models and prompt, applies projection if needed, and
+        classifies the factorized representation.
+
+        Parameters
+        ----------
+        model_id : int or list[int]
+            Model ID(s) to score. If list, returns scores for each.
+        prompt : str
+            Text prompt to score.
+
+        Returns
+        -------
+        torch.Tensor
+            Raw logit score(s) for model(s) on prompt.
+        """
         model_id = torch.tensor(model_id, dtype=torch.long).to(self.get_device())
 
         model_embed = self.P(model_id)
@@ -121,9 +185,32 @@ class MFModel(torch.nn.Module, PyTorchModelHubMixin):
 
     @torch.no_grad()
     def pred_win_rate(self, model_a, model_b, prompt):
+        """Predict win rate of model_a over model_b on prompt.
+
+        Parameters
+        ----------
+        model_a : int
+            Model ID for first model.
+        model_b : int
+            Model ID for second model.
+        prompt : str
+            Text prompt.
+
+        Returns
+        -------
+        float
+            Predicted win rate of model_a in [0, 1].
+        """
         logits = self.forward([model_a, model_b], prompt)
         winrate = torch.sigmoid(logits[0] - logits[1]).item()
         return winrate
 
     def load(self, path):
+        """Load model state from checkpoint file.
+
+        Parameters
+        ----------
+        path : str
+            Path to checkpoint file (.pt or .pth).
+        """
         self.load_state_dict(torch.load(path))

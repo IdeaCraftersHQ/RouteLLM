@@ -47,12 +47,12 @@ import (
 var (
 	// versionString stores the full semantic version, including build metadata.
 	versionString string
-	// versionNum indicates the numerical part fo the version
+	// versionNum indicates the numerical part of the version.
 	//go:embed version.txt
 	versionNum string
-	// metadataString indicates additional build or distribution metadata.
-	buildType string = "dev" // should be one of "dev", "binary", or "container"
-	// commitSha is the git commit it was built from
+	// buildType indicates the build variant: "dev", "binary", or "container".
+	buildType string = "dev"
+	// commitSha is the git commit SHA it was built from.
 	commitSha string
 )
 
@@ -60,7 +60,8 @@ func init() {
 	versionString = semanticVersion()
 }
 
-// semanticVersion returns the version of the CLI including a compile-time metadata.
+// semanticVersion returns the version string with compile-time metadata appended.
+// Format: <version>+<buildType>.<OS>.<arch>[.<commit>]
 func semanticVersion() string {
 	metadataStrings := []string{buildType, runtime.GOOS, runtime.GOARCH}
 	if commitSha != "" {
@@ -70,15 +71,15 @@ func semanticVersion() string {
 	return v
 }
 
-// GenerateCommand returns a new Command object with the specified IO streams
-// This is used for integration test package
+// GenerateCommand returns a new root command with custom IO streams.
+// Used for integration testing to capture output.
 func GenerateCommand(out, err io.Writer) *cobra.Command {
 	opts := internal.NewToolboxOptions(internal.WithIOStreams(out, err))
 	return NewCommand(opts)
 }
 
-// Execute adds all child commands to the root command and sets flags appropriately.
-// This is called by main.main(). It only needs to happen once to the rootCmd.
+// Execute initializes the root command and executes it.
+// Called by main() to start the CLI.
 func Execute() {
 	// Initialize options
 	opts := internal.NewToolboxOptions()
@@ -89,7 +90,7 @@ func Execute() {
 	}
 }
 
-// NewCommand returns a Command object representing an invocation of the CLI.
+// NewCommand creates and configures the root command with all subcommands and flags.
 func NewCommand(opts *internal.ToolboxOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "toolbox",
@@ -138,6 +139,8 @@ func NewCommand(opts *internal.ToolboxOptions) *cobra.Command {
 	return cmd
 }
 
+// handleDynamicReload validates and applies reloaded tool configurations to the server.
+// Returns error if reloaded configs fail to initialize.
 func handleDynamicReload(ctx context.Context, toolsFile internal.ToolsFile, s *server.Server) error {
 	logger, err := util.LoggerFromContext(ctx)
 	if err != nil {
@@ -156,7 +159,8 @@ func handleDynamicReload(ctx context.Context, toolsFile internal.ToolsFile, s *s
 	return nil
 }
 
-// validateReloadEdits checks that the reloaded tools file configs can initialized without failing
+// validateReloadEdits parses and validates reloaded tool file configurations.
+// Returns initialized maps for all resource types or error if validation fails.
 func validateReloadEdits(
 	ctx context.Context, toolsFile internal.ToolsFile,
 ) (map[string]sources.Source, map[string]auth.AuthService, map[string]embeddingmodels.EmbeddingModel, map[string]tools.Tool, map[string]tools.Toolset, map[string]prompts.Prompt, map[string]prompts.Promptset, error,
@@ -196,7 +200,8 @@ func validateReloadEdits(
 	return sourcesMap, authServicesMap, embeddingModelsMap, toolsMap, toolsetsMap, promptsMap, promptsetsMap, nil
 }
 
-// Helper to check if a file has a newer ModTime than stored in the map
+// checkModTime checks whether a file's modification time is newer than previously recorded.
+// Updates lastSeen if changed and returns true.
 func checkModTime(path string, mTime time.Time, lastSeen map[string]time.Time) bool {
 	if mTime.After(lastSeen[path]) {
 		lastSeen[path] = mTime
@@ -205,7 +210,8 @@ func checkModTime(path string, mTime time.Time, lastSeen map[string]time.Time) b
 	return false
 }
 
-// Helper to scan watched files and check their modification times in polling system
+// scanWatchedFiles scans watched files or folder for modifications via polling.
+// Returns current disk files, whether any changed, or error if unable to read.
 func scanWatchedFiles(watchingFolder bool, folderToWatch string, watchedFiles map[string]bool, lastSeen map[string]time.Time) (map[string]bool, bool, error) {
 	changed := false
 	currentDiskFiles := make(map[string]bool)
@@ -238,7 +244,9 @@ func scanWatchedFiles(watchingFolder bool, folderToWatch string, watchedFiles ma
 	return currentDiskFiles, changed, nil
 }
 
-// watchChanges checks for changes in the provided yaml tools file(s) or folder.
+// watchChanges monitors tools file(s) or folder for changes and reloads server on modification.
+// Uses fsnotify for event-driven watching; polling interval (seconds) enables NFS support.
+// Debounces rapid changes to prevent duplicate reloads.
 func watchChanges(ctx context.Context, watchDirs map[string]bool, watchedFiles map[string]bool, s *server.Server, pollTickerSecond int) {
 	logger, err := util.LoggerFromContext(ctx)
 	if err != nil {
@@ -394,6 +402,8 @@ func watchChanges(ctx context.Context, watchDirs map[string]bool, watchedFiles m
 	}
 }
 
+// resolveWatcherInputs converts tool file/folder inputs into deduplicated directory and file maps.
+// Returns (watchDirs, watchedFiles) for fsnotify setup.
 func resolveWatcherInputs(toolsFile string, toolsFiles []string, toolsFolder string) (map[string]bool, map[string]bool) {
 	var relevantFiles []string
 
@@ -421,6 +431,8 @@ func resolveWatcherInputs(toolsFile string, toolsFiles []string, toolsFolder str
 	return watchDirs, watchedFiles
 }
 
+// run initializes the toolbox server and handles graceful shutdown.
+// Blocks until context cancelled or server exits with error.
 func run(cmd *cobra.Command, opts *internal.ToolboxOptions) error {
 	ctx, cancel := context.WithCancel(cmd.Context())
 	defer cancel()

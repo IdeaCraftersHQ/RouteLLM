@@ -1,3 +1,9 @@
+"""Resilience utilities for fault-tolerant model routing.
+
+Implements circuit breaker pattern for handling transient failures and
+fallback mechanisms for routing.
+"""
+
 import asyncio
 import time
 import logging
@@ -7,12 +13,31 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
+
 class CircuitState(Enum):
+    """States in circuit breaker pattern.
+
+    Attributes
+    ----------
+    CLOSED : str
+        Normal operation; requests pass through.
+    OPEN : str
+        Failures exceeded; requests fail immediately.
+    HALF_OPEN : str
+        Recovery mode; testing if service is healthy.
+    """
+
     CLOSED = "closed"
     OPEN = "open"
     HALF_OPEN = "half_open"
 
+
 class CircuitBreaker:
+    """Implements circuit breaker pattern for fault tolerance.
+
+    Tracks failures and health status of downstream services, opening
+    circuit when failure threshold exceeded to prevent cascading failures.
+    """
     def __init__(
         self,
         fail_max: int = 5,
@@ -22,6 +47,23 @@ class CircuitBreaker:
         rate_interval_ms: int = 60000,
         rate_minimum: int = 10,
     ):
+        """Initialize circuit breaker.
+
+        Parameters
+        ----------
+        fail_max : int, optional
+            Consecutive failures to trigger OPEN state (default 5).
+        fail_rate : float, optional
+            Failure rate threshold in [0, 1] (default 0.5).
+        fail_wait_ms : int, optional
+            Milliseconds to wait before trying recovery (default 5000).
+        fail_codes : list[int], optional
+            HTTP status codes to treat as failures (default [500, 502, 503, 504]).
+        rate_interval_ms : int, optional
+            Time window for computing failure rate (default 60000).
+        rate_minimum : int, optional
+            Minimum requests in window to compute rate (default 10).
+        """
         self.fail_max = fail_max
         self.fail_rate = fail_rate
         self.fail_wait_ms = fail_wait_ms
@@ -35,11 +77,19 @@ class CircuitBreaker:
         self.history: List[tuple[float, bool]] = [] # (timestamp, success)
 
     def _clean_history(self):
+        """Remove stale entries from failure history."""
         now = time.time()
         interval_s = self.rate_interval_ms / 1000
         self.history = [h for h in self.history if now - h[0] <= interval_s]
 
     def _get_fail_rate(self) -> float:
+        """Compute failure rate within time window.
+
+        Returns
+        -------
+        float
+            Failure rate in [0, 1]. Returns 0 if insufficient history.
+        """
         self._clean_history()
         if len(self.history) < self.rate_minimum:
             return 0.0
@@ -47,6 +97,13 @@ class CircuitBreaker:
         return fails / len(self.history)
 
     def can_execute(self) -> bool:
+        """Check if request can proceed given circuit state.
+
+        Returns
+        -------
+        bool
+            True if circuit allows execution.
+        """
         if self.state == CircuitState.CLOSED:
             return True
         
