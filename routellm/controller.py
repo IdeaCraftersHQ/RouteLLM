@@ -16,7 +16,7 @@ from litellm import acompletion, completion
 from tqdm import tqdm
 
 from routellm.caching import Cache, CacheConfig
-from routellm.endpoints import EndpointRegistry
+from routellm.endpoints import EndpointRegistry, Selector
 from routellm.payment.gateway import PaymentGateway
 from routellm.payment.types import PaymentChallenge
 from routellm.quality import QualityManager
@@ -50,6 +50,19 @@ GPT_4_AUGMENTED_CONFIG = {
 class RoutingError(Exception):
     """Raised when routing configuration or parameters are invalid."""
     pass
+
+
+def _has_selector(registry: EndpointRegistry) -> bool:
+    """Return whether any tier side is still an unresolved policy.
+
+    Kept cheap so a registry of plain names never imports the optional
+    models.dev client.
+    """
+    return any(
+        isinstance(side, Selector)
+        for tier in registry.tiers.values()
+        for side in (tier.strong, tier.weak)
+    )
 
 
 class Controller:
@@ -126,9 +139,29 @@ class Controller:
         ------
         ValueError
             If both models are None and no `default` tier is configured,
-            or a tier names a router that is not registered.
+            a tier names a router that is not registered, a tier's
+            policy resolves to no endpoint or to the same endpoint on
+            both sides, or `strong_model`/`weak_model` names a tier.
         """
         self.endpoints = endpoints or EndpointRegistry()
+
+        # A tier side may be a policy rather than a name. Resolve every
+        # one against the configured endpoints and the models.dev
+        # catalog now, once, then re-validate: everything downstream
+        # sees names only.
+        if _has_selector(self.endpoints):
+            from routellm.pairing import resolve_registry_pairings
+
+            resolve_registry_pairings(self.endpoints)
+            self.endpoints.revalidate()
+
+        for label, name in (("strong_model", strong_model), ("weak_model", weak_model)):
+            if name is not None and self.endpoints.has_tier(name):
+                raise ValueError(
+                    f"{label}={name!r} names a tier, not an endpoint; a flat "
+                    "pair must name two endpoints. Use the tier as the "
+                    "request model instead."
+                )
 
         if strong_model is None and weak_model is None:
             if not self.endpoints.has_tier("default"):
@@ -300,7 +333,7 @@ class Controller:
         tier: Optional[str],
         router: Optional[str],
         threshold: Optional[float],
-    ) -> tuple[str, list[dict[str, Any]]]:
+    ) -> tuple[str, list[dict[str, Any]], Optional[ModelPair]]:
         """Choose one endpoint for a prompt and record how it was chosen.
 
         A traffic rule or a middleware that returns a pair bypasses the

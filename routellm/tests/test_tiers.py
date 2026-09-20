@@ -266,6 +266,22 @@ def test_tier_router_name_collision_rejected_at_construction(
     assert "hi" in str(excinfo.value)
 
 
+def test_strong_model_naming_a_tier_rejected(registry, tmp_path, hi_router):
+    with pytest.raises(ValueError) as excinfo:
+        _controller(registry, tmp_path, strong_model="premium", weak_model="local_fast")
+
+    assert "premium" in str(excinfo.value)
+    assert "use the tier as the request model instead" in str(excinfo.value).lower()
+
+
+def test_weak_model_naming_a_tier_rejected(registry, tmp_path, hi_router):
+    with pytest.raises(ValueError) as excinfo:
+        _controller(registry, tmp_path, strong_model="cloud_strong", weak_model="premium")
+
+    assert "premium" in str(excinfo.value)
+    assert "use the tier as the request model instead" in str(excinfo.value).lower()
+
+
 # ---------------------------------------------------------------------------
 # Model-name grammar
 # ---------------------------------------------------------------------------
