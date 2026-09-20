@@ -214,11 +214,18 @@ python -m routellm.openai_server \
   --strong-model gpt-4-1106-preview \
   --weak-model  ollama_chat/llama3 \
   --config /opt/routellm/config.yaml \
-  --host 127.0.0.1 --port 6060
+  --port 6060
 ```
 
+The server takes no `--host`: it binds `0.0.0.0` unconditionally, so
+the port is reachable from the LAN the moment it starts. Confine it to
+loopback outside the process — a firewall rule, a network namespace, or
+the systemd unit below — and never expose it directly.
+
 Wrap as a systemd unit (`/etc/systemd/system/routellm.service`)
-binding to loopback, restart-on-failure, env-file for secrets.
+with restart-on-failure and an env-file for secrets. Because the bind
+is not configurable, the unit is what keeps it off the LAN:
+`IPAddressAllow=localhost` with `IPAddressDeny=any`.
 
 ### 6. Enable per-employee auth — US-0100 (paper, flagged)
 
@@ -485,9 +492,12 @@ firing weak-class prompts; expect zero packets.
   single-tenant deploys mask the bug. US-0102 hooks let
   classified-safe prompts opt into a global namespace; do not
   flip global on by default.
-- **Loopback bind**: confirm `ss -ltnp | grep -E ':(6060|11434)'`
-  shows `127.0.0.1`, not `0.0.0.0`. A bind misconfig exposes the
-  router unauthenticated to the LAN.
+- **Loopback bind**: `ss -ltnp | grep :6060` always shows
+  `0.0.0.0` — the server hard-codes that bind and has no `--host`.
+  The router is therefore unauthenticated on the LAN unless the
+  systemd `IPAddressDeny=any` confinement above, or an equivalent
+  firewall rule, is in place. Verify that confinement, not the bind
+  address.
 - **VPN MTU**: VPN tunnels often drop MTU to 1380 or lower.
   Streaming completions can hang at the boundary if proxy /
   upstream renegotiate large TLS records. Set `proxy-bufsize`
