@@ -34,6 +34,11 @@ dev = ["black", "isort", "pre-commit", "pytest", "pytest-asyncio"]
 pairing = [
 	"hop-top-aim @ git+https://github.com/hop-top/poly-aim.git#subdirectory=py",
 ]
+# Only `routellm.quality_scores score` imports fit, and only inside
+# `build_scorer`. Aggregation and config consumption never do.
+fit = [
+	"hop-top-fit @ git+https://github.com/hop-top/fit.git#subdirectory=py",
+]
 
 [project.urls]
 "Homepage" = "https://github.com/lm-sys/RouteLLM"

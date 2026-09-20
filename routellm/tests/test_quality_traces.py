@@ -52,7 +52,9 @@ def test_trace_has_every_fit_required_field(tmp_path):
         session_id="sess-1",
     )
 
-    records = TraceIngester().load_batch(manager.fine_tune_config.trace_dir)
+    records = TraceIngester().load_batch(
+        [manager.fine_tune_config.trace_dir]
+    ).to_trace_records()
     assert len(records) == 1
     record = records[0]
     assert record.prompt == "what is 2+2"
