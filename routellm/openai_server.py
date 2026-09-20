@@ -12,11 +12,11 @@ from typing import AsyncGenerator, Dict, List, Literal, Optional, Union
 import fastapi
 import shortuuid
 import uvicorn
-import yaml
 from fastapi.concurrency import asynccontextmanager
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from routellm.config import load_config
 from routellm.controller import Controller, RoutingError
 from routellm.endpoints import Endpoint, EndpointRegistry, Tier
 from routellm.hints import TYPESAFE_INSTALL_HINT
@@ -74,12 +74,13 @@ def legacy_pair() -> tuple[str, str]:
 def build_registry(file_config: Optional[dict]) -> EndpointRegistry:
     """Build the endpoint registry the server routes against.
 
-    `--config` is the single source for endpoints and tiers. When that
-    config carries no `default` tier and both `--strong-model` and
-    `--weak-model` are given, the two are wrapped as endpoints and
-    joined into an implicit `default` tier running `--routers[0]` at
-    `--default-threshold`, so a flat command line still answers a
-    request addressed to `default`.
+    The merged config is the single source for endpoints and tiers, and
+    it is discovered rather than named: `--config` is only its highest
+    layer. When that config carries no `default` tier and both
+    `--strong-model` and `--weak-model` are given, the two are wrapped
+    as endpoints and joined into an implicit `default` tier running
+    `--routers[0]` at `--default-threshold`, so a flat command line
+    still answers a request addressed to `default`.
 
     A config `default` tier wins, and the flags are then left to the
     flat pair the controller keeps. Neither flag and no config
@@ -90,7 +91,7 @@ def build_registry(file_config: Optional[dict]) -> EndpointRegistry:
     Parameters
     ----------
     file_config : dict, optional
-        The loaded YAML config, or None when `--config` was not given.
+        The merged config as `load_config` returns it.
 
     Returns
     -------
@@ -186,7 +187,7 @@ def build_intents(
     Parameters
     ----------
     file_config : dict, optional
-        The loaded YAML config, or None when `--config` was not given.
+        The merged config as `load_config` returns it.
     registry : EndpointRegistry
         Registry whose tiers the mapping is checked against.
 
@@ -284,15 +285,26 @@ async def lifespan(app):
         if key:
             gateway = X402Adapter(private_key=key)
 
+    # The config is discovered, not named: system, user, project, then
+    # ROUTELLM_CONFIG and `--config`, each merged onto the last. The
+    # layers that were actually read are logged so a surprising value
+    # has a file to blame.
+    loaded = load_config(explicit=args.config)
+    if loaded.layers:
+        logging.info(
+            "config layers: %s",
+            ", ".join(f"{entry.source}={entry.path}" for entry in loaded.layers),
+        )
+    else:
+        logging.info("config layers: none found; built-in router defaults only")
+
     # `endpoints:` and `tiers:` belong to the registry and `intents:`
-    # to the intent middleware; the rest of the file stays router
-    # config, so all three are popped out before the handoff. A file
-    # holding nothing else leaves None, which keeps the router
-    # defaults.
-    file_config = yaml.safe_load(open(args.config, "r")) if args.config else None
+    # to the intent middleware; the rest of the merged mapping stays
+    # router config, so all three are popped out before the handoff.
+    file_config = loaded.data
     endpoints = build_registry(file_config)
     intents = build_intents(file_config, endpoints)
-    router_config = dict(file_config or {})
+    router_config = dict(file_config)
     router_config.pop("endpoints", None)
     router_config.pop("tiers", None)
     router_config.pop("intents", None)
@@ -501,7 +513,16 @@ parser.add_argument(
     action="store_true",
 )
 parser.add_argument("--workers", type=int, default=0)
-parser.add_argument("--config", type=str, default=None)
+parser.add_argument(
+    "--config",
+    type=str,
+    default=None,
+    help=(
+        "Explicit config file, merged last over the discovered chain "
+        "(system, user, project, ROUTELLM_CONFIG). Run "
+        "`python -m routellm.config paths` to see the chain."
+    ),
+)
 parser.add_argument("--port", type=int, default=6060)
 parser.add_argument(
     "--host",

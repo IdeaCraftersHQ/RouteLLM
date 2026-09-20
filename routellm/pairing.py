@@ -35,6 +35,7 @@ that actually needs a catalog term fails when neither is available.
 
 The pick is explainable without a server::
 
+    python -m routellm.pairing            # the discovered config
     python -m routellm.pairing --config config.yaml
 """
 
@@ -50,6 +51,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from routellm.config import ConfigError, load_config
 from routellm.endpoints import Endpoint, EndpointRegistry, Selector
 
 logger = logging.getLogger(__name__)
@@ -752,13 +754,14 @@ def resolve_registry_pairings(registry: EndpointRegistry) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _explain(config_path: str) -> str:
+def _explain(config_path: Optional[str] = None) -> str:
     """Return the candidate table and pick for every selector in a config.
 
     Parameters
     ----------
-    config_path : str
-        Path to the YAML config.
+    config_path : str, optional
+        Explicit config file, merged last over the discovered chain.
+        None explains whatever discovery finds.
 
     Returns
     -------
@@ -766,10 +769,7 @@ def _explain(config_path: str) -> str:
         A plain-text report, one block per tier side that selects,
         then one line per configured intent naming the tier it enters.
     """
-    import yaml
-
-    with open(config_path) as handle:
-        config = yaml.safe_load(handle) or {}
+    config = load_config(explicit=config_path).data
 
     registry = EndpointRegistry.from_config(config)
     lines: list[str] = []
@@ -821,14 +821,22 @@ def main(argv: Optional[list[str]] = None) -> int:
         prog="python -m routellm.pairing",
         description="Explain how each tier's selectors resolve.",
     )
-    parser.add_argument("--config", required=True, help="Path to the YAML config.")
+    parser.add_argument(
+        "--config",
+        default=None,
+        help=(
+            "Explicit config file, merged last over the discovered chain "
+            "(system, user, project, ROUTELLM_CONFIG). Omit it to explain "
+            "whatever discovery finds."
+        ),
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.WARNING)
 
     try:
         print(_explain(args.config))
-    except (ValueError, CatalogUnavailable, OSError) as exc:
+    except (ValueError, CatalogUnavailable, OSError, ConfigError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
     return 0

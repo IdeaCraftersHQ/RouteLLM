@@ -34,20 +34,36 @@ controller.acompletion = AsyncMock(return_value=res)
 """
 
 
-def _spawn(tmp_path, argv, body):
-    """Run `body` in a subprocess against a server built from `argv`."""
+def _spawn(tmp_path, argv, body, env=None, cwd=None):
+    """Run `body` in a subprocess against a server built from `argv`.
+
+    Parameters
+    ----------
+    env : dict, optional
+        Extra environment entries, merged over the isolated base. Used by
+        the discovery cases to point `XDG_CONFIG_HOME` at `tmp_path`.
+    cwd : path-like, optional
+        Working directory. Defaults to the repo root; a discovery case
+        moves it under `tmp_path` so the walk-up finds no marker.
+    """
+    base = {
+        "PYTHONPATH": str(REPO_ROOT),
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(tmp_path),
+    }
+    base.update(env or {})
     return subprocess.run(
         [sys.executable, "-c", _PREAMBLE.format(argv=argv) + body],
-        cwd=REPO_ROOT,
+        cwd=str(cwd or REPO_ROOT),
         capture_output=True,
         text=True,
-        env={"PYTHONPATH": ".", "PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+        env=base,
     )
 
 
-def _run(tmp_path, argv, body):
+def _run(tmp_path, argv, body, env=None, cwd=None):
     """Run `body` and return the JSON its last line printed."""
-    result = _spawn(tmp_path, argv, body)
+    result = _spawn(tmp_path, argv, body, env=env, cwd=cwd)
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout.strip().splitlines()[-1])
 
@@ -451,3 +467,76 @@ def test_unknown_other_router_carries_no_install_hint():
         )
 
     assert "pip install" not in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# Config discovery
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+def test_server_discovers_the_user_config_without_a_flag(tmp_path):
+    """No `--config`: the user layer under XDG still supplies the tiers."""
+    xdg = tmp_path / "xdgconf"
+    user = xdg / "routellm" / "config.yaml"
+    user.parent.mkdir(parents=True)
+    user.write_text(
+        "endpoints:\n"
+        "  discovered_big: {model: m_big}\n"
+        "  discovered_small: {model: m_small}\n"
+        "tiers:\n"
+        "  discovered: {strong: discovered_big, weak: discovered_small}\n"
+        "  default: {strong: discovered, weak: discovered_small}\n"
+    )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+
+    payload = _run(
+        tmp_path,
+        ["x", "--routers", "random", "--default-threshold", "0.5"],
+        """
+with TestClient(server.app) as client:
+    reply = client.get("/v1/models")
+print(json.dumps({"ids": [item["id"] for item in reply.json()["data"]]}))
+""",
+        env={"XDG_CONFIG_HOME": str(xdg)},
+        cwd=elsewhere,
+    )
+
+    assert payload["ids"] == ["default", "discovered", "router-random-0.5"]
+
+
+@pytest.mark.slow
+def test_flag_still_overrides_discovery(tmp_path, tiered_config):
+    """`--config` merges last, so its tiers join the discovered ones."""
+    xdg = tmp_path / "xdgconf"
+    user = xdg / "routellm" / "config.yaml"
+    user.parent.mkdir(parents=True)
+    user.write_text(
+        "endpoints:\n"
+        "  discovered_small: {model: m_small}\n"
+        "tiers:\n"
+        "  discovered: {strong: discovered_small, weak: discovered_small}\n"
+    )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+
+    payload = _run(
+        tmp_path,
+        ["x", "--config", str(tiered_config), "--routers", "random",
+         "--default-threshold", "0.5"],
+        """
+with TestClient(server.app) as client:
+    reply = client.get("/v1/models")
+print(json.dumps({"ids": [item["id"] for item in reply.json()["data"]]}))
+""",
+        env={"XDG_CONFIG_HOME": str(xdg)},
+        cwd=elsewhere,
+    )
+
+    assert payload["ids"] == [
+        "default",
+        "discovered",
+        "premium",
+        "router-random-0.5",
+    ]

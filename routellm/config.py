@@ -349,10 +349,7 @@ def explain(loaded: LoadedConfig) -> str:
     str
         The rendered explanation, newline-terminated.
     """
-    lines = []
-    for entry in loaded.chain:
-        marker = "[used]  " if entry.exists else "[absent]"
-        lines.append(f"{marker} {entry.source:<7} {entry.path}")
+    lines = _chain_lines(loaded.chain)
     if not any(entry.source == "project" for entry in loaded.chain):
         lines.append("[absent] project (no .routellm.yaml or routellm.yaml found)")
     lines.append("")
@@ -382,3 +379,135 @@ def _top_level_origin(loaded: LoadedConfig, line: str) -> Optional[Path]:
         if dotted.startswith(prefix):
             return path
     return None
+
+
+# ---------------------------------------------------------------------------
+# Inspection CLI
+# ---------------------------------------------------------------------------
+
+
+def winning_path(chain: List[ResolvedPath]) -> Optional[ResolvedPath]:
+    """Return the highest-precedence entry that exists, or None.
+
+    Parameters
+    ----------
+    chain : list[ResolvedPath]
+        The chain as `config_paths` returns it, lowest precedence first.
+
+    Returns
+    -------
+    ResolvedPath or None
+        The last entry whose file is there; None when none of them is.
+    """
+    for entry in reversed(chain):
+        if entry.exists:
+            return entry
+    return None
+
+
+def _chain_lines(chain: List[ResolvedPath]) -> List[str]:
+    """Render one `[used]`/`[absent]` line per searched location."""
+    return [
+        f"{'[used]  ' if entry.exists else '[absent]'} "
+        f"{entry.source:<7} {entry.path}"
+        for entry in chain
+    ]
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    """Inspect the config chain: `path`, `paths`, or `show`.
+
+    Parameters
+    ----------
+    argv : list[str], optional
+        Command-line arguments. Defaults to `sys.argv[1:]`.
+
+    Returns
+    -------
+    int
+        0 on success; 1 when `path` finds nothing on the chain or when a
+        named file is missing or unparseable.
+    """
+    import argparse
+    import json
+    import sys
+
+    # `--config` is declared on a shared parent so it reads the same
+    # before or after the subcommand; argparse otherwise rejects it in
+    # the trailing position, which is where an operator naturally types
+    # it.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
+        "--config",
+        default=None,
+        help="Explicit config file; the highest-precedence layer.",
+    )
+
+    parser = argparse.ArgumentParser(
+        prog="python -m routellm.config",
+        description="Show where the RouteLLM config comes from.",
+        parents=[common],
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers.add_parser(
+        "path",
+        parents=[common],
+        help="Print the highest-precedence config file that exists.",
+    )
+    for name, helptext in (
+        ("paths", "Print every searched location, lowest precedence first."),
+        ("show", "Print the effective merged config."),
+    ):
+        sub = subparsers.add_parser(name, parents=[common], help=helptext)
+        sub.add_argument("--format", choices=["text", "json"], default="text")
+
+    args = parser.parse_args(argv)
+
+    try:
+        if args.command == "paths":
+            chain = config_paths(explicit=args.config)
+            if args.format == "json":
+                print(
+                    json.dumps(
+                        [
+                            {
+                                "source": entry.source,
+                                "path": str(entry.path),
+                                "exists": entry.exists,
+                            }
+                            for entry in chain
+                        ],
+                        indent=2,
+                    )
+                )
+            else:
+                print("\n".join(_chain_lines(chain)))
+            return 0
+
+        if args.command == "path":
+            winner = winning_path(config_paths(explicit=args.config))
+            if winner is None:
+                print(
+                    "no routellm config file on the chain; "
+                    "run `paths` to see where it looked",
+                    file=sys.stderr,
+                )
+                return 1
+            print(winner.path)
+            return 0
+
+        loaded = load_config(explicit=args.config)
+        if args.format == "json":
+            print(json.dumps(loaded.data, indent=2, default=str))
+        else:
+            print(explain(loaded), end="")
+        return 0
+    except (FileNotFoundError, ConfigError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main())

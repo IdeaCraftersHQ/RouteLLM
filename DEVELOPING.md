@@ -36,6 +36,29 @@ PYTHONPATH=. python -m pytest routellm/tests -q
 
 The server (`routellm/openai_server.py` et al.) listens on port 6060.
 
+## Your local instance config
+
+The server discovers its config; it does not read one from the repo.
+Put your own instance config in the user layer:
+
+```sh
+mkdir -p ~/.config/routellm
+cp config.example.yaml ~/.config/routellm/config.yaml
+```
+
+Then `python -m routellm.openai_server` needs no `--config` at all.
+`config.example.yaml` and `examples/multitier.yaml` are samples to copy
+from, never configuration.
+
+To override a few keys for this checkout only, write `./.routellm.yaml`
+— it is gitignored, merges over the user layer, and `null` deletes a key
+the user layer set. Check what is in effect with:
+
+```sh
+python -m routellm.config paths   # every searched location, used or absent
+python -m routellm.config show    # the merged result, each key's origin
+```
+
 ## Extensions
 
 Extensions live under `extensions/<name>/` with their own `pyproject.toml`.
