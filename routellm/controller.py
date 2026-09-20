@@ -195,12 +195,15 @@ class Controller:
 
         # Balancers stay keyed on the routed name, as the cache and
         # trace keys are, so a named endpoint balances under its name.
-        # balance() echoes its argument back when no balancer matches,
-        # in which case the endpoint's own model is what litellm wants.
-        balanced_model, balanced_key, balanced_base = self.traffic_manager.balance(
-            model_name
-        )
-        model = endpoint.model if balanced_model == model_name else balanced_model
+        # Membership decides whether one applies: balance() echoes its
+        # argument when none is registered, which is indistinguishable
+        # from a balancer whose target model equals the routed name.
+        if model_name in self.traffic_manager.load_balancers:
+            model, balanced_key, balanced_base = self.traffic_manager.balance(
+                model_name
+            )
+        else:
+            model, balanced_key, balanced_base = endpoint.model, None, None
 
         return model, balanced_base or api_base, balanced_key or api_key, endpoint.extra
 
