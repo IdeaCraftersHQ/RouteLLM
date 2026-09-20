@@ -35,6 +35,7 @@ from aps story 004.
 
 ### Server
 - [US-0010](US-0010-openai-compatible-server.md) — OpenAI-compatible server
+- [US-0107](US-0107-config-discovery.md) — config discovery: XDG paths with local-to-global inheritance
 
 ### Auth + observability (gap series — paper)
 - [US-0100](US-0100-multi-tenant-auth.md) — multi-tenant API auth

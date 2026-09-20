@@ -1,3 +1,12 @@
+# SAMPLE, not configuration. Copy what you need into a real config
+# file on the discovery chain; this file is never read automatically.
+#
+#   user layer:     ~/.config/routellm/config.yaml
+#   project layer:  ./.routellm.yaml   (gitignored)
+#   one-off run:    --config <path>
+#
+# Run `python -m routellm.config paths` to see the chain.
+#
 # A multi-tier instance: several providers behind one server, with the
 # choice of which model answers made by policy rather than by hand.
 #

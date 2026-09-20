@@ -165,3 +165,9 @@ cython_debug/
 #.idea/
 # SQLite databases written at runtime (routellm.caching default db_path, tool caches)
 *.db
+
+# Project-local RouteLLM config (the project layer of the config chain).
+# Real configuration lives outside the repo; config.example.yaml and
+# examples/*.yaml are samples, not the instance config.
+/.routellm.yaml
+/routellm.yaml

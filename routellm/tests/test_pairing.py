@@ -699,3 +699,38 @@ def _subprocess_env(tmp_path):
     env["PYTHONPATH"] = str(REPO_ROOT)
     env[CATALOG_CACHE_ENV] = str(tmp_path / "subprocess_cache.json")
     return env
+
+
+def test_explain_without_a_flag_reads_the_discovered_config(tmp_path):
+    """No `--config`: the user layer under XDG is what gets explained."""
+    xdg = tmp_path / "xdgconf"
+    user = xdg / "routellm" / "config.yaml"
+    user.parent.mkdir(parents=True)
+    user.write_text(
+        "endpoints:\n"
+        "  cloud_strong: {model: gpt-4o, tags: [cloud], quality: 90}\n"
+        "  local_fast: {model: 'ollama_chat/qwen3:8b', tags: [local], quality: 40}\n"
+        "tiers:\n"
+        "  default:\n"
+        "    strong: {select: 'tag:cloud', order: quality_desc}\n"
+        "    weak: {select: 'tag:local', order: quality_asc}\n"
+    )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+
+    env = _subprocess_env(tmp_path)
+    env["XDG_CONFIG_HOME"] = str(xdg)
+    env["HOME"] = str(tmp_path)
+    env.pop("ROUTELLM_CONFIG", None)
+
+    result = subprocess.run(
+        [sys.executable, "-m", "routellm.pairing"],
+        cwd=str(elsewhere),
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "cloud_strong" in result.stdout
+    assert "local_fast" in result.stdout

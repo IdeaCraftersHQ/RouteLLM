@@ -221,11 +221,13 @@ The research in this repository was conducted in [collaboration with Anyscale](h
 RouteLLM offers a lightweight OpenAI-compatible server for routing requests based on different routing strategies:
 
 ```
-python -m routellm.openai_server --routers mf jev --config config.example.yaml
+python -m routellm.openai_server --routers mf jev
 ```
 
+The config is discovered rather than named; pass `--config <path>` for a one-off file.
+
 - `--routers` specifies the list of routers available to the server. For instance, here, the server is started with two available routers, `mf` and `jev` (see below for the list of routers). The first one is the default for a request that names none.
-- `--config` is the single source for the server's endpoints, tiers, and router settings. If unspecified, the server defaults to our best-performing router configuration and routes the flat `--strong-model`/`--weak-model` pair (see [Configuration](#configuration) for details).
+- `--config` names an explicit config file, merged last over the discovered chain (system, user, project, `ROUTELLM_CONFIG`). Omit it and the server uses whatever it discovers; with nothing on the chain it falls back to our best-performing router configuration and routes the flat `--strong-model`/`--weak-model` pair. Run `python -m routellm.config paths` to see the chain (see [Configuration](#configuration) for details).
 - `--strong-model` and `--weak-model` name that flat pair. Both together or neither; each may name a configured endpoint or a raw model name.
 - `--default-threshold` is the threshold used by a level that names none and whose request carries none. Default `0.5`.
 - `--host` is the interface to bind. Default `127.0.0.1`. The server is unauthenticated, so a wider bind exposes it to that network: widen it only behind a proxy that authenticates. Changed: the server previously bound `0.0.0.0`. Pass `--host 0.0.0.0` to restore that, only behind an authenticating proxy.
@@ -540,7 +542,55 @@ and [extensions/typesafe/README.md](extensions/typesafe/README.md).
 
 ## Configuration
 
-The configuration is specified in either the `config` argument for `Controller` or by passing in the path to a YAML file using the `--config` flag. Most top-level keys are router names mapping to the keyword arguments used for that router's initialization. Two are reserved:
+The server does not take one config file; it discovers a chain of them and merges them, so a global config, a project-local override, and a one-off file all compose. Lowest precedence first, each layer merged onto the ones below it:
+
+| # | Layer | Location | If the file is missing |
+|---|---|---|---|
+| 1 | defaults | built in, no file | — |
+| 2 | system | `/etc/routellm/config.yaml` | skipped |
+| 3 | user | `$XDG_CONFIG_HOME/routellm/config.yaml` (`~/.config` when unset) | skipped |
+| 4 | project | `./.routellm.yaml` or `./routellm.yaml`, in the CWD or the nearest ancestor below `$HOME` | skipped |
+| 5 | env | `ROUTELLM_CONFIG=<path>` | **error** |
+| 6 | flag | `--config <path>` | **error** |
+
+Layers 2-4 are discovered, so their absence is silence. Layers 5 and 6 were named by you, so a file that is not there is an error naming the variable or the flag. `Controller` still takes a `config` argument directly for library use.
+
+### Merge rules
+
+- **Mappings merge by key, recursively.** `endpoints:`, `tiers:`, `intents:` and each router's section merge across layers, so a user file can define ten endpoints and a project file add one or retag another without restating the rest.
+- **Scalars and lists replace.** A project's `tags:` list replaces the user's for that endpoint; it never concatenates.
+- **`null` deletes.** A key whose value is `null` in a higher layer is removed from the merged result. That is the only way to drop a globally defined endpoint locally:
+
+  ```yaml
+  # ~/.config/routellm/config.yaml
+  endpoints:
+    cloud_strong: {model: gpt-4o}
+    local_fast:   {model: ollama_chat/qwen3:8b}
+
+  # ./.routellm.yaml — this repo may not talk to the cloud
+  endpoints:
+    cloud_strong: null
+  ```
+
+- **Relative paths resolve against their own file.** A user-layer `prompt_file: prompts/router.yaml` means `~/.config/routellm/prompts/router.yaml` wherever the server is run from, not a path relative to the CWD.
+
+### Inspecting the chain
+
+Three commands answer "where does this value come from":
+
+```sh
+python -m routellm.config path    # the highest-precedence file that exists; exit 1 if none
+python -m routellm.config paths   # every searched location, lowest first, [used] or [absent]
+python -m routellm.config show    # the effective merged config, each top-level key commented with its origin
+```
+
+`paths` and `show` also take `--format json`. All three honour `--config` and `ROUTELLM_CONFIG`. `python -m routellm.pairing` with no `--config` explains the discovered config the same way.
+
+A project-local `.routellm.yaml` is gitignored: real configuration belongs outside the repo. `config.example.yaml` and `examples/multitier.yaml` are samples to copy from, never the instance config.
+
+### Reserved keys
+
+Most top-level keys are router names mapping to the keyword arguments used for that router's initialization. Two are reserved:
 
 | Key | Holds |
 |---|---|
@@ -549,7 +599,7 @@ The configuration is specified in either the `config` argument for `Controller` 
 
 Both are read by the endpoint registry and removed before the rest of the file is handed to the routers, so a router can never be shadowed by one of them. A file carrying neither is exactly the router config it always was.
 
-An example configuration is provided in the `config.example.yaml` file - it provides the configurations for routers that have trained on Arena data augmented using GPT-4 as a judge, plus a worked `endpoints:`/`tiers:` pair spanning a cloud model and two local ones. The models and datasets used are all hosted on Hugging Face under the [RouteLLM](https://huggingface.co/routellm) and [LMSYS](https://huggingface.co/lmsys) organizations.
+A sample configuration is provided in the `config.example.yaml` file - it provides the configurations for routers that have trained on Arena data augmented using GPT-4 as a judge, plus a worked `endpoints:`/`tiers:` pair spanning a cloud model and two local ones. The models and datasets used are all hosted on Hugging Face under the [RouteLLM](https://huggingface.co/routellm) and [LMSYS](https://huggingface.co/lmsys) organizations.
 
 `routellm/prompts.py` is a core facility: any router or middleware can read a named section from a shared YAML prompt file so its model-facing wording is editable without code changes, without pulling in that adapter's own dependencies. The TypeSafe extension documents its own environment variables in [extensions/typesafe/README.md](extensions/typesafe/README.md).
 

@@ -1,3 +1,12 @@
+# SAMPLE, not configuration. Copy what you need into a real config
+# file on the discovery chain; this file is never read automatically.
+#
+#   user layer:     ~/.config/routellm/config.yaml
+#   project layer:  ./.routellm.yaml   (gitignored)
+#   one-off run:    --config <path>
+#
+# Run `python -m routellm.config paths` to see the chain.
+#
 sw_ranking:
     arena_battle_datasets:
       - lmsys/lmsys-arena-human-preference-55k

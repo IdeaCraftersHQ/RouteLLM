@@ -213,10 +213,23 @@ python -m routellm.openai_server \
   --routers mf \
   --strong-model gpt-4-1106-preview \
   --weak-model  ollama_chat/llama3 \
-  --config /opt/routellm/config.yaml \
   --host 127.0.0.1 \
   --port 6060
 ```
+
+The config is discovered, not named. On a server, put it in the user
+layer of the account the unit runs as
+(`$XDG_CONFIG_HOME/routellm/config.yaml`, i.e.
+`~/.config/routellm/config.yaml`), or system-wide at
+`/etc/routellm/config.yaml`. Confirm which files are in play before
+starting:
+
+```
+python -m routellm.config paths
+```
+
+Pass `--config <path>` only for a one-off run; it is merged last over
+whatever was discovered.
 
 `--host` defaults to `127.0.0.1`, so the port is not reachable from the
 LAN unless you widen it. The server is unauthenticated: pass anything
@@ -374,14 +387,25 @@ installed. Skip the extra unless a tier uses `select:`.
 ### Serve
 
 ```
-python -m routellm.openai_server \
-  --config config.example.yaml \
-  --routers mf jev
+python -m routellm.openai_server --routers mf jev
 ```
 
-`--config` is the single source for endpoints and tiers. The example
-config's `default` tier names `mf` and `0.12`, so neither
-`--strong-model` nor `--weak-model` is needed.
+The config is discovered. For local development it belongs in the user
+layer:
+
+```
+mkdir -p ~/.config/routellm
+cp config.example.yaml ~/.config/routellm/config.yaml
+```
+
+That file's `default` tier names `mf` and `0.12`, so neither
+`--strong-model` nor `--weak-model` is needed. `config.example.yaml` in
+the repo is a sample, never read automatically.
+
+`python -m routellm.config paths` lists every location searched and
+which of them were used; `python -m routellm.config show` prints the
+merged result with each top-level key's origin. Pass `--config <path>`
+for a one-off run against a different file.
 
 When a config carries no `default` tier, passing both flags derives an
 implicit one from them instead. Passing neither derives nothing: no
