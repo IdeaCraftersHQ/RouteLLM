@@ -317,6 +317,13 @@ class EndpointRegistry:
         self._tiers: dict[str, Tier] = dict(tiers or {})
         self._warned: set[str] = set()
 
+        # Measured per-area quality, `{endpoint: {area: quality}}`,
+        # filled by `routellm.quality_scores.apply_sidecar` when the
+        # config points at a sidecar. Empty means nothing was measured,
+        # and pairing then orders on the overall number as it always
+        # has.
+        self.area_quality: dict[str, dict[str, int]] = {}
+
         self._validate_tiers()
 
     @classmethod
@@ -363,20 +370,38 @@ class EndpointRegistry:
             for name, spec in raw_endpoints.items()
         }
 
-        quality_from = config.get("quality_from")
-        if quality_from:
-            from routellm.quality_scores import apply_sidecar, resolve_sidecar_path
-
-            apply_sidecar(
-                endpoints, resolve_sidecar_path(quality_from, config_path)
-            )
-
         raw_tiers = config.get("tiers") or {}
         tiers = {
             name: Tier(name=name, **(spec or {})) for name, spec in raw_tiers.items()
         }
 
-        return cls(endpoints, tiers)
+        registry = cls(endpoints, tiers)
+
+        # The sidecar merges HERE, on the built registry, so every
+        # consumer that goes through from_config -- the server and both
+        # pairing CLIs -- orders on the same numbers. Per-area quality
+        # needs the registry itself, which is why this cannot run on the
+        # raw endpoint mapping above.
+        #
+        # Precedence: the sidecar wins, because it is measured and a
+        # hand-written `quality:` is a guess someone typed once. Set
+        # `quality_from_override: false` to flip it.
+        quality_from = config.get("quality_from")
+        if quality_from:
+            from routellm.quality_scores import (
+                apply_sidecar,
+                load_sidecar,
+                resolve_sidecar_path,
+            )
+
+            override = config.get("quality_from_override", True)
+            apply_sidecar(
+                registry,
+                load_sidecar(str(resolve_sidecar_path(quality_from, config_path))),
+                override=bool(override),
+            )
+
+        return registry
 
     def revalidate(self) -> None:
         """Re-run tier validation after the tiers were rewritten in place.

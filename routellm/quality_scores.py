@@ -32,8 +32,11 @@ import os
 import re
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Optional, Union
+
+from pydantic import BaseModel, Field, ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -608,6 +611,213 @@ def _areas_from_config(path: str) -> dict:
         for tier in tiers or []:
             inverted[tier] = area
     return inverted
+
+
+# ---------------------------------------------------------------------------
+# Sidecar consumption
+# ---------------------------------------------------------------------------
+
+#: A sidecar older than this logs a staleness warning. Never an error:
+#: an old measurement still beats no measurement.
+STALE_AFTER_DAYS = 30
+
+SIDECAR_VERSION = 1
+
+
+class AreaQuality(BaseModel):
+    """One area's measured quality for one endpoint."""
+
+    quality: int = Field(ge=0, le=100)
+    n: int = 0
+
+
+class EndpointQuality(BaseModel):
+    """One endpoint's measured quality, overall and per area."""
+
+    quality: int = Field(ge=0, le=100)
+    n: int = 0
+    by_area: dict = Field(default_factory=dict)
+
+
+class Sidecar(BaseModel):
+    """The quality sidecar `quality_from` points at."""
+
+    version: int
+    generated_at: str = ""
+    min_samples: int = 0
+    transform: str = "linear"
+    source: str = "traces"
+    area_source: str = "tier"
+    endpoints: dict = Field(default_factory=dict)
+
+
+def load_sidecar(path: str) -> Sidecar:
+    """Read and validate a quality sidecar.
+
+    Parameters
+    ----------
+    path : str
+        Sidecar YAML, already resolved to an absolute or cwd-relative
+        path by the caller.
+
+    Returns
+    -------
+    Sidecar
+        The parsed sidecar.
+
+    Raises
+    ------
+    FileNotFoundError
+        If there is no file at `path`. The message names the config key
+        that asked for it, so the fix is obvious from the error alone.
+    ValueError
+        If the version is not the one this code reads, or the YAML is
+        malformed.
+    """
+    import yaml
+
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"No quality sidecar at {path} (asked for by the config key "
+            "`quality_from`). Generate one with: python -m "
+            "routellm.quality_scores aggregate"
+        )
+
+    try:
+        with open(path) as handle:
+            raw = yaml.safe_load(handle) or {}
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Malformed quality sidecar at {path}: {exc}") from exc
+
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"Malformed quality sidecar at {path}: expected a mapping, "
+            f"found {type(raw).__name__}"
+        )
+
+    version = raw.get("version")
+    if version != SIDECAR_VERSION:
+        raise ValueError(
+            f"Quality sidecar at {path} is version {version!r}; this "
+            f"routellm reads version {SIDECAR_VERSION}. Regenerate it "
+            "with: python -m routellm.quality_scores aggregate"
+        )
+
+    try:
+        sidecar = Sidecar(**raw)
+        sidecar.endpoints = {
+            name: EndpointQuality(**(spec or {}))
+            for name, spec in (raw.get("endpoints") or {}).items()
+        }
+    except ValidationError as exc:
+        raise ValueError(f"Malformed quality sidecar at {path}: {exc}") from exc
+
+    _warn_if_stale(path, sidecar.generated_at)
+    return sidecar
+
+
+def _warn_if_stale(path: str, generated_at: str) -> None:
+    """Log one WARNING when a sidecar is older than `STALE_AFTER_DAYS`."""
+    if not generated_at:
+        return
+    try:
+        stamp = datetime.strptime(generated_at, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc
+        )
+    except ValueError:
+        logger.warning(
+            "quality sidecar %s has an unreadable generated_at %r",
+            path,
+            generated_at,
+        )
+        return
+
+    age = (datetime.now(timezone.utc) - stamp).days
+    if age > STALE_AFTER_DAYS:
+        logger.warning(
+            "quality sidecar %s is stale: measured %s days ago (%s). "
+            "Regenerate it; an old measurement still beats none.",
+            path,
+            age,
+            generated_at,
+        )
+
+
+def apply_sidecar(registry, sidecar: Sidecar, override: bool = True) -> int:
+    """Merge measured quality into a registry's endpoints, in place.
+
+    Precedence: THE SIDECAR WINS. It is measured; the YAML number is a
+    guess someone typed once and forgot. Every override logs one INFO
+    line naming both numbers and the sample count, so a surprising
+    ordering can be read out of the startup log.
+
+    `override=False` flips it: an explicit YAML `quality` wins and the
+    sidecar only fills endpoints that set none. That mode logs one INFO
+    per endpoint it declined to override.
+
+    Under either setting an endpoint the sidecar does not name is never
+    touched, so it keeps exactly the ordering it has today.
+
+    Per-area numbers land on `registry.area_quality` as
+    `{endpoint: {area: quality}}`, which pairing reads when a selector
+    sits inside an area's tier.
+
+    Parameters
+    ----------
+    registry : EndpointRegistry
+        Registry to merge into.
+    sidecar : Sidecar
+        The parsed sidecar.
+    override : bool, optional
+        Whether a measured number beats an explicit YAML one
+        (default True).
+
+    Returns
+    -------
+    int
+        How many endpoints changed.
+    """
+    changed = 0
+    area_quality: dict = {}
+
+    for name, measured in sidecar.endpoints.items():
+        if name not in registry.names():
+            continue
+        endpoint = registry.get(name)
+        current = endpoint.quality
+
+        area_quality[name] = {
+            area: int(spec["quality"])
+            for area, spec in (measured.by_area or {}).items()
+            if isinstance(spec, dict) and "quality" in spec
+        }
+
+        if current is not None and not override:
+            logger.info(
+                "quality: %s declined to override explicit %s with %s "
+                "(n=%s); quality_from_override is false",
+                name,
+                current,
+                measured.quality,
+                measured.n,
+            )
+            continue
+
+        if current == measured.quality:
+            continue
+
+        endpoint.quality = measured.quality
+        changed += 1
+        logger.info(
+            "quality: %s %s -> %s (n=%s, from the sidecar)",
+            name,
+            current,
+            measured.quality,
+            measured.n,
+        )
+
+    registry.area_quality = area_quality
+    return changed
 
 
 # ---------------------------------------------------------------------------
