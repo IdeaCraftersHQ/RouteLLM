@@ -19,6 +19,10 @@ from pydantic import BaseModel, Field
 
 from routellm.controller import Controller, RoutingError
 from routellm.endpoints import Endpoint, EndpointRegistry, Tier
+from routellm.middleware.intent_model_selector import (
+    IntentModelMapping,
+    IntentModelSelector,
+)
 from routellm.routers.routers import ROUTER_CLS
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -143,6 +147,124 @@ def build_registry(file_config: Optional[dict]) -> EndpointRegistry:
     return EndpointRegistry(endpoints, tiers)
 
 
+#: Detector backends the `intents:` section may ask for.
+INTENT_DETECTORS = ("jev", "litellm")
+
+#: Told to the operator when the typesafe extension is not importable.
+TYPESAFE_INSTALL_HINT = (
+    "intents.detector: jev needs the typesafe extension. Install it with "
+    "`pip install -e extensions/typesafe`, or set intents.detector to "
+    "litellm."
+)
+
+
+def build_intents(
+    file_config: Optional[dict],
+    registry: EndpointRegistry,
+) -> Optional[IntentModelSelector]:
+    """Build the intent middleware the server routes tiers with.
+
+    Reads the `intents:` key: a `detector` of `jev` or `litellm`, the
+    `model` that detector classifies with, a `confidence_floor` the
+    Jev detector honours, per-intent `descriptions`, and a `tiers` map
+    from intent label to tier name.
+
+    Both detectors need one `IntentModelMapping` per intent, carrying
+    its description: the litellm path writes them into its own
+    classification prompt, the Jev path turns them into the criteria of
+    its single Choice question. The pair on each mapping is never
+    consulted: every mapping and the default carry no pair at all, so
+    `get_model_pair` returns None and the request walks the tier tree
+    the intent chose rather than bypassing it with a flat pair.
+
+    `routellm_typesafe` is imported here rather than at module level,
+    so a server whose config names no Jev detector never needs the
+    extension installed.
+
+    Parameters
+    ----------
+    file_config : dict, optional
+        The loaded YAML config, or None when `--config` was not given.
+    registry : EndpointRegistry
+        Registry whose tiers the mapping is checked against.
+
+    Returns
+    -------
+    IntentModelSelector or None
+        The middleware to hand the controller, or None when the config
+        carries no `intents:` section.
+
+    Raises
+    ------
+    ValueError
+        If the detector is unknown, or an intent maps to a tier the
+        registry does not carry.
+    ImportError
+        If `detector: jev` is asked for and the typesafe extension is
+        not installed. The message names the install command.
+    """
+    spec = (file_config or {}).get("intents") or {}
+    if not spec:
+        return None
+
+    detector_name = spec.get("detector", "litellm")
+    if detector_name not in INTENT_DETECTORS:
+        raise ValueError(
+            f"Unknown intents.detector: {detector_name}. "
+            f"Configured detectors: {', '.join(INTENT_DETECTORS)}"
+        )
+
+    intent_tiers = dict(spec.get("tiers") or {})
+    for intent, tier in intent_tiers.items():
+        if not registry.has_tier(tier):
+            known = ", ".join(registry.tier_names()) or "<none>"
+            raise ValueError(
+                f"Intent {intent!r} maps to unknown tier {tier!r}. "
+                f"Configured tiers: {known}"
+            )
+
+    descriptions = dict(spec.get("descriptions") or {})
+    model = spec.get("model")
+
+    # No mapping carries a pair: this selector decides a tier and
+    # nothing else, and `default_model_pair=None` keeps `get_model_pair`
+    # from bypassing the very tree the tier was chosen to enter.
+    mappings = [
+        IntentModelMapping(
+            intent=intent,
+            model_pair=None,
+            description=descriptions.get(intent, ""),
+        )
+        for intent in intent_tiers
+    ]
+
+    if detector_name == "litellm":
+        return IntentModelSelector(
+            intent_mappings=mappings,
+            default_model_pair=None,
+            intent_detection_model=model or "gpt-3.5-turbo",
+            intent_tiers=intent_tiers,
+        )
+
+    try:
+        from routellm_typesafe.intent_detector import JevIntentDetector
+    except ImportError as exc:
+        raise ImportError(TYPESAFE_INSTALL_HINT) from exc
+
+    detector = JevIntentDetector(
+        intent_mappings=mappings,
+        model=model,
+        confidence_floor=spec.get("confidence_floor", 0.5),
+        descriptions=descriptions,
+    )
+    return IntentModelSelector(
+        intent_mappings=mappings,
+        default_model_pair=None,
+        intent_detector=detector,
+        intent_tiers=intent_tiers,
+    )
+
+
 @asynccontextmanager
 async def lifespan(app):
     global CONTROLLER
@@ -154,15 +276,18 @@ async def lifespan(app):
         if key:
             gateway = X402Adapter(private_key=key)
 
-    # `endpoints:` and `tiers:` belong to the registry; the rest of the
-    # file stays router config, so they are popped out before the
-    # handoff. A file holding nothing else leaves None, which keeps the
-    # router defaults.
+    # `endpoints:` and `tiers:` belong to the registry and `intents:`
+    # to the intent middleware; the rest of the file stays router
+    # config, so all three are popped out before the handoff. A file
+    # holding nothing else leaves None, which keeps the router
+    # defaults.
     file_config = yaml.safe_load(open(args.config, "r")) if args.config else None
     endpoints = build_registry(file_config)
+    intents = build_intents(file_config, endpoints)
     router_config = dict(file_config or {})
     router_config.pop("endpoints", None)
     router_config.pop("tiers", None)
+    router_config.pop("intents", None)
     router_config = router_config or None
 
     # Neither flag and no tier to route into leaves the legacy flat form
@@ -184,6 +309,7 @@ async def lifespan(app):
         payment_gateway=gateway,
         default_router=args.routers[0] if args.routers else None,
         default_threshold=args.default_threshold,
+        middleware=[intents] if intents else None,
     )
     yield
     CONTROLLER = None
