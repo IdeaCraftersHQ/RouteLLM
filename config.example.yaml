@@ -11,3 +11,6 @@ bert:
     checkpoint_path: routellm/bert_gpt4_augmented
 mf:
     checkpoint_path: routellm/mf_gpt4_augmented
+jev:
+    # model and timeout default to the SDK env (TYPESAFE_DEFAULT_MODEL, 10s)
+    max_prompt_chars: 100000
