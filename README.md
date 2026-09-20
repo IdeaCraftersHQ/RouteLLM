@@ -265,7 +265,7 @@ A tier is a named strong/weak pair whose sides may themselves be tiers, so a req
 ```yaml
 tiers:
   premium:
-    router: jev
+    router: mf
     threshold: 0.33
     strong: cloud_strong
     weak: colibri_glm
@@ -275,6 +275,8 @@ tiers:
     strong: premium
     weak: ollama_qwen
 ```
+
+A tier may name any registered router. `jev` is registered by the typesafe extension rather than the base package, so a tier routing over it needs `pip install -e ./extensions/typesafe`; without it the server reports the unknown router at startup.
 
 A tier naming no `router` or `threshold` inherits it, first hit winning: its own value, the parent level's resolved value, the request-level value from the model name, then `--routers[0]` and `--default-threshold`. The response records where each level's values came from, so a routing decision is explainable without re-running it:
 

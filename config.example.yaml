@@ -59,7 +59,7 @@ endpoints:
 # above, then from the request, then from the controller defaults.
 tiers:
   premium:
-    router: jev
+    router: mf
     threshold: 0.33
     strong: cloud_strong
     weak: colibri_glm
@@ -84,3 +84,15 @@ tiers:
 #   threshold: 0.12
 #   strong: {select: "tool_call:true reasoning:true", order: quality_desc}
 #   weak: {select: "tag:local", order: cost_asc}
+
+# Every router named above ships with the base package, so this file
+# serves on a stock install. `jev` is registered by the typesafe
+# extension instead: install it with `pip install -e
+# ./extensions/typesafe`, then a tier may route on it. Commented out so
+# the example needs no extra.
+#
+# premium:
+#   router: jev
+#   threshold: 0.33
+#   strong: cloud_strong
+#   weak: colibri_glm

@@ -376,7 +376,10 @@ class EndpointRegistry:
                     continue
                 if reference in self._tiers or reference in self._endpoints:
                     continue
-                known = ", ".join(sorted(self._tiers) + self.names()) or "<none>"
+                # A tier may not name itself: that is a one-node cycle
+                # the walk below rejects, so never suggest it.
+                others = sorted(set(self._tiers) - {tier.name})
+                known = ", ".join(others + self.names()) or "<none>"
                 raise ValueError(
                     f"Tier {tier.name!r} names unknown {side} {reference!r}. "
                     f"Known tiers and endpoints: {known}"
@@ -422,7 +425,13 @@ class EndpointRegistry:
 
     @property
     def tiers(self) -> dict[str, Tier]:
-        """Return a copy of the configured tiers, keyed by name."""
+        """Return a shallow copy of the configured tiers, keyed by name.
+
+        The mapping is fresh, so adding or removing a key leaves the
+        registry alone. The `Tier` objects in it are the registry's own:
+        pairing rewrites a resolved side through this mapping, and every
+        holder sees that change.
+        """
         return dict(self._tiers)
 
     def names(self) -> list[str]:

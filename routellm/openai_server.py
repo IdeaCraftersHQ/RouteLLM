@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from routellm.controller import Controller, RoutingError
 from routellm.endpoints import Endpoint, EndpointRegistry, Tier
+from routellm.hints import TYPESAFE_INSTALL_HINT
 from routellm.middleware.intent_model_selector import (
     IntentModelMapping,
     IntentModelSelector,
@@ -151,10 +152,11 @@ def build_registry(file_config: Optional[dict]) -> EndpointRegistry:
 INTENT_DETECTORS = ("jev", "litellm")
 
 #: Told to the operator when the typesafe extension is not importable.
-TYPESAFE_INSTALL_HINT = (
-    "intents.detector: jev needs the typesafe extension. Install it with "
-    "`pip install -e extensions/typesafe`, or set intents.detector to "
-    "litellm."
+#: The install line is shared with the controller, which raises on a
+#: tier routing over `jev`.
+TYPESAFE_DETECTOR_HINT = (
+    f"intents.detector: jev is unavailable. {TYPESAFE_INSTALL_HINT} "
+    "Or set intents.detector to litellm."
 )
 
 
@@ -255,7 +257,7 @@ def build_intents(
     try:
         from routellm_typesafe.intent_detector import JevIntentDetector
     except ImportError as exc:
-        raise ImportError(TYPESAFE_INSTALL_HINT) from exc
+        raise ImportError(TYPESAFE_DETECTOR_HINT) from exc
 
     detector = JevIntentDetector(
         intent_mappings=mappings,

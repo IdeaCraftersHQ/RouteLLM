@@ -340,3 +340,114 @@ def test_config_example_loads_into_the_registry():
     assert colibri.api_key_env == "COLI_API_KEY"
     assert colibri.tags == ["local", "tools"]
     assert colibri.quality == 85
+
+
+def test_config_example_builds_a_controller_on_a_stock_install(monkeypatch):
+    """Nothing in the example needs an optional extension to construct.
+
+    Every router the example's tiers name must be registered by the base
+    package, so a stock install can serve the shipped config rather than
+    failing in the lifespan.
+    """
+    import routellm.controller
+    from routellm.caching import CacheConfig
+    from routellm.controller import Controller
+
+    class _Stub:
+        def calculate_strong_win_rate(self, prompt):
+            return 0.5
+
+    monkeypatch.setitem(routellm.controller.ROUTER_CLS, "mf", lambda **kw: _Stub())
+
+    with open(REPO_ROOT / "config.example.yaml") as handle:
+        config = yaml.safe_load(handle)
+
+    registry = EndpointRegistry.from_config(config)
+
+    controller = Controller(
+        routers=["mf"],
+        strong_model=None,
+        weak_model=None,
+        config={},
+        endpoints=registry,
+        cache_config=CacheConfig(enabled=False),
+    )
+
+    assert set(controller.routers) == {"mf"}
+
+
+def test_unknown_jev_router_names_the_typesafe_extra():
+    """A tier on `jev` without the extension says how to install it."""
+    from routellm.caching import CacheConfig
+    from routellm.controller import Controller
+    from routellm.hints import TYPESAFE_INSTALL_HINT
+
+    registry = EndpointRegistry.from_config(
+        {
+            "endpoints": {
+                "a": {"model": "gpt-4o"},
+                "b": {"model": "ollama_chat/qwen3:8b"},
+            },
+            "tiers": {
+                "premium": {
+                    "router": "jev",
+                    "threshold": 0.33,
+                    "strong": "a",
+                    "weak": "b",
+                },
+                "default": {
+                    "router": "random",
+                    "threshold": 0.12,
+                    "strong": "premium",
+                    "weak": "b",
+                },
+            },
+        }
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        Controller(
+            routers=["random"],
+            strong_model=None,
+            weak_model=None,
+            config={},
+            endpoints=registry,
+            cache_config=CacheConfig(enabled=False),
+        )
+
+    message = str(excinfo.value)
+    assert "unknown router 'jev'" in message
+    assert TYPESAFE_INSTALL_HINT in message
+
+
+def test_unknown_other_router_carries_no_install_hint():
+    """The hint is specific to `jev`; other names get the plain error."""
+    from routellm.caching import CacheConfig
+    from routellm.controller import Controller
+
+    registry = EndpointRegistry.from_config(
+        {
+            "endpoints": {"a": {"model": "gpt-4o"}, "b": {"model": "m"}},
+            "tiers": {
+                "premium": {"router": "nope", "strong": "a", "weak": "b"},
+                "default": {
+                    "router": "random",
+                    "threshold": 0.12,
+                    "strong": "premium",
+                    "weak": "b",
+                },
+            },
+        }
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        Controller(
+            routers=["random"],
+            strong_model=None,
+            weak_model=None,
+            config={},
+            endpoints=registry,
+            cache_config=CacheConfig(enabled=False),
+        )
+
+    assert "pip install" not in str(excinfo.value)
