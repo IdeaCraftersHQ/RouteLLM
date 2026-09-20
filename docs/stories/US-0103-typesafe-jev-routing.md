@@ -75,6 +75,8 @@ Modules present:
 - `extensions/routellm_typesafe/tests/test_router.py::test_prompt_truncated`
 - `extensions/routellm_typesafe/tests/test_router.py::test_model_from_config`
 - `extensions/routellm_typesafe/tests/test_router.py::test_custom_criteria_in_request`
+- `extensions/routellm_typesafe/tests/test_router.py::test_default_criteria_not_shared_between_routers`
+- `extensions/routellm_typesafe/tests/test_router.py::test_debug_log_records_response_model_id`
 - `extensions/routellm_typesafe/tests/test_router.py::test_api_error_propagates`
 - `extensions/routellm_typesafe/tests/test_router.py::test_registered_through_entry_point`
 - `extensions/routellm_typesafe/tests/test_router.py::test_str_is_jev`
@@ -85,6 +87,19 @@ Modules present:
 - `extensions/routellm_typesafe/tests/test_intent_detector.py::test_selector_integration`
 - `extensions/routellm_typesafe/tests/test_intent_detector.py::test_close_delegates_to_client_close`
 - `extensions/routellm_typesafe/tests/test_intent_detector.py::test_get_intent_confidence_fills_missing_intent_with_zero`
+- `extensions/routellm_typesafe/tests/test_prompts.py::test_router_file_values_reach_request`
+- `extensions/routellm_typesafe/tests/test_prompts.py::test_router_kwarg_beats_file`
+- `extensions/routellm_typesafe/tests/test_prompts.py::test_router_without_file_uses_defaults`
+- `extensions/routellm_typesafe/tests/test_prompts.py::test_router_file_criteria_only_keeps_default_instructions`
+- `extensions/routellm_typesafe/tests/test_prompts.py::test_router_rejects_unknown_criteria_key`
+- `extensions/routellm_typesafe/tests/test_prompts.py::test_router_rejects_non_string_criteria_value`
+- `extensions/routellm_typesafe/tests/test_prompts.py::test_router_empty_prompt_file_path_raises`
+- `extensions/routellm_typesafe/tests/test_prompts.py::test_detector_file_values_reach_request`
+- `extensions/routellm_typesafe/tests/test_prompts.py::test_detector_instructions_kwarg_beats_file`
+- `extensions/routellm_typesafe/tests/test_prompts.py::test_detector_descriptions_general_beats_file`
+- `extensions/routellm_typesafe/tests/test_prompts.py::test_detector_without_file_uses_defaults`
+- `extensions/routellm_typesafe/tests/test_prompts.py::test_detector_empty_prompt_file_path_raises`
+- `extensions/routellm_typesafe/tests/test_prompts.py::test_example_prompt_file_matches_built_in_defaults`
 - `routellm/tests/test_intent_model_selector.py::TestIntentModelSelectorPluggableDetector::test_pluggable_detector_known_intent_routes_to_pair`
 - `routellm/tests/test_intent_model_selector.py::TestIntentModelSelectorPluggableDetector::test_pluggable_detector_unknown_intent_falls_back_to_default`
 
