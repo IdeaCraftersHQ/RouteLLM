@@ -41,6 +41,7 @@ class IntentModelSelector:
         intent_mappings: List[IntentModelMapping],
         default_model_pair: ModelPair,
         intent_detection_model: str = "gpt-3.5-turbo",
+        intent_detector: Optional[Any] = None,
     ):
         """Initialize the intent-based model selector.
 
@@ -52,10 +53,16 @@ class IntentModelSelector:
             Default model pair to use when no intent matches.
         intent_detection_model : str, optional
             Model to use for intent detection (default "gpt-3.5-turbo").
+        intent_detector : Optional[Any], optional
+            Pluggable intent detector to delegate detect_intent to (default
+            None, which uses the built-in litellm classification path). Any
+            object exposing `detect_intent(prompt) -> str` works, e.g.
+            DomainIntentDetector or JevIntentDetector.
         """
         self.intent_mappings = intent_mappings
         self.default_model_pair = default_model_pair
         self.intent_detection_model = intent_detection_model
+        self.intent_detector = intent_detector
         self.intent_cache = {}  # Cache detected intents
         
         # Create a lookup dictionary for faster access
@@ -80,19 +87,29 @@ class IntentModelSelector:
         # Check cache first
         if prompt in self.intent_cache:
             return self.intent_cache[prompt]
-        
+
         # Get available intents and their descriptions
         intents = [mapping.intent for mapping in self.intent_mappings]
+
+        # Delegate to a pluggable detector when configured, skipping the
+        # litellm classification path entirely.
+        if self.intent_detector is not None:
+            detected_intent = self.intent_detector.detect_intent(prompt)
+            if detected_intent not in intents and detected_intent != "general":
+                detected_intent = "general"
+            self.intent_cache[prompt] = detected_intent
+            return detected_intent
+
         intent_descriptions = {
             mapping.intent: mapping.description for mapping in self.intent_mappings
         }
-        
+
         # Create a formatted list of intents with descriptions for the prompt
         intent_options = "\n".join([
             f"- {intent}: {intent_descriptions[intent]}"
             for intent in intents
         ])
-        
+
         # Create the classification prompt with more detailed instructions
         classification_prompt = f"""
 You are an expert intent classifier for a language model router system. Your task is to analyze the following user message and determine which category it best fits into.
@@ -153,7 +170,8 @@ Respond with ONLY the category name in lowercase, nothing else. If none of the c
         """Analyze the confidence of intent classification for a prompt.
 
         Uses a more detailed LLM prompt to get confidence scores
-        for each possible intent category.
+        for each possible intent category. Always uses the litellm path;
+        a configured intent_detector is only consulted by detect_intent.
 
         Parameters
         ----------
@@ -298,6 +316,9 @@ Respond in JSON format like this:
     @classmethod
     def load_mappings(cls, filepath: str) -> 'IntentModelSelector':
         """Load intent mappings from a JSON file.
+
+        Does not round-trip a configured intent_detector; pass
+        intent_detector again to the returned instance if needed.
 
         Parameters
         ----------
