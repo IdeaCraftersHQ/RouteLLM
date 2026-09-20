@@ -7,9 +7,10 @@ embed. The client is therefore built on first use and cached here.
 
 The controller calls `configure_embeddings` with its endpoint registry
 before constructing routers, so an endpoint named `embedding` can point
-the embedding calls at a different provider than the completions. No
-registry, or no such endpoint, falls back to the `OPENAI_API_KEY` /
-`OPENAI_BASE_URL` environment variables.
+the embedding calls at a different provider than the completions. Its
+base URL and its credential are taken independently, each falling back
+to `OPENAI_BASE_URL` / `OPENAI_API_KEY` on its own, so an endpoint
+naming a host but no key still reaches that host.
 """
 
 import logging
@@ -61,10 +62,11 @@ def reset_embedding_client() -> None:
 def get_embedding_client() -> "openai.OpenAI":
     """Return the shared embedding client, building it on first use.
 
-    Sources, in order: an endpoint named `embedding` in the configured
+    Sources, per field: an endpoint named `embedding` in the configured
     registry, then the `OPENAI_BASE_URL` / `OPENAI_API_KEY` environment
-    variables. The result is cached until `configure_embeddings` or
-    `reset_embedding_client` is called.
+    variables. Base URL and key resolve separately, so an endpoint may
+    supply either one alone. The result is cached until
+    `configure_embeddings` or `reset_embedding_client` is called.
 
     Returns
     -------
@@ -99,18 +101,22 @@ def get_embedding_client() -> "openai.OpenAI":
 
 def _resolve_credentials() -> tuple[Optional[str], Optional[str]]:
     """Return the `(base_url, api_key)` pair for the embedding client."""
-    if _registry is not None and EMBEDDING_ENDPOINT in _registry.names():
-        endpoint = _registry.get(EMBEDDING_ENDPOINT)
-        # Defaults stay None so a configured endpoint without a key
-        # falls through to the environment below rather than silently
-        # inheriting the completion credentials.
-        base_url, api_key = endpoint.credentials(None, None)
-        if api_key is not None:
-            return base_url, api_key
+    env_base = os.environ.get("OPENAI_BASE_URL")
+    env_key = os.environ.get("OPENAI_API_KEY")
+
+    if _registry is None or EMBEDDING_ENDPOINT not in _registry.names():
+        return env_base, env_key
+
+    endpoint = _registry.get(EMBEDDING_ENDPOINT)
+    # Base URL and credential are resolved independently: an endpoint
+    # naming a host but no key must keep that host, or the environment's
+    # key would send the embeddings to OpenAI instead.
+    base_url, api_key = endpoint.credentials(env_base, env_key)
+    if api_key is None:
         logger.debug(
-            "endpoint %s carries no credential; falling back to the "
+            "endpoint %s carries no credential and none is in the "
             "environment",
             EMBEDDING_ENDPOINT,
         )
 
-    return os.environ.get("OPENAI_BASE_URL"), os.environ.get("OPENAI_API_KEY")
+    return base_url, api_key
