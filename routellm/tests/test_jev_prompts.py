@@ -1,6 +1,7 @@
-"""Tests for the YAML prompt file: loader, router wiring, detector wiring.
+"""Tests for Jev prompt-file wiring: JevRouter and JevIntentDetector.
 
-Every request goes through httpx2.MockTransport, never the network, and
+The generic loader itself is covered by test_prompt_file.py. Every
+request here goes through httpx2.MockTransport, never the network, and
 every fixture sets TYPESAFE_API_KEY because TypeSafeClient checks for a
 key before it sends anything.
 """
@@ -16,7 +17,6 @@ from routellm.middleware.jev_intent_detector import (
     GENERAL_DESCRIPTION,
     JevIntentDetector,
 )
-from routellm.routers.typesafe.prompts import load_prompt_file
 from routellm.routers.typesafe.router import (
     DEFAULT_CRITERIA,
     DEFAULT_INSTRUCTIONS,
@@ -87,129 +87,6 @@ def _write(tmp_path, text, name="prompts.yaml"):
     path = tmp_path / name
     path.write_text(text)
     return path
-
-
-# --- loader ---------------------------------------------------------------
-
-
-def test_full_file_round_trips(tmp_path):
-    router, detector = load_prompt_file(_write(tmp_path, FULL_FILE))
-
-    assert router.instructions == "file router question"
-    assert router.criteria == {"true": "file yes case", "false": "file no case"}
-    assert detector.instructions == "file detector instructions"
-    assert detector.general_description == "file general description"
-
-
-def test_partial_file_leaves_absent_keys_none(tmp_path):
-    text = textwrap.dedent(
-        """\
-        router:
-          instructions: only the question
-        """
-    )
-
-    router, detector = load_prompt_file(_write(tmp_path, text))
-
-    assert router.instructions == "only the question"
-    assert router.criteria is None
-    assert detector.instructions is None
-    assert detector.general_description is None
-
-
-def test_empty_file_yields_all_none(tmp_path):
-    router, detector = load_prompt_file(_write(tmp_path, ""))
-
-    assert router.instructions is None
-    assert router.criteria is None
-    assert detector.instructions is None
-    assert detector.general_description is None
-
-
-def test_missing_file_raises_file_not_found(tmp_path):
-    with pytest.raises(FileNotFoundError):
-        load_prompt_file(tmp_path / "absent.yaml")
-
-
-def test_non_mapping_document_raises(tmp_path):
-    path = _write(tmp_path, "- just\n- a list\n")
-
-    with pytest.raises(ValueError, match=str(path)):
-        load_prompt_file(path)
-
-
-def test_unknown_top_level_key_raises(tmp_path):
-    path = _write(tmp_path, "rooter:\n  instructions: typo\n")
-
-    with pytest.raises(ValueError) as excinfo:
-        load_prompt_file(path)
-
-    assert "rooter" in str(excinfo.value)
-    assert str(path) in str(excinfo.value)
-
-
-def test_unknown_section_key_raises(tmp_path):
-    path = _write(tmp_path, "router:\n  criterion: typo\n")
-
-    with pytest.raises(ValueError) as excinfo:
-        load_prompt_file(path)
-
-    assert "criterion" in str(excinfo.value)
-    assert str(path) in str(excinfo.value)
-
-
-def test_unknown_criteria_key_raises(tmp_path):
-    path = _write(tmp_path, 'router:\n  criteria:\n    "maybe": hmm\n')
-
-    with pytest.raises(ValueError) as excinfo:
-        load_prompt_file(path)
-
-    assert "maybe" in str(excinfo.value)
-
-
-def test_non_mapping_criteria_raises(tmp_path):
-    path = _write(tmp_path, "router:\n  criteria: not a mapping\n")
-
-    with pytest.raises(ValueError) as excinfo:
-        load_prompt_file(path)
-
-    assert "criteria" in str(excinfo.value)
-
-
-def test_non_string_criteria_value_raises(tmp_path):
-    path = _write(tmp_path, 'router:\n  criteria:\n    "true": 3\n')
-
-    with pytest.raises(ValueError) as excinfo:
-        load_prompt_file(path)
-
-    assert "true" in str(excinfo.value)
-
-
-def test_non_string_instructions_raises(tmp_path):
-    path = _write(tmp_path, "router:\n  instructions: 7\n")
-
-    with pytest.raises(ValueError) as excinfo:
-        load_prompt_file(path)
-
-    assert "instructions" in str(excinfo.value)
-
-
-def test_non_mapping_section_raises(tmp_path):
-    path = _write(tmp_path, "intent_detector: nope\n")
-
-    with pytest.raises(ValueError) as excinfo:
-        load_prompt_file(path)
-
-    assert "intent_detector" in str(excinfo.value)
-
-
-def test_non_string_general_description_raises(tmp_path):
-    path = _write(tmp_path, "intent_detector:\n  general_description: 5\n")
-
-    with pytest.raises(ValueError) as excinfo:
-        load_prompt_file(path)
-
-    assert "general_description" in str(excinfo.value)
 
 
 # --- router ---------------------------------------------------------------
@@ -283,6 +160,28 @@ def test_router_file_criteria_only_keeps_default_instructions(tmp_path, captured
     question = captured["body"]["questions"]["strong"]
     assert question["instructions"] == DEFAULT_INSTRUCTIONS
     assert question["criteria"]["true"] == "file yes case"
+
+
+def test_router_rejects_unknown_criteria_key(tmp_path):
+    text = 'router:\n  criteria:\n    "maybe": hmm\n'
+    path = _write(tmp_path, text)
+
+    with pytest.raises(ValueError) as excinfo:
+        JevRouter(prompt_file=path, transport=httpx2.MockTransport(lambda r: None))
+
+    assert "maybe" in str(excinfo.value)
+    assert str(path) in str(excinfo.value)
+
+
+def test_router_rejects_non_string_criteria_value(tmp_path):
+    text = 'router:\n  criteria:\n    "true": 3\n'
+    path = _write(tmp_path, text)
+
+    with pytest.raises(ValueError) as excinfo:
+        JevRouter(prompt_file=path, transport=httpx2.MockTransport(lambda r: None))
+
+    assert "true" in str(excinfo.value)
+    assert str(path) in str(excinfo.value)
 
 
 # --- detector -------------------------------------------------------------

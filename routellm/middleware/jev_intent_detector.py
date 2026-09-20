@@ -10,12 +10,8 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from routellm.middleware.intent_model_selector import IntentModelMapping
+from routellm.prompts import PromptFile, resolve
 from routellm.routers.typesafe import require_typesafe_sdk
-from routellm.routers.typesafe.prompts import (
-    DetectorPrompt,
-    _resolve,
-    load_prompt_file,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +30,10 @@ DEFAULT_INSTRUCTIONS = (
     "Classify the user prompt into exactly one intent. "
     "Pick 'general' when none of the other intents fit."
 )
+
+#: Section of the prompt file this detector reads, and its key types.
+PROMPT_SECTION = "intent_detector"
+PROMPT_SCHEMA = {"instructions": str, "general_description": str}
 
 
 class JevIntentDetector:
@@ -104,16 +104,16 @@ class JevIntentDetector:
         self.confidence_floor = confidence_floor
         self.descriptions = descriptions or {}
 
-        file_prompt = (
-            DetectorPrompt()
-            if prompt_file is None
-            else load_prompt_file(prompt_file)[1]
+        section = (
+            PromptFile.load(prompt_file).section(PROMPT_SECTION, PROMPT_SCHEMA)
+            if prompt_file
+            else {}
         )
-        self.instructions, instructions_source = _resolve(
-            instructions, file_prompt.instructions, DEFAULT_INSTRUCTIONS
+        self.instructions, instructions_source = resolve(
+            instructions, section.get("instructions"), DEFAULT_INSTRUCTIONS
         )
-        self._general_description, general_source = _resolve(
-            None, file_prompt.general_description, GENERAL_DESCRIPTION
+        self._general_description, general_source = resolve(
+            None, section.get("general_description"), GENERAL_DESCRIPTION
         )
         logger.debug(
             "jev detector prompt sources instructions=%s general_description=%s",
