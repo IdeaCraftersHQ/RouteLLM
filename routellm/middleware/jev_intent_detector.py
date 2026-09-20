@@ -136,6 +136,10 @@ class JevIntentDetector:
         )
         return response.choices[_QUESTION_NAME]
 
+    def close(self) -> None:
+        """Close the underlying TypeSafe SDK client and its transport."""
+        self._client.close()
+
     def detect_intent(self, prompt: str) -> str:
         """Detect the intent of a prompt.
 
@@ -177,14 +181,17 @@ class JevIntentDetector:
         Returns
         -------
         dict[str, float]
-            Probabilities keyed by intent label, restricted to the
-            configured intents plus "general". Unlike
-            DomainIntentDetector's normalized similarities, these come
-            straight from the model and are not re-normalized.
+            Probabilities for every configured intent plus "general",
+            in that order. Intents the model omitted from its answer
+            default to 0.0. Unlike DomainIntentDetector's normalized
+            similarities, these come straight from the model and are
+            not re-normalized.
         """
         probabilities = self._ask(prompt).probabilities
-        return {
-            intent: probability
+        result = dict.fromkeys(self.criteria, 0.0)
+        result.update(
+            (intent, probability)
             for intent, probability in probabilities.items()
             if intent in self.criteria
-        }
+        )
+        return result

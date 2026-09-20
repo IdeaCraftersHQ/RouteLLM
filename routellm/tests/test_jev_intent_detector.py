@@ -129,3 +129,35 @@ def test_selector_integration(monkeypatch):
     mock_completion.assert_not_called()
 
 
+def test_close_delegates_to_client_close():
+    captured = {}
+    body = _choice_response(
+        "coding", 0.91, {"coding": 0.91, "general": 0.09}
+    )
+    transport = _make_transport(body, captured)
+    detector = JevIntentDetector([CODING_MAPPING], transport=transport)
+    closed = {"called": False}
+    original_close = detector._client.close
+
+    def fake_close():
+        closed["called"] = True
+        original_close()
+
+    detector._client.close = fake_close
+
+    detector.close()
+
+    assert closed["called"] is True
+
+
+def test_get_intent_confidence_fills_missing_intent_with_zero():
+    captured = {}
+    # Canned answer omits the configured "coding" intent from probabilities.
+    body = _choice_response("general", 0.6, {"general": 0.6})
+    transport = _make_transport(body, captured)
+    detector = JevIntentDetector([CODING_MAPPING], transport=transport)
+
+    probabilities = detector.get_intent_confidence("what's the weather")
+
+    assert probabilities == {"coding": 0.0, "general": 0.6}
+
