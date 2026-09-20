@@ -35,7 +35,7 @@ jev:
     # model and timeout default to the SDK env (TYPESAFE_DEFAULT_MODEL, 10s)
     # calibrated 2026-09-20 against jev-1.13.0; pin model: jev-1.13.0 to keep thresholds stable
     max_prompt_chars: 100000
-    # prompt_file: prompts/jev.example.yaml  # copy + edit wording without code changes
+    # prompt_file: /etc/routellm/jev.yaml  # copy prompts/jev.example.yaml here, edit wording, no code changes
 ```
 
 ## Router
@@ -70,9 +70,15 @@ built-in default.
 ```python
 from routellm_typesafe import JevIntentDetector, JevRouter
 
-router = JevRouter(prompt_file="prompts/jev.example.yaml")
-detector = JevIntentDetector(mappings, prompt_file="prompts/jev.example.yaml")
+router = JevRouter(prompt_file="/etc/routellm/jev.yaml")
+detector = JevIntentDetector(mappings, prompt_file="/etc/routellm/jev.yaml")
 ```
+
+`prompt_file` is opened as given, resolved relative to the process's
+current working directory, not to this package. Copy
+`prompts/jev.example.yaml` (in this package) next to your config,
+edit it, and point `prompt_file` at that copy — with an absolute
+path, or a path relative to wherever you run the process from.
 
 See `prompts/jev.example.yaml` in this package for the format: a
 `router` section (`instructions`, `criteria.true`, `criteria.false`)

@@ -31,10 +31,11 @@ interface. Below a confidence floor, `JevIntentDetector` returns
 Calibration run against model `jev-1.13.0` over 200 arena prompts
 sets the documented threshold at 0.33 (50% strong-call rate).
 
-The TypeSafe SDK is an optional dependency: importing `routellm`
-must not require it. The `ImportError` naming the missing extra
-surfaces only when a `Controller` is actually constructed with
-`jev` selected, not at module import time.
+The TypeSafe SDK and the `jev` router live in the
+`extensions/routellm_typesafe` package, not core: importing
+`routellm` must not require either. Without that package installed,
+`jev` never appears in `ROUTER_CLS`, and selecting it raises a
+`KeyError` listing the routers that are actually registered.
 
 ## Acceptance criteria
 
@@ -47,8 +48,9 @@ surfaces only when a `Controller` is actually constructed with
       `DomainIntentDetector` both fit that slot
 - [x] Below the confidence floor, `JevIntentDetector` returns
       `"general"`
-- [x] SDK missing → `ImportError` naming the extra at `Controller`
-      construction, not at `import routellm`
+- [x] Without the extension installed, `jev` is not in `ROUTER_CLS`
+      and requesting it raises `KeyError` listing the available
+      routers
 - [x] Response model id is logged so thresholds can be pinned to a
       versioned model
 

@@ -251,15 +251,13 @@ The full list of routers:
 3. `bert`: Uses a BERT classifier trained on the preference data.
 4. `causal_llm`: Uses a LLM-based classifier tuned on the preference data.
 5. `random`: Randomly routes to either model.
-6. `jev`: Uses TypeSafe's Jev System One model (hosted API, no local weights); install with `pip install "routellm[typesafe]"` and set `TYPESAFE_API_KEY`.
+6. `jev`: Uses TypeSafe's Jev System One model (hosted API, no local weights), shipped as a separate extension; install with `pip install -e extensions/routellm_typesafe` and see [extensions/routellm_typesafe/README.md](extensions/routellm_typesafe/README.md).
 
 While these routers have been trained on the `gpt-4-1106-preview` and `mixtral-8x7b-instruct-v0.1` model pair, we have found that these routers generalize well to other strong and weak model pairs as well. Therefore, you can replace the model pair used for routing without having to retrain these models!
 
 We also provide detailed instructions on how to train the LLM-based classifier in the following [notebook](https://github.com/anyscale/llm-router/blob/main/README.ipynb).
 
 For the full details, refer to our [paper](https://arxiv.org/abs/2406.18665).
-
-The `jev` router's question and criteria can be edited without code changes by passing `prompt_file=...` (a YAML file, see `prompts/jev.example.yaml` for the format) to `JevRouter`, or a `prompt_file:` entry under `jev:` in your config. The file is adapter-agnostic: each adapter reads its own named section from it and ignores sections it doesn't recognize, so a future adapter can add its own section to the same file. Precedence is explicit kwarg > prompt file > built-in default.
 
 ## Intent-Based Routing
 
@@ -349,33 +347,9 @@ default_pair = ModelPair(strong="gpt-4-1106-preview", weak="anyscale/mistralai/M
 intent_selector = IntentModelSelector(intent_mappings, default_pair, intent_detector=detector)
 ```
 
-### TypeSafe Jev Intent Detection
-
-`JevIntentDetector` classifies a prompt with a single TypeSafe Choice question instead of embeddings, so it needs no examples:
-
-```python
-from routellm.middleware.intent_model_selector import IntentModelMapping, IntentModelSelector
-from routellm.middleware.jev_intent_detector import JevIntentDetector
-from routellm.types import ModelPair
-
-intent_mappings = [
-    IntentModelMapping(
-        intent="coding",
-        model_pair=ModelPair(strong="gpt-4-1106-preview", weak="anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1"),
-        description="Coding questions",
-    ),
-]
-
-detector = JevIntentDetector(intent_mappings)
-
-# Or load its instructions and general-intent description from a prompt file:
-detector = JevIntentDetector(intent_mappings, prompt_file="prompts/jev.example.yaml")
-
-default_pair = ModelPair(strong="gpt-4-1106-preview", weak="anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1")
-intent_selector = IntentModelSelector(intent_mappings, default_pair, intent_detector=detector)
-```
-
-Like the `jev` router, `JevIntentDetector` reads its own `intent_detector` section from the same `prompt_file` (see `prompts/jev.example.yaml`), with the same precedence: explicit kwarg > prompt file > built-in default.
+TypeSafe's Jev-backed detector, `JevIntentDetector`, fits this same
+`intent_detector` slot; see the `jev` entry in [Routers](#routers)
+and [extensions/routellm_typesafe/README.md](extensions/routellm_typesafe/README.md).
 
 ## Configuration
 
@@ -383,7 +357,7 @@ The configuration for routers is specified in either the `config` argument for `
 
 An example configuration is provided in the `config.example.yaml` file - it provides the configurations for routers that have trained on Arena data augmented using GPT-4 as a judge. The models and datasets used are all hosted on Hugging Face under the [RouteLLM](https://huggingface.co/routellm) and [LMSYS](https://huggingface.co/lmsys) organizations.
 
-The `jev` router and `JevIntentDetector` are backed by TypeSafe's hosted API instead of local checkpoints: set `TYPESAFE_API_KEY` (required), and optionally `TYPESAFE_BASE_URL` (default `https://api.typesafe.ai`) and `TYPESAFE_DEFAULT_MODEL` (default `jev-latest`, which currently resolves to `jev-1.13.0`) — pin `TYPESAFE_DEFAULT_MODEL=jev-1.13.0` once you've calibrated a threshold against a specific model version, since `jev-latest` moves on release.
+`routellm/prompts.py` is a core facility: any router or middleware can read a named section from a shared YAML prompt file so its model-facing wording is editable without code changes, without pulling in that adapter's own dependencies. The TypeSafe extension documents its own environment variables in [extensions/routellm_typesafe/README.md](extensions/routellm_typesafe/README.md).
 
 ## Contribution
 
