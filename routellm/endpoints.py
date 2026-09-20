@@ -86,7 +86,10 @@ class Selector(BaseModel):
         models.dev catalog term.
     order : str
         Which matching endpoint wins, one of `SelectorOrder`.
-        Default `quality_desc`.
+        Default `quality_desc`. Endpoints missing the value an order
+        reads always sort last, whichever direction it runs. Both
+        quality orders break ties on release date newest-first, so
+        `quality_asc` reverses only the quality scores, not the dates.
     """
 
     select: str

@@ -216,11 +216,18 @@ def _fetch_catalog() -> list[ModelRecord]:
     def _work() -> list[Any]:
         return asyncio.run(aim.Registry().models())
 
+    # Deliberately not a `with` block: leaving the context manager calls
+    # shutdown(wait=True), which blocks until the worker finishes, so a
+    # hung fetch would hold startup far past the timeout. Shut the pool
+    # down without waiting instead and let the stuck thread die on its
+    # own; the daemon-free worker holds nothing the caller needs.
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            models = pool.submit(_work).result(timeout=CATALOG_FETCH_TIMEOUT)
+        models = pool.submit(_work).result(timeout=CATALOG_FETCH_TIMEOUT)
     except Exception as exc:
+        pool.shutdown(wait=False, cancel_futures=True)
         raise CatalogUnavailable(f"models.dev fetch failed: {exc}") from exc
+    pool.shutdown(wait=False)
 
     return [
         ModelRecord(
@@ -459,6 +466,14 @@ def _catalog_filter(query: str, select: str):
         ) from exc
 
 
+def _unsupported_term(name: str) -> ValueError:
+    """Return the error for a catalog term pairing cannot judge."""
+    return ValueError(
+        f"Selector term {name!r} is not supported by routellm pairing; "
+        "supported catalog terms are tool_call, reasoning, and provider."
+    )
+
+
 def _record_matches(record: Optional[ModelRecord], filter_) -> bool:
     """Return whether a catalog record satisfies an aim filter.
 
@@ -478,25 +493,20 @@ def _record_matches(record: Optional[ModelRecord], filter_) -> bool:
     if filter_.provider and record.provider != filter_.provider:
         return False
 
-    # Facts this flattened record does not carry (modalities, family,
-    # open_weights, structured_output, temperature) cannot be judged
+    # Facts this flattened record does not carry cannot be judged
     # locally; matching them would silently pass. Reject instead.
-    for name in (
-        "input",
-        "output",
-        "family",
-        "open_weights",
-        "structured_output",
-        "temperature",
-        "query",
-    ):
-        value = getattr(filter_, name, None)
-        if value:
-            raise ValueError(
-                f"Selector term {name!r} is not supported by routellm "
-                "pairing; supported catalog terms are tool_call, "
-                "reasoning, and provider."
-            )
+    #
+    # The tri-states are checked with `is not None`, not for
+    # truthiness: `open_weights:false` parses to False, which is a real
+    # constraint pairing still cannot honour. The string and list
+    # fields carry no such distinction, so empty means unset there.
+    for name in ("open_weights", "structured_output", "temperature"):
+        if getattr(filter_, name, None) is not None:
+            raise _unsupported_term(name)
+
+    for name in ("input", "output", "family", "query"):
+        if getattr(filter_, name, None):
+            raise _unsupported_term(name)
 
     return True
 
@@ -523,19 +533,32 @@ def _sort_key(candidate: Candidate, order: str):
 
     if order in ("quality_asc", "quality_desc"):
         quality = candidate.endpoint.quality
-        release = (record.release_date if record else None) or ""
+        release = _release_key(record)
         if quality is None:
             # Unrated endpoints sort after every rated one, and among
             # themselves by release date, newest first.
-            return (1, 0.0, _reverse_text(release), candidate.name)
+            return (1, 0.0, release, candidate.name)
         signed = quality if order == "quality_asc" else -quality
-        return (0, float(signed), _reverse_text(release), candidate.name)
+        return (0, float(signed), release, candidate.name)
 
     # context_desc
     context = record.context if record else None
     if context is None:
         return (1, 0.0, candidate.name)
     return (0, -float(context), candidate.name)
+
+
+def _release_key(record: Optional[ModelRecord]) -> tuple:
+    """Return the release-date tiebreak key, newest first, undated last.
+
+    An absent date gets its own trailing group rather than an empty
+    descending key, which would otherwise sort ahead of every real
+    date because `()` precedes any non-empty tuple.
+    """
+    release = (record.release_date if record else None) or ""
+    if not release:
+        return (1, ())
+    return (0, _reverse_text(release))
 
 
 def _reverse_text(text: str) -> tuple:
@@ -579,19 +602,18 @@ def rank_candidates(
     # catalog facts only makes it useful, so a failed fetch there
     # degrades to name-ordered rather than aborting startup.
     by_key: dict[tuple[str, str], ModelRecord] = {}
-    if filter_ is not None:
+    try:
         by_key = _index_catalog(load_catalog())
-    else:
-        try:
-            by_key = _index_catalog(load_catalog())
-        except CatalogUnavailable as exc:
-            logger.warning(
-                "no models.dev catalog for order %s; ordering %r on local "
-                "facts only (%s)",
-                selector.order,
-                selector.select,
-                exc,
-            )
+    except CatalogUnavailable as exc:
+        if filter_ is not None:
+            raise
+        logger.warning(
+            "no models.dev catalog for order %s; ordering %r on local "
+            "facts only (%s)",
+            selector.order,
+            selector.select,
+            exc,
+        )
 
     candidates: list[Candidate] = []
     for name in registry.names():
