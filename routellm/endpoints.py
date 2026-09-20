@@ -285,6 +285,9 @@ class EndpointRegistry:
                     f"Known tiers and endpoints: {known}"
                 )
 
+        # Every tier is walked as its own root, so a tier reachable only
+        # from another still has its own nesting checked. Repeated work
+        # on shared subtrees is bounded by the depth cap.
         for name in sorted(self._tiers):
             self._walk(name, [])
 

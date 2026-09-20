@@ -64,10 +64,13 @@ class Router(abc.ABC):
         well as the pick, such as the tier walk that records a decision
         path. `calculate_strong_win_rate` is called exactly once.
 
-        A subclass that overrides `route` but not this method is taken
-        as deciding by its own means: its `route` is called and the
-        score is reported as None, rather than scoring the prompt a
-        second time just to fill the field in.
+        A subclass that overrides `route` is taken as deciding by its
+        own means: its `route` is called and the score is reported as
+        None, rather than scoring the prompt a second time just to fill
+        the field in. That holds even for an override that merely
+        delegates to `super().route(...)`, since the base returns only
+        the model name; such a subclass should override this method too
+        if it wants its score reported.
 
         Parameters
         ----------
@@ -85,9 +88,35 @@ class Router(abc.ABC):
             The chosen model name, and the win rate behind it. None
             means this router reports no score.
         """
-        if type(self).route is not Router.route:
-            return self.route(prompt, threshold, routed_pair), None
+        # The override is resolved and called directly, never through
+        # `self.route`: a subclass whose `route` delegates to
+        # `super().route` would otherwise bounce back here forever.
+        override = type(self).route
+        if override is Router.route:
+            return self._score_and_pick(prompt, threshold, routed_pair)
 
+        return override(self, prompt, threshold, routed_pair), None
+
+    def _score_and_pick(self, prompt, threshold, routed_pair):
+        """Score the prompt once and pick a side of the pair.
+
+        The shared body behind both `route` and `route_with_score`, so
+        neither dispatches through the other.
+
+        Parameters
+        ----------
+        prompt : str
+            Input prompt to route.
+        threshold : float
+            Decision threshold in [0, 1].
+        routed_pair : ModelPair
+            Pair of strong and weak model names.
+
+        Returns
+        -------
+        tuple[str, float]
+            The chosen model name and the win rate behind it.
+        """
         win_rate = self.calculate_strong_win_rate(prompt)
         model = routed_pair.strong if win_rate >= threshold else routed_pair.weak
 
@@ -96,9 +125,11 @@ class Router(abc.ABC):
     def route(self, prompt, threshold, routed_pair):
         """Route prompt to strong or weak model based on threshold.
 
-        Delegates to `route_with_score`, so the pick and the score can
-        never disagree. A subclass overriding this method replaces the
-        decision for both entry points.
+        Shares its body with `route_with_score` rather than dispatching
+        through it, so the pick and the score can never disagree and a
+        subclass may safely delegate here with `super().route(...)`. A
+        subclass overriding this method replaces the decision for both
+        entry points.
 
         Parameters
         ----------
@@ -116,7 +147,7 @@ class Router(abc.ABC):
             Name of model to route to (either routed_pair.strong or
             routed_pair.weak).
         """
-        return self.route_with_score(prompt, threshold, routed_pair)[0]
+        return self._score_and_pick(prompt, threshold, routed_pair)[0]
 
     def __str__(self):
         """Return the name this router class is registered under."""

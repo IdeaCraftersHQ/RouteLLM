@@ -922,3 +922,144 @@ def test_routing_leaves_the_router_instance_untouched(
 
     instance = controller.routers["hi"]
     assert "calculate_strong_win_rate" not in vars(instance)
+
+
+# ---------------------------------------------------------------------------
+# Fallback stays inside the pair the request was actually routed against
+# ---------------------------------------------------------------------------
+
+
+def _failing_completion(monkeypatch, failing):
+    """Patch completion so `failing` raises once; record every model."""
+    res = MagicMock()
+    res._hidden_params = {}
+    res.model_dump.return_value = {"choices": []}
+    seen = []
+
+    def _completion(**kwargs):
+        seen.append(kwargs["model"])
+        if kwargs["model"] == failing:
+            raise RuntimeError(f"{failing} down")
+        return res
+
+    monkeypatch.setattr(routellm.controller, "completion", _completion)
+    return seen, res
+
+
+def test_middleware_pair_falls_back_to_its_own_other_side(
+    registry, tmp_path, hi_router, monkeypatch
+):
+    """A bypassed pair must fall back within itself, not be left alone."""
+
+    class _Middleware:
+        def get_model_pair(self, prompt):
+            return ModelPair(strong="cloud_strong", weak="local_fast")
+
+    controller = _controller(
+        registry,
+        tmp_path,
+        middleware=[_Middleware()],
+        resilience_config=ResilienceConfig(max_retries=0),
+    )
+    seen, _ = _failing_completion(monkeypatch, "gpt-4o")
+
+    controller.completion(
+        model="default", messages=[{"role": "user", "content": "hard"}]
+    )
+
+    # Strong side picked and failed, so the pair's weak side must serve.
+    assert seen == ["gpt-4o", "ollama_chat/qwen3:8b"]
+
+
+def test_traffic_rule_pair_falls_back_within_that_pair(
+    tmp_path, hi_router, monkeypatch
+):
+    """A flat controller must not fall back into the default pair."""
+    flat = EndpointRegistry.from_config(
+        {
+            "endpoints": {
+                "big": {"model": "m_big"},
+                "small": {"model": "m_small"},
+                "rule_strong": {"model": "m_rule_strong"},
+                "rule_weak": {"model": "m_rule_weak"},
+            }
+        }
+    )
+    controller = _controller(
+        flat,
+        tmp_path,
+        strong_model="big",
+        weak_model="small",
+        default_router=None,
+        resilience_config=ResilienceConfig(max_retries=0),
+        traffic_manager=TrafficManager(
+            rules=[
+                TrafficRule(
+                    pattern="special",
+                    strong_model="rule_strong",
+                    weak_model="rule_weak",
+                )
+            ]
+        ),
+    )
+    seen, _ = _failing_completion(monkeypatch, "m_rule_strong")
+
+    controller.completion(
+        model="router-hi-0.5", messages=[{"role": "user", "content": "this is special"}]
+    )
+
+    # The rule's own weak side, never the controller's default pair.
+    assert seen == ["m_rule_strong", "m_rule_weak"]
+    assert "m_small" not in seen
+
+
+def test_successful_canary_is_not_labelled_a_fallback(
+    registry, tmp_path, hi_router, mock_completion
+):
+    """A canary that serves is not a fallback and must not be labelled one."""
+    controller = _controller(
+        registry,
+        tmp_path,
+        quality_manager=QualityManager(
+            canary_config=CanaryConfig(
+                enabled=True, canary_model="local_fast", weight=1.0
+            )
+        ),
+    )
+
+    res = controller.completion(
+        model="default", messages=[{"role": "user", "content": "hard"}]
+    )
+
+    path = res._hidden_params["routellm_path"]
+    assert all("fallback_from" not in entry for entry in path)
+
+
+def test_real_fallback_is_still_labelled(registry, tmp_path, lo_router, monkeypatch):
+    """The sibling actually serving still records `fallback_from`."""
+    config = {
+        "endpoints": CONFIG["endpoints"],
+        "tiers": {
+            "premium": {**CONFIG["tiers"]["premium"], "router": "lo"},
+            "default": {
+                "router": "lo",
+                "threshold": 0.9,
+                "strong": "premium",
+                "weak": "local_fast",
+            },
+        },
+    }
+    controller = _controller(
+        EndpointRegistry.from_config(config),
+        tmp_path,
+        routers=["lo"],
+        default_router="lo",
+        resilience_config=ResilienceConfig(max_retries=0),
+    )
+    _, res = _failing_completion(monkeypatch, "ollama_chat/qwen3:8b")
+
+    out = controller.completion(
+        model="default", messages=[{"role": "user", "content": "easy"}]
+    )
+
+    assert out._hidden_params["routellm_path"][-1]["fallback_from"] == "premium"

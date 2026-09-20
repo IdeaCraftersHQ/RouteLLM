@@ -258,7 +258,9 @@ def resolve_tier(
 
 
 def sibling_of(
-    path: list[dict[str, Any]], registry: EndpointRegistry
+    path: list[dict[str, Any]],
+    registry: EndpointRegistry,
+    pair: Optional[ModelPair] = None,
 ) -> Optional[tuple[str, str]]:
     """Return the fallback endpoint on the other side of the final pick.
 
@@ -266,25 +268,37 @@ def sibling_of(
     tier-valued sibling is descended by its `weak` side WITHOUT running
     any router, so the failure path stays deterministic.
 
+    The final level may be a flat one, either because a traffic rule or
+    middleware bypassed the tree or because the controller has no tiers.
+    Its two sides are not on the path, so they arrive as `pair`, and the
+    fallback stays inside the pair the request was actually routed
+    against rather than the controller's default one.
+
     Parameters
     ----------
     path : list[dict]
         The decision path, as `resolve_tier` returns it.
     registry : EndpointRegistry
         Registry holding the tiers and endpoints.
+    pair : ModelPair, optional
+        The two sides of the final level when it is a flat one.
 
     Returns
     -------
     tuple[str, str] or None
         The `(endpoint, reference)` pair, where `reference` is the name
         written on the tier, a tier name when the sibling was descended.
-        None when the path carries no tier level.
+        None when there is no other side to fall back to.
     """
-    last = next(
-        (entry for entry in reversed(path) if entry.get("tier") is not None), None
-    )
+    last = path[-1] if path else None
     if last is None:
         return None
+
+    if last.get("tier") is None:
+        if pair is None:
+            return None
+        sibling = pair.weak if last["picked"] == pair.strong else pair.strong
+        return sibling, sibling
 
     tier = registry.get_tier(last["tier"])
     reference = tier.weak if last["picked"] == tier.strong else tier.strong

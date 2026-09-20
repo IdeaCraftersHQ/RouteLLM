@@ -272,3 +272,25 @@ def test_scoring_a_prompt_leaves_the_router_untouched():
     # entry means the call instrumented the object in place.
     assert "calculate_strong_win_rate" not in vars(router)
     assert "route" not in vars(router)
+
+
+def test_route_calling_super_does_not_recurse():
+    """A subclass delegating to `super().route` must not recurse.
+
+    The pick comes back correctly, scored once. The reported win rate
+    is None: overriding `route` at all means the subclass owns the
+    decision, and the base `route` hands back only the model name, so
+    there is no score to carry out. A subclass wanting its score
+    reported overrides `route_with_score` instead.
+    """
+
+    class SuperDelegating(_ScoringRouter):
+        def route(self, prompt, threshold, routed_pair):
+            return super().route(prompt, threshold, routed_pair)
+
+    router = SuperDelegating(0.9)
+    pair = ModelPair(strong="s", weak="w")
+
+    assert router.route("prompt", 0.5, pair) == "s"
+    assert router.route_with_score("prompt", 0.5, pair) == ("s", None)
+    assert router.calls == 2
