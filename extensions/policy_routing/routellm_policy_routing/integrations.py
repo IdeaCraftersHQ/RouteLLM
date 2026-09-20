@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from policy_routing.policy import (
+from routellm_policy_routing.policy import (
     DEFAULT_POLICY,
     CachePolicy,
     classify_to_policy,

@@ -12,7 +12,7 @@ Public API:
     DEFAULT_NAMESPACE_KEY  — sentinel meaning "use workspace_id default"
 """
 
-from policy_routing.policy import (
+from routellm_policy_routing.policy import (
     DEFAULT_NAMESPACE_KEY,
     CacheAction,
     CachePolicy,

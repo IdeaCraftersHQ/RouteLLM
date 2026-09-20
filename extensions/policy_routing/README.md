@@ -18,11 +18,13 @@ Paper-stable. Wire-up to routellm core's cache hook ships when
 pip install -e extensions/policy_routing
 ```
 
+Directory `extensions/policy_routing`, import package `routellm_policy_routing`, distribution name `routellm-policy-routing`.
+
 ## Use
 
 ```python
-from policy_routing import classify_to_policy, CacheAction
-from policy_routing.integrations import build_cache_hook
+from routellm_policy_routing import classify_to_policy, CacheAction
+from routellm_policy_routing.integrations import build_cache_hook
 
 # Direct mapping:
 policy = classify_to_policy(request, classification_result)

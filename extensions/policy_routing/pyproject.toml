@@ -32,5 +32,5 @@ dev = ["pytest", "pytest-asyncio"]
 "Showcase scenario" = "https://github.com/jadb-admin/.ops/tree/main/.tlc/tracks/tools-showcase-scenarios"
 
 [tool.setuptools.packages.find]
-include = ["policy_routing*"]
+include = ["routellm_policy_routing*"]
 exclude = ["tests*"]
