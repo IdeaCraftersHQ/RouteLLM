@@ -6,6 +6,8 @@ quality management, and payment gateway integration.
 """
 
 import logging
+import time
+import uuid
 from collections import defaultdict
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -809,6 +811,7 @@ class Controller:
         # A vision request's content is a list; routers want a string.
         prompt = requirements_module._prompt_text(kwargs["messages"])
         reqs = requirements_module.derive(kwargs["messages"], kwargs, request_name)
+        session_id = kwargs.get("user") or str(uuid.uuid4())
 
         # 1. Route: traffic rules and middleware bypass the tree, a tier
         #    walks it, and a bare pair routes flat. Each side is checked
@@ -833,7 +836,17 @@ class Controller:
             from litellm.utils import ModelResponse
             res = ModelResponse(**cached_res)
             # Record trace for cached response too
-            self.quality_manager.record_trace(prompt, model_to_use, res.model_dump(), {"cached": True, "is_canary": is_canary})
+            self.quality_manager.record_trace(
+                prompt,
+                model_to_use,
+                res.model_dump(),
+                {"cached": True, "is_canary": is_canary},
+                path=path,
+                request_model=request_name,
+                endpoint=model_to_use,
+                session_id=session_id,
+                latency_ms=0,
+            )
             return self._attach_path(
                 res, path, model_to_use, sibling, sibling_reference
             )
@@ -856,10 +869,12 @@ class Controller:
 
             try:
                 # Wrap with resilience
+                started = time.monotonic()
                 res = self.resilience.wrap_completion(
                     model_name,
                     _call
                 )
+                latency_ms = int((time.monotonic() - started) * 1000)
 
                 # Cache the response
                 try:
@@ -869,7 +884,17 @@ class Controller:
                     logging.getLogger(__name__).error(f"Failed to cache response: {str(e)}")
                 
                 # Record trace
-                self.quality_manager.record_trace(prompt, model_name, res.model_dump(), {"is_canary": is_canary and model_name == model_to_use})
+                self.quality_manager.record_trace(
+                    prompt,
+                    model_name,
+                    res.model_dump(),
+                    {"is_canary": is_canary and model_name == model_to_use},
+                    path=path,
+                    request_model=request_name,
+                    endpoint=model_name,
+                    session_id=session_id,
+                    latency_ms=latency_ms,
+                )
 
                 return self._attach_path(
                     res, path, model_name, sibling, sibling_reference
@@ -903,6 +928,7 @@ class Controller:
         # A vision request's content is a list; routers want a string.
         prompt = requirements_module._prompt_text(kwargs["messages"])
         reqs = requirements_module.derive(kwargs["messages"], kwargs, request_name)
+        session_id = kwargs.get("user") or str(uuid.uuid4())
 
         # 1. Route: traffic rules and middleware bypass the tree, a tier
         #    walks it, and a bare pair routes flat. Each side is checked
@@ -927,7 +953,17 @@ class Controller:
             from litellm.utils import ModelResponse
             res = ModelResponse(**cached_res)
             # Record trace for cached response too
-            self.quality_manager.record_trace(prompt, model_to_use, res.model_dump(), {"cached": True, "is_canary": is_canary})
+            self.quality_manager.record_trace(
+                prompt,
+                model_to_use,
+                res.model_dump(),
+                {"cached": True, "is_canary": is_canary},
+                path=path,
+                request_model=request_name,
+                endpoint=model_to_use,
+                session_id=session_id,
+                latency_ms=0,
+            )
             return self._attach_path(
                 res, path, model_to_use, sibling, sibling_reference
             )
@@ -950,10 +986,12 @@ class Controller:
                 )
 
             try:
+                started = time.monotonic()
                 res = await self.resilience.wrap_acompletion(
                     model_name,
                     lambda: self._request_with_payment(_call)
                 )
+                latency_ms = int((time.monotonic() - started) * 1000)
                 
                 # 4. Validate canary if needed
                 if is_canary and model_name == model_to_use:
@@ -974,7 +1012,17 @@ class Controller:
                     logging.getLogger(__name__).error(f"Failed to cache response: {str(e)}")
                 
                 # Record trace
-                self.quality_manager.record_trace(prompt, model_name, res.model_dump(), {"is_canary": is_canary and model_name == model_to_use})
+                self.quality_manager.record_trace(
+                    prompt,
+                    model_name,
+                    res.model_dump(),
+                    {"is_canary": is_canary and model_name == model_to_use},
+                    path=path,
+                    request_model=request_name,
+                    endpoint=model_name,
+                    session_id=session_id,
+                    latency_ms=latency_ms,
+                )
 
                 return self._attach_path(
                     res, path, model_name, sibling, sibling_reference

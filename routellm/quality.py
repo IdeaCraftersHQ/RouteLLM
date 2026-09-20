@@ -6,14 +6,19 @@ and improve router performance.
 
 import random
 import logging
+import secrets
 import time
 import json
 import os
+import uuid
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from routellm.types import ModelPair
 
 logger = logging.getLogger(__name__)
+
+# How long a trace-directory listing is trusted before it is re-stat'd.
+_LISTING_TTL_SECONDS = 60.0
 
 
 class CanaryConfig(BaseModel):
@@ -36,21 +41,29 @@ class CanaryConfig(BaseModel):
     contract_path: Optional[str] = None # Path to Eva contract YAML
 
 class FineTuneConfig(BaseModel):
-    """Configuration for fine-tuning data collection.
+    """Configuration for trace recording.
 
     Attributes
     ----------
     enabled : bool, optional
-        Enable trace recording for fine-tuning (default False).
+        Enable trace recording (default False).
     trace_dir : str, optional
         Directory to save traces (default ".routellm_traces").
+    max_files : int, optional
+        Keep at most this many trace files; 0 is unbounded
+        (default 10000).
     min_confidence : float, optional
         Minimum router confidence to record trace (default 0.5).
+    max_bytes : int, optional
+        Keep at most this many bytes of traces; 0 is unbounded
+        (default 512 MiB).
     """
 
     enabled: bool = False
     trace_dir: str = ".routellm_traces"
     min_confidence: float = 0.5
+    max_files: int = 10000
+    max_bytes: int = 512 * 1024 * 1024
 
 class QualityManager:
     """Handles canary testing and data collection for fine-tuning."""
@@ -62,7 +75,10 @@ class QualityManager:
     ):
         self.canary_config = canary_config or CanaryConfig(canary_model="")
         self.fine_tune_config = fine_tune_config or FineTuneConfig()
-        
+        self._listing: Optional[List[tuple]] = None
+        self._listing_at: float = 0.0
+        self._capped: set = set()
+
         if self.fine_tune_config.enabled:
             os.makedirs(self.fine_tune_config.trace_dir, exist_ok=True)
 
@@ -103,39 +119,202 @@ class QualityManager:
             logger.error(f"Canary validation failed: {str(e)}")
             return False
 
-    def record_trace(self, prompt: str, routed_model: str, response: Dict[str, Any], metadata: Dict[str, Any] = None):
-        """Record a trace for future fine-tuning.
+    def record_trace(
+        self,
+        prompt: str,
+        routed_model: str,
+        response: Dict[str, Any],
+        metadata: Dict[str, Any] = None,
+        *,
+        path: Optional[List[Dict[str, Any]]] = None,
+        request_model: Optional[str] = None,
+        endpoint: Optional[str] = None,
+        session_id: Optional[str] = None,
+        latency_ms: Optional[int] = None,
+        provider: Optional[str] = None,
+        area: Optional[str] = None,
+    ) -> None:
+        """Record one routed request as a fit-ingestible trace.
+
+        The body is fit's `trace-format-v1` (`id`, `session_id`,
+        `timestamp`, `input`, `advice`, `frontier`, `reward`,
+        `metadata`) plus a `routellm` block naming the decision that
+        produced it. `output` and `routed_model` stay at the top level
+        verbatim: fit ignores keys it does not know, and callers that
+        predate the block still read them.
+
+        Every new argument is keyword-only and defaults to None, so the
+        three-positional form keeps working.
+
+        Recording is best effort. Any failure is logged at WARNING and
+        swallowed: a trace must never fail the request it describes.
 
         Parameters
         ----------
         prompt : str
             User input prompt.
         routed_model : str
-            Model the prompt was routed to.
+            Model or endpoint the prompt was routed to.
         response : dict
-            Model response with completion data.
+            The model response, as `model_dump()` gives it.
         metadata : dict, optional
-            Additional metadata to include in trace (default None).
+            Caller-supplied metadata, carried through untouched.
+        path : list[dict], optional
+            The decision path `_route` produced.
+        request_model : str, optional
+            The model string the client asked for.
+        endpoint : str, optional
+            Name of the endpoint that answered; `routed_model` when
+            unset.
+        session_id : str, optional
+            The request session; a fresh uuid4 when unset.
+        latency_ms : int, optional
+            Wall time of the provider call.
+        provider : str, optional
+            litellm provider name.
+        area : str, optional
+            The area the deepest tier belongs to.
         """
         if not self.fine_tune_config.enabled:
             return
 
-        trace = {
-            "id": f"trace-{int(time.time()*1000)}",
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "input": {"prompt": prompt},
-            "output": response,
-            "routed_model": routed_model,
-            "metadata": metadata or {}
-        }
-        
-        trace_file = os.path.join(
-            self.fine_tune_config.trace_dir, 
-            f"{trace['id']}.json"
-        )
-        with open(trace_file, "w") as f:
-            json.dump(trace, f)
-            
+        try:
+            self._enforce_cap()
+
+            deepest = path[-1] if path else {}
+            trace_id = f"trace-{int(time.time() * 1000)}-{secrets.token_hex(3)}"
+            trace = {
+                "id": trace_id,
+                "session_id": session_id or str(uuid.uuid4()),
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "input": {"prompt": prompt, "context": {}},
+                "advice": {
+                    "domain": "routellm",
+                    "steering_text": "",
+                    "confidence": 0.0,
+                    "version": "1.0",
+                    "constraints": [],
+                    "metadata": {},
+                },
+                "frontier": {
+                    "model": routed_model,
+                    "provider": provider or "",
+                    "output": _extract_output(response),
+                    "usage": _extract_usage(response),
+                },
+                "reward": {"score": None, "breakdown": {}},
+                "routellm": {
+                    "endpoint": endpoint or routed_model,
+                    "request_model": request_model,
+                    "tier": deepest.get("tier"),
+                    "area": area,
+                    "path": list(path or []),
+                    "cached": bool((metadata or {}).get("cached", False)),
+                    "is_canary": bool((metadata or {}).get("is_canary", False)),
+                    "latency_ms": latency_ms,
+                    "router": deepest.get("router"),
+                    "win_rate": deepest.get("win_rate"),
+                },
+                "metadata": {
+                    **(metadata or {}),
+                    "trace_version": "1.0",
+                    "routellm_trace_version": 2,
+                },
+                "output": response,
+                "routed_model": routed_model,
+            }
+
+            final = os.path.join(
+                self.fine_tune_config.trace_dir, f"{trace_id}.json"
+            )
+            temporary = f"{final}.tmp"
+            with open(temporary, "w") as handle:
+                json.dump(trace, handle)
+            os.replace(temporary, final)
+            if self._listing is not None:
+                self._listing.append((trace_id, os.path.getsize(final)))
+        except Exception as exc:
+            logger.warning("failed to record trace: %s", exc)
+
+    def _enforce_cap(self) -> None:
+        """Delete oldest-first until both caps hold.
+
+        Trace names carry their millisecond timestamp first, so the
+        filename order is the chronological one and the oldest file is
+        simply the first. The listing is cached for
+        `_LISTING_TTL_SECONDS` and after every delete, so a busy server
+        stats its trace directory once a minute rather than once a
+        request.
+        """
+        config = self.fine_tune_config
+        if not config.max_files and not config.max_bytes:
+            return
+
+        listing = self._directory_listing()
+        # The caps describe the directory once the incoming trace has
+        # landed, and this runs before the write, so the room for that
+        # one file is subtracted here rather than left for the next
+        # call to reclaim.
+        for cap, name, over in (
+            (
+                config.max_files,
+                "max_files",
+                lambda: len(listing) >= config.max_files,
+            ),
+            (
+                config.max_bytes,
+                "max_bytes",
+                lambda: sum(size for _, size in listing) >= config.max_bytes,
+            ),
+        ):
+            if not cap or not over():
+                continue
+            if name not in self._capped:
+                self._capped.add(name)
+                logger.warning(
+                    "trace directory over %s (%s files, %s bytes); "
+                    "deleting oldest first",
+                    name,
+                    len(listing),
+                    sum(size for _, size in listing),
+                )
+            while listing and over():
+                oldest, _ = listing.pop(0)
+                try:
+                    os.remove(os.path.join(config.trace_dir, f"{oldest}.json"))
+                except OSError:
+                    pass
+            self._listing = listing
+            self._listing_at = time.monotonic()
+
+    def _directory_listing(self) -> List[tuple]:
+        """Return `(stem, size)` per trace, oldest first, cached 60s."""
+        now = time.monotonic()
+        if (
+            self._listing is not None
+            and now - self._listing_at < _LISTING_TTL_SECONDS
+        ):
+            self._listing.sort(key=_age_key)
+            return self._listing
+
+        entries = []
+        try:
+            for name in os.listdir(self.fine_tune_config.trace_dir):
+                if not name.endswith(".json"):
+                    continue
+                full = os.path.join(self.fine_tune_config.trace_dir, name)
+                try:
+                    entries.append((name[: -len(".json")], os.path.getsize(full)))
+                except OSError:
+                    continue
+        except OSError:
+            entries = []
+
+        entries.sort(key=_age_key)
+        self._listing = entries
+        self._listing_at = now
+        return entries
+
     def trigger_fit(self, target_model: str):
         """Trigger a fine-tuning job using Fit CLI."""
         if not self.fine_tune_config.enabled:
@@ -151,3 +330,45 @@ class QualityManager:
             ], check=True)
         except Exception as e:
             logger.error(f"Failed to trigger Fit fine-tuning: {str(e)}")
+
+
+def _age_key(entry: tuple) -> tuple:
+    """Return the oldest-first sort key of a `(stem, size)` entry.
+
+    A trace stem is `trace-<epoch_ms>-<hex>`; the millisecond is what
+    orders it, and the hex suffix only breaks a tie. Sorting the whole
+    string would order two traces from the same millisecond by a random
+    number, which is not wrong but is not chronological either.
+    """
+    parts = entry[0].split("-")
+    try:
+        return (int(parts[1]), entry[0])
+    except (IndexError, ValueError):
+        return (0, entry[0])
+
+
+def _extract_output(response: Any) -> str:
+    """Return the assistant text of a response, "" when it has none.
+
+    Tool calls, an empty `choices` list and a shape that is not a
+    mapping at all all yield "" rather than raising: a trace of a
+    strange response is better than no trace.
+    """
+    try:
+        choices = response["choices"] if isinstance(response, dict) else response.choices
+        content = choices[0]["message"]["content"]
+    except (AttributeError, KeyError, IndexError, TypeError):
+        return ""
+    return content or ""
+
+
+def _extract_usage(response: Any) -> Dict[str, int]:
+    """Return the three token counts, each defaulting to 0."""
+    usage = response.get("usage") if isinstance(response, dict) else None
+    if not isinstance(usage, dict):
+        usage = {}
+    out = {}
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        value = usage.get(key, 0)
+        out[key] = value if isinstance(value, int) else 0
+    return out
