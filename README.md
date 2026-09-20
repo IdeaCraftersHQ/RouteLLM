@@ -178,7 +178,7 @@ Instead of using the Python SDK, you can also launch an OpenAI-compatible server
 > export ANYSCALE_API_KEY=esecret_XXXXXX
 > python -m routellm.openai_server --routers mf --strong-model gpt-4-1106-preview --weak-model anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1
 INFO:     Application startup complete.
-INFO:     Uvicorn running on http://0.0.0.0:6060 (Press CTRL+C to quit)
+INFO:     Uvicorn running on http://127.0.0.1:6060 (Press CTRL+C to quit)
 ```
 
 Once the server is launched, you can start a local router chatbot to see how different messages are routed.
@@ -228,6 +228,8 @@ python -m routellm.openai_server --routers mf jev --config config.example.yaml
 - `--config` is the single source for the server's endpoints, tiers, and router settings. If unspecified, the server defaults to our best-performing router configuration and routes the flat `--strong-model`/`--weak-model` pair (see [Configuration](#configuration) for details).
 - `--strong-model` and `--weak-model` name that flat pair. Both together or neither; each may name a configured endpoint or a raw model name.
 - `--default-threshold` is the threshold used by a level that names none and whose request carries none. Default `0.5`.
+- `--host` is the interface to bind. Default `127.0.0.1`. The server is unauthenticated, so a wider bind exposes it to that network: widen it only behind a proxy that authenticates.
+- `--port` is the port to listen on. Default `6060`.
 
 For most use-cases, **we recommend the `mf` router** as we have evaluated it to be very strong and lightweight.
 
