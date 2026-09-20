@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import logging
 
+from routellm.prompts import PromptFile, resolve
 from routellm.routers.base import Router
 from routellm.routers.typesafe import require_typesafe_sdk
-from routellm.routers.typesafe.prompts import RouterPrompt, _resolve, load_prompt_file
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,42 @@ DEFAULT_CRITERIA = {
 }
 
 QUESTION_KEY = "strong"
+
+#: Section of the prompt file this router reads, and the types its keys take.
+PROMPT_SECTION = "router"
+PROMPT_SCHEMA = {"instructions": str, "criteria": dict}
+
+#: The only keys a Noul's criteria mapping may carry.
+_CRITERIA_KEYS = frozenset({"true", "false"})
+
+
+def _check_criteria(criteria, path):
+    """Check prompt-file criteria carry only string "true"/"false" entries.
+
+    The generic loader validates that `criteria` is a mapping; the
+    yes/no shape is this router's own requirement, so it is checked
+    here rather than in the loader.
+
+    Parameters
+    ----------
+    criteria : dict
+        The `router.criteria` mapping read from the prompt file.
+    path : str or os.PathLike
+        Prompt file path, named in the error message.
+
+    Raises
+    ------
+    ValueError
+        If a key is outside {"true", "false"} or a value is not a str.
+    """
+    for key, value in criteria.items():
+        if key not in _CRITERIA_KEYS:
+            raise ValueError(f"{path}: unknown key {key!r} in 'router.criteria'")
+        if not isinstance(value, str):
+            raise ValueError(
+                f"{path}: router.criteria.{key} must be str, "
+                f"got {type(value).__name__}"
+            )
 
 
 class JevRouter(Router):
@@ -94,14 +130,19 @@ class JevRouter(Router):
     ):
         typesafe_sdk = require_typesafe_sdk()
 
-        file_prompt = (
-            RouterPrompt() if prompt_file is None else load_prompt_file(prompt_file)[0]
+        section = (
+            PromptFile.load(prompt_file).section(PROMPT_SECTION, PROMPT_SCHEMA)
+            if prompt_file
+            else {}
         )
-        self.instructions, instructions_source = _resolve(
-            instructions, file_prompt.instructions, DEFAULT_INSTRUCTIONS
+        file_criteria = section.get("criteria")
+        if file_criteria is not None:
+            _check_criteria(file_criteria, prompt_file)
+        self.instructions, instructions_source = resolve(
+            instructions, section.get("instructions"), DEFAULT_INSTRUCTIONS
         )
-        self.criteria, criteria_source = _resolve(
-            criteria, file_prompt.criteria, dict(DEFAULT_CRITERIA)
+        self.criteria, criteria_source = resolve(
+            criteria, file_criteria, dict(DEFAULT_CRITERIA)
         )
         logger.debug(
             "jev router prompt sources instructions=%s criteria=%s",
