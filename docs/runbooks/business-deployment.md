@@ -297,6 +297,135 @@ c.chat.completions.create(model="router-mf-0.11593",
                           messages=[{"role":"user","content":"hi"}])
 ```
 
+## Local development
+
+Running the whole gateway on one laptop, against models that live on
+another machine reached over ssh tunnels. Nothing here is required by
+the deployment above; it is how the endpoint/tier config is exercised
+before it reaches a LAN host.
+
+### Tunnels
+
+Two forwards, both landing on loopback so the endpoint config can name
+`127.0.0.1` and never a remote host:
+
+```
+# Ollama -> 127.0.0.1:11500 (host alias m3-ollama in ~/.ssh/config)
+ssh -f -N m3-ollama
+
+# colibri -> 127.0.0.1:11800, from its own 127.0.0.1:8000
+ssh -f -N -L 11800:localhost:8000 jadb@m3.local
+```
+
+`-f -N` backgrounds the forward without running a remote command.
+Confirm both are up before starting the server:
+
+```
+curl -sS http://127.0.0.1:11500/api/tags
+curl -sS http://127.0.0.1:11800/v1/models
+```
+
+colibri binds `127.0.0.1:8000` on the remote host, serves `/v1/models`
+and `/v1/chat/completions`, streams over SSE, and takes its key from
+`COLI_API_KEY`. The model id it reports under `/v1/models` is what
+`coli serve --model-id` was given, and it is what the endpoint's
+`model:` must carry after the `openai/` prefix — a mismatch is rejected
+by colibri, not by routellm. **These colibri facts are verified in the
+smoke task**; treat them as provisional until it runs.
+
+### Environment
+
+```
+export OPENAI_API_KEY=sk-...       # cloud_strong, and prompt embedding
+export COLI_API_KEY=...            # colibri_glm
+export TYPESAFE_API_KEY=...        # the jev router
+```
+
+No key is written into the config: each endpoint names the variable it
+reads at call time, so the file loads on a machine holding none of them.
+
+### Install
+
+```
+pip install -e '.[serve,eval]'
+pip install -e './extensions/typesafe'    # registers the jev router
+pip install -e '.[pairing]'               # only if a tier side selects
+```
+
+The `pairing` extra pulls its catalog client from a git URL and needs
+Python 3.11 or newer. Skip it unless a tier uses `select:`.
+
+### Serve
+
+```
+python -m routellm.openai_server \
+  --config config.example.yaml \
+  --routers mf jev
+```
+
+`--config` is the single source for endpoints and tiers. The example
+config's `default` tier names `mf` and `0.12`, so neither
+`--strong-model` nor `--weak-model` is needed; when a config carries no
+`default` tier, those two flags derive an implicit one instead. The
+startup log says which is in effect.
+
+Check what the server answers to:
+
+```
+curl -sS http://127.0.0.1:6060/v1/models
+```
+
+Expect one id per tier (`default`, `premium`) plus `router-mf-0.5` and
+`router-jev-0.5` — one per loaded router at `--default-threshold`.
+
+### Smoke
+
+```
+curl -sS http://127.0.0.1:6060/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "router-default",
+    "messages": [{"role":"user","content":"what is 2+2?"}]
+  }'
+```
+
+`router-default` is the `default` tier under the `router-` prefix many
+clients expect; bare `default` routes identically.
+
+### Reading `routellm.path`
+
+A non-streamed response carries the decision path under a top-level
+`routellm` key, which OpenAI clients ignore:
+
+```
+... | jq '.routellm.path'
+```
+
+```json
+[
+  {"tier": "default", "router": "mf", "router_from": "tier",
+   "threshold": 0.12, "threshold_from": "tier", "win_rate": 0.04,
+   "picked": "ollama_qwen"}
+]
+```
+
+One entry per tier level, outermost first. `router_from` and
+`threshold_from` say where that level's values came from — `tier`,
+`parent`, `request`, or `default` — so a surprising route is explained
+without re-running it. `picked` is the endpoint name, and the last
+entry's is what answered unless a `fallback_from` key says the sibling
+did. A streamed response carries the path in the server logs only,
+since its chunks must keep the SSE shape the client parses.
+
+### Cache keys
+
+Cache, resilience, and trace keys are the routed *name*: the endpoint
+name for a configured endpoint, the raw model string otherwise. Moving
+a deployment onto named endpoints therefore changes every cache key,
+and entries written under the old raw model names go unread. The old
+rows are not wrong, just unreachable; prune them or accept one cold
+period.
+
 ## Verification
 
 | Check                                  | Expected                              |
@@ -368,6 +497,9 @@ firing weak-class prompts; expect zero packets.
 - [US-0005](../stories/US-0005-load-balancing.md) — LB
 - [US-0010](../stories/US-0010-openai-compatible-server.md) —
   OpenAI-compat server (entry point)
+- [US-0105](../stories/US-0105-endpoint-registry-and-tiers.md) —
+  endpoint registry and tiers (the `endpoints:`/`tiers:` config and
+  the `routellm.path` field this runbook reads)
 - [US-0100](../stories/US-0100-multi-tenant-auth.md) —
   per-employee auth (paper; deploy blocker for attribution)
 - [US-0101](../stories/US-0101-audit-log.md) — audit log

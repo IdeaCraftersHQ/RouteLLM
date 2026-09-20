@@ -11,3 +11,76 @@ bert:
     checkpoint_path: routellm/bert_gpt4_augmented
 mf:
     checkpoint_path: routellm/mf_gpt4_augmented
+
+# Named endpoints. Each gives a reachable model a stable name that
+# routing, caching, and traces refer to instead of a raw litellm model
+# string. Names match [A-Za-z0-9_]+: hyphens are reserved for the
+# model-name grammar. Credentials are never written here; `api_key_env`
+# names an environment variable read at call time, so this file loads on
+# a machine holding none of the keys.
+endpoints:
+  cloud_strong:
+    model: gpt-4o
+    api_key_env: OPENAI_API_KEY
+    tags: [cloud, tools]
+    quality: 90
+
+  # Ollama over the ssh tunnel. models.dev lists no ollama models, so
+  # this endpoint is a tag-only candidate for selectors: it satisfies
+  # `tag:` terms and fails every catalog term.
+  ollama_qwen:
+    model: ollama_chat/qwen3:8b
+    api_base: http://127.0.0.1:11500
+    tags: [local]
+
+  # colibri over its own tunnel. The `openai/` prefix routes any
+  # OpenAI-compatible server through litellm. The model id must match
+  # what `coli serve --model-id` reports under `/v1/models`; a mismatch
+  # is rejected by colibri, not by routellm.
+  colibri_glm:
+    model: openai/glm-5.2-colibri
+    api_base: http://127.0.0.1:11800/v1
+    api_key_env: COLI_API_KEY
+    tags: [local, tools]
+    quality: 85
+
+  # The `mf` and `sw_ranking` routers embed each prompt before scoring
+  # it. This endpoint supplies the base URL and the credential for those
+  # calls and nothing else: each router keeps its own `embedding_model`,
+  # so the `model` written here is never sent. Without this endpoint the
+  # embedding client falls back to OPENAI_BASE_URL / OPENAI_API_KEY.
+  embedding:
+    model: text-embedding-3-small
+    api_key_env: OPENAI_API_KEY
+
+# Tiers: named strong/weak pairs whose sides may themselves be tiers, so
+# a request addressed to a tier walks a tree, one router call per level.
+# A tier naming no router or threshold inherits them from the level
+# above, then from the request, then from the controller defaults.
+tiers:
+  premium:
+    router: jev
+    threshold: 0.33
+    strong: cloud_strong
+    weak: colibri_glm
+
+  # `default` answers a bare `router-<name>-<threshold>` request, so an
+  # existing OpenAI client reaches the tree without changing its model
+  # field.
+  default:
+    router: mf
+    threshold: 0.12
+    strong: premium
+    weak: ollama_qwen
+
+# A side may select rather than name, saying what it wants over endpoint
+# tags plus the models.dev catalog; `routellm.pairing` resolves it to one
+# endpoint name at startup. Needs the `pairing` extra. Explain a pick
+# with `python -m routellm.pairing --config config.yaml`. Commented out:
+# the tier above already names both sides.
+#
+# default_selected:
+#   router: mf
+#   threshold: 0.12
+#   strong: {select: "tool_call:true reasoning:true", order: quality_desc}
+#   weak: {select: "tag:local", order: cost_asc}

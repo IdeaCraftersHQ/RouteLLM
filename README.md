@@ -221,15 +221,136 @@ The research in this repository was conducted in [collaboration with Anyscale](h
 RouteLLM offers a lightweight OpenAI-compatible server for routing requests based on different routing strategies:
 
 ```
-python -m routellm.openai_server --routers mf --config config.example.yaml
+python -m routellm.openai_server --routers mf jev --config config.example.yaml
 ```
 
-- `--routers` specifies the list of routers available to the server. For instance, here, the server is started with one available router: `mf` (see below for the list of routers).
-- `--config` specifies the path to the configuration file for the routers. If unspecified, the server will default to using our best-performing configuration (see [Configuration](#configuration) for details).
+- `--routers` specifies the list of routers available to the server. For instance, here, the server is started with two available routers, `mf` and `jev` (see below for the list of routers). The first one is the default for a request that names none.
+- `--config` is the single source for the server's endpoints, tiers, and router settings. If unspecified, the server defaults to our best-performing router configuration and routes the flat `--strong-model`/`--weak-model` pair (see [Configuration](#configuration) for details).
+- `--default-threshold` is the threshold used by a level that names none and whose request carries none. Default `0.5`.
 
 For most use-cases, **we recommend the `mf` router** as we have evaluated it to be very strong and lightweight.
 
-When making a request to the server, clients specify the router and cost threshold to use for each request using the `model` field in the following format `router-[ROUTER NAME]-[THRESHOLD]`. For instance, using a `model` of `router-mf-0.5` specifies that the request should be routed using the `mf` router with a threshold of 0.5.
+### Endpoints
+
+An endpoint gives a reachable model a stable name, so routing, caching, and traces refer to `cloud_strong` rather than to whatever litellm model string happens to sit behind it. Endpoints are declared under the `endpoints:` key of the `--config` file:
+
+```yaml
+endpoints:
+  cloud_strong:
+    model: gpt-4o
+    api_key_env: OPENAI_API_KEY
+    tags: [cloud, tools]
+    quality: 90
+  ollama_qwen:
+    model: ollama_chat/qwen3:8b
+    api_base: http://127.0.0.1:11500
+    tags: [local]
+```
+
+Each endpoint carries its own `api_base` and its own credential, so one server can span a cloud provider and two local runtimes at once. `api_key_env` names an environment variable read at call time — never the key itself — so a config loads on a machine that holds none of the keys. A missing variable is an error naming the endpoint and the variable, raised when that endpoint is called.
+
+The global `--base-url` and `--api-key` flags remain as the defaults an endpoint falls back to when it sets none of its own, so an existing flat deployment keeps working unchanged. Precedence for one call is: a load balancer registered on the routed name, then the endpoint's own values, then the two flags.
+
+Names match `[A-Za-z0-9_]+`; hyphens are reserved for the model-name grammar below. A name the registry does not know is used as a raw litellm model name with the global defaults, and logged once as a warning.
+
+Endpoint names are also the cache, resilience, and trace keys. Adopting them therefore changes existing SQLite cache keys, and entries written under the old raw model names go unread.
+
+### Tiers
+
+A tier is a named strong/weak pair whose sides may themselves be tiers, so a request addressed to a tier walks a tree, one router call per level on the original prompt:
+
+```yaml
+tiers:
+  premium:
+    router: jev
+    threshold: 0.33
+    strong: cloud_strong
+    weak: colibri_glm
+  default:
+    router: mf
+    threshold: 0.12
+    strong: premium
+    weak: ollama_qwen
+```
+
+A tier naming no `router` or `threshold` inherits it, first hit winning: its own value, the parent level's resolved value, the request-level value from the model name, then `--routers[0]` and `--default-threshold`. The response records where each level's values came from, so a routing decision is explainable without re-running it:
+
+```python
+out = controller.completion(
+    model="default", messages=[{"role": "user", "content": "hello"}]
+)
+for entry in out._hidden_params["routellm_path"]:
+    print({k: entry[k] for k in
+           ("tier", "router", "router_from", "threshold", "threshold_from", "picked")})
+```
+
+```
+{'tier': 'default', 'router': 'random', 'router_from': 'tier', 'threshold': 0.12, 'threshold_from': 'tier', 'picked': 'premium'}
+{'tier': 'premium', 'router': 'random', 'router_from': 'tier', 'threshold': 0.33, 'threshold_from': 'tier', 'picked': 'cloud_strong'}
+```
+
+Over the HTTP server the same path arrives on a non-streamed response under a top-level `routellm` key, which OpenAI clients ignore. A streamed response carries it in the server logs only, since its chunks must keep the SSE shape the client parses.
+
+Tier and endpoint names share one namespace and are validated together at load: every side must name a known endpoint or tier, the graph must be acyclic, and it may not nest deeper than four tier levels. A name that is both a tier and a router is rejected too.
+
+If a tier fails, the request falls back to the other side of the level it was decided at. A tier-valued sibling is descended by its `weak` side without running any router, so the failure path stays deterministic.
+
+### Model names
+
+Clients address the router through the `model` field, in any of four forms:
+
+| `model` | Means |
+|---|---|
+| `premium` | the `premium` tier, inheriting router and threshold |
+| `router-premium` | the same tier, for clients that expect a `router-` prefix |
+| `router-mf-0.5` | the legacy flat form: the `mf` router at threshold `0.5`, entering the `default` tier when one is configured and the flat pair otherwise |
+| `premium:router-mf-0.5` | the `premium` tier, with `mf` and `0.5` supplied at request level |
+
+A request-level router and threshold sit below a tier's own values in the inheritance order, so they fill in the levels that name none rather than overriding the levels that do.
+
+The `default` tier is what makes the legacy form keep working: an existing OpenAI client sending `router-mf-0.5` reaches the tree without changing its model field. When the config defines no `default` tier and both `--strong-model` and `--weak-model` are given, the server derives an implicit one from them, running `--routers[0]` at `--default-threshold`. A config `default` tier always wins; which one is in effect is logged at startup.
+
+### `GET /v1/models`
+
+Many OpenAI clients probe the model list before their first request. The server answers with one id per configured tier, plus `router-<name>-<default_threshold>` for each loaded router — the legacy form needs a concrete threshold, and only the server's default is a usable id, though any other threshold still routes:
+
+```
+> curl -s localhost:6060/v1/models
+{"object":"list","data":[
+  {"id":"default","object":"model","created":1758326400,"owned_by":"routellm"},
+  {"id":"premium","object":"model","created":1758326400,"owned_by":"routellm"},
+  {"id":"router-mf-0.5","object":"model","created":1758326400,"owned_by":"routellm"}]}
+```
+
+`created` is the moment the process came up: the listing is derived from the config, so it does not change while the server runs.
+
+### Selectors
+
+A tier side may say what it wants instead of naming one endpoint, and the winner is chosen once at startup from the configured endpoints' own tags plus the [models.dev](https://models.dev) catalog:
+
+```yaml
+tiers:
+  default:
+    router: mf
+    threshold: 0.12
+    strong: {select: "tool_call:true reasoning:true", order: quality_desc}
+    weak: {select: "tag:local", order: cost_asc}
+```
+
+`select` is a space-separated list of terms, all ANDed. A `tag:<label>` term is answered locally from the endpoint's own `tags`; every other `key:value` term is a models.dev fact. Bare free text is rejected — a policy says what a model *is*, never what its name looks like. `order` picks the winner among the matches, one of `cost_asc`, `cost_desc`, `quality_asc`, `quality_desc` (default), `context_desc`.
+
+Selectors need the optional `pairing` extra. Endpoints models.dev does not list, such as anything served by Ollama, are tag-only candidates: they satisfy `tag:` terms and fail every catalog term. Explain a pick without starting a server:
+
+```
+python -m routellm.pairing --config config.example.yaml
+```
+
+```
+-> colibri_glm(model=openai/glm-5.2-colibri, quality=85, cost=-, context=-)
+   ollama_qwen(model=ollama_chat/qwen3:8b, quality=None, cost=-, context=-)
+```
+
+Every selector is resolved to an endpoint name before the tier graph is validated a second time, so nothing downstream ever sees one.
 
 ### Threshold Calibration
 
@@ -376,9 +497,16 @@ and [extensions/typesafe/README.md](extensions/typesafe/README.md).
 
 ## Configuration
 
-The configuration for routers is specified in either the `config` argument for `Controller` or by passing in the path to a YAML file using the `--config` flag. It is a top-level mapping from router name to the keyword arguments used for router initialization.
+The configuration is specified in either the `config` argument for `Controller` or by passing in the path to a YAML file using the `--config` flag. Most top-level keys are router names mapping to the keyword arguments used for that router's initialization. Two are reserved:
 
-An example configuration is provided in the `config.example.yaml` file - it provides the configurations for routers that have trained on Arena data augmented using GPT-4 as a judge. The models and datasets used are all hosted on Hugging Face under the [RouteLLM](https://huggingface.co/routellm) and [LMSYS](https://huggingface.co/lmsys) organizations.
+| Key | Holds |
+|---|---|
+| `endpoints:` | named endpoints, each with its own `model`, optional `api_base`, `api_key_env`, `tags`, `quality`, and `extra` — see [Endpoints](#endpoints) |
+| `tiers:` | named strong/weak pairs, each with an optional `router` and `threshold` and a `strong`/`weak` side that names an endpoint, another tier, or a selector — see [Tiers](#tiers) |
+
+Both are read by the endpoint registry and removed before the rest of the file is handed to the routers, so a router can never be shadowed by one of them. A file carrying neither is exactly the router config it always was.
+
+An example configuration is provided in the `config.example.yaml` file - it provides the configurations for routers that have trained on Arena data augmented using GPT-4 as a judge, plus a worked `endpoints:`/`tiers:` pair spanning a cloud model and two local ones. The models and datasets used are all hosted on Hugging Face under the [RouteLLM](https://huggingface.co/routellm) and [LMSYS](https://huggingface.co/lmsys) organizations.
 
 `routellm/prompts.py` is a core facility: any router or middleware can read a named section from a shared YAML prompt file so its model-facing wording is editable without code changes, without pulling in that adapter's own dependencies. The TypeSafe extension documents its own environment variables in [extensions/typesafe/README.md](extensions/typesafe/README.md).
 
@@ -408,6 +536,26 @@ register_router("myrouter", MyRouterClass)
 ```
 
 A plugin that fails to import is skipped with a warning and shown in the error when its name is requested.
+
+### How a router gets the embedding client
+
+A router that embeds the prompt before scoring it — `mf` and `sw_ranking` do — must not build an OpenAI client at import: that made `import routellm.routers.routers` fail without `OPENAI_API_KEY` even for a server whose routers never embed. Call `get_embedding_client()` from `routellm/routers/embeddings.py` inside the method that embeds instead:
+
+```python
+from routellm.routers.embeddings import get_embedding_client
+
+class MyRouter(Router):
+    def __init__(self):
+        self.embedding_model = "text-embedding-3-small"
+
+    def calculate_strong_win_rate(self, prompt):
+        vector = get_embedding_client().embeddings.create(
+            input=[prompt], model=self.embedding_model
+        )
+        ...
+```
+
+The client is built on first call and cached. The controller calls `configure_embeddings` with its endpoint registry before constructing any router, so an endpoint named `embedding` in the config points those calls at a different provider than the completions; with no such endpoint, the client falls back to `OPENAI_BASE_URL` / `OPENAI_API_KEY`. That endpoint supplies the base URL and the credential only — the model each router embeds with stays the router's own `embedding_model`. When neither source supplies a key, the first embedding call raises a `RuntimeError` naming both ways to fix it. Tests that need their own client call `reset_embedding_client()`.
 
 ### Adding a new benchmark
 
