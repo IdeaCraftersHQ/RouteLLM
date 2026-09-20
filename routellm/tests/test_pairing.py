@@ -363,15 +363,15 @@ def test_bare_free_text_token_rejected(registry, catalog, cache_dir):
         resolve_pairing(registry, selector)
 
 
-@pytest.mark.parametrize(
-    "key", ["open_weights", "structured_output", "temperature", "family"]
-)
+@pytest.mark.parametrize("key", ["temperature", "family"])
 @pytest.mark.parametrize("value", ["true", "false"])
 def test_unsupported_catalog_term_rejected_whatever_its_value(
     registry, catalog, cache_dir, key, value
 ):
     # A false-valued tri-state is still a term pairing cannot judge; it
     # must be rejected rather than silently matching every candidate.
+    # `open_weights` and `structured_output` left this list when the
+    # capability terms started answering them from `Capabilities`.
     selector = Selector(select=f"{key}:{value}")
     with pytest.raises(ValueError, match=key):
         resolve_pairing(registry, selector)

@@ -52,6 +52,15 @@ from pathlib import Path
 from typing import Any, Optional
 
 from routellm.config import ConfigError, load_config
+from routellm.capabilities import (
+    CAPABILITY_KEYS,
+    RANGE_KEYS,
+    Capabilities,
+    CapabilityQuery,
+    capabilities_for,
+    matches,
+    parse_capability_terms,
+)
 from routellm.endpoints import Endpoint, EndpointRegistry, Selector
 
 logger = logging.getLogger(__name__)
@@ -176,11 +185,16 @@ class Candidate:
     record : ModelRecord, optional
         Its models.dev record, None when the model maps to no catalog
         entry. A candidate without one fails every catalog term.
+    capabilities : Capabilities, optional
+        The endpoint's merged capabilities, built once per candidate by
+        `rank_candidates` and read by the capability terms and the
+        `max_output_desc` order.
     """
 
     name: str
     endpoint: Endpoint
     record: Optional[ModelRecord] = None
+    capabilities: Optional[Capabilities] = None
 
     @property
     def total_cost(self) -> Optional[float]:
@@ -429,8 +443,22 @@ def catalog_provider_for(model: str) -> Optional[tuple[str, str]]:
 # ---------------------------------------------------------------------------
 
 
-def _split_terms(select: str) -> tuple[list[str], str]:
-    """Split a `select` expression into tag labels and a catalog query.
+def _split_terms(select: str) -> tuple[list[str], list[str], str]:
+    """Split a `select` expression into tags, capability terms, and a query.
+
+    A term is routed by its key: `tag:` goes to the tag bucket; a key
+    in `CAPABILITY_KEYS`, `RANGE_KEYS`, `tool_call`, or `input` goes to
+    the capability bucket routellm judges itself; everything else is
+    passed through unchanged to `hop.aim.parse_query`.
+
+    The capability terms MUST be stripped before aim sees the query:
+    aim's key set is exactly {in, out, provider, family, tool_call,
+    reasoning, open_weights, structured_output, temperature} and it
+    raises on `vision:`, `context:` and `input:`.
+
+    `tool_call` stays in the capability bucket as an alias of `tools`,
+    answered from `Capabilities.tools`, which already merged the
+    catalog's own `tool_call` value.
 
     Parameters
     ----------
@@ -439,9 +467,9 @@ def _split_terms(select: str) -> tuple[list[str], str]:
 
     Returns
     -------
-    tuple[list[str], str]
-        Labels from the `tag:` terms, and the remaining terms joined
-        back into a query string for `hop.aim.parse_query`.
+    tuple[list[str], list[str], str]
+        Labels from the `tag:` terms, the capability terms verbatim,
+        and the remaining terms joined back into an aim query string.
 
     Raises
     ------
@@ -449,6 +477,7 @@ def _split_terms(select: str) -> tuple[list[str], str]:
         If a term carries no colon, which would be free text.
     """
     tags: list[str] = []
+    capability_terms: list[str] = []
     catalog_terms: list[str] = []
 
     for term in select.split():
@@ -461,10 +490,15 @@ def _split_terms(select: str) -> tuple[list[str], str]:
         key, _, value = term.partition(":")
         if key == "tag":
             tags.append(value)
+        elif key in CAPABILITY_KEYS or key in RANGE_KEYS or key in (
+            "tool_call",
+            "input",
+        ):
+            capability_terms.append(term)
         else:
             catalog_terms.append(term)
 
-    return tags, " ".join(catalog_terms)
+    return tags, capability_terms, " ".join(catalog_terms)
 
 
 def _catalog_filter(query: str, select: str):
@@ -503,7 +537,9 @@ def _unsupported_term(name: str) -> ValueError:
     """Return the error for a catalog term pairing cannot judge."""
     return ValueError(
         f"Selector term {name!r} is not supported by routellm pairing; "
-        "supported catalog terms are tool_call, reasoning, and provider."
+        "supported catalog terms are tool_call, reasoning, provider, "
+        "open_weights, structured_output, and input, plus routellm's own "
+        "vision, tools, context, and max_output."
     )
 
 
@@ -533,11 +569,14 @@ def _record_matches(record: Optional[ModelRecord], filter_) -> bool:
     # truthiness: `open_weights:false` parses to False, which is a real
     # constraint pairing still cannot honour. The string and list
     # fields carry no such distinction, so empty means unset there.
-    for name in ("open_weights", "structured_output", "temperature"):
-        if getattr(filter_, name, None) is not None:
-            raise _unsupported_term(name)
+    # `open_weights`, `structured_output` and `input` are answered from
+    # the merged `Capabilities` instead, so they never reach here: the
+    # splitter routes them into the capability bucket. `temperature`,
+    # `family` and `query` remain unjudgeable locally.
+    if getattr(filter_, "temperature", None) is not None:
+        raise _unsupported_term("temperature")
 
-    for name in ("input", "output", "family", "query"):
+    for name in ("output", "family", "query"):
         if getattr(filter_, name, None):
             raise _unsupported_term(name)
 
@@ -573,6 +612,15 @@ def _sort_key(candidate: Candidate, order: str):
             return (1, 0.0, release, candidate.name)
         signed = quality if order == "quality_asc" else -quality
         return (0, float(signed), release, candidate.name)
+
+    if order == "max_output_desc":
+        # Read the merged capabilities, not the record, so an endpoint
+        # with an explicit block orders alongside a catalogued one.
+        caps = candidate.capabilities
+        max_output = caps.max_output if caps else None
+        if max_output is None:
+            return (1, 0.0, candidate.name)
+        return (0, -float(max_output), candidate.name)
 
     # context_desc
     context = record.context if record else None
@@ -626,9 +674,20 @@ def rank_candidates(
     ValueError
         If `select` is malformed or names a term pairing cannot judge.
     CatalogUnavailable
-        If `select` carries a catalog term and no catalog can be had.
+        If `select` carries a catalog term and no catalog can be had,
+        or a capability term that some endpoint can only answer from
+        its record.
+
+    Notes
+    -----
+    The catalog is mandatory when a term could only be answered by it.
+    If EVERY endpoint in the registry answers the capability query from
+    its explicit `capabilities:` block alone, a failed fetch is a
+    warning rather than an error, so a config whose endpoints all
+    declare themselves resolves with no network at all.
     """
-    tags, query = _split_terms(selector.select)
+    tags, capability_terms, query = _split_terms(selector.select)
+    capability_query = parse_capability_terms(capability_terms)
     filter_ = _catalog_filter(query, selector.select)
 
     # A catalog term makes the catalog mandatory; an order that reads
@@ -640,10 +699,12 @@ def rank_candidates(
     except CatalogUnavailable as exc:
         if filter_ is not None:
             raise
+        if not _blocks_answer(registry, capability_query):
+            raise
         logger.warning(
-            "no models.dev catalog for order %s; ordering %r on local "
-            "facts only (%s)",
-            selector.order,
+            "no models.dev catalog for %r; every endpoint answers its "
+            "capability terms from its own block, so ordering and "
+            "selection continue on local facts only (%s)",
             selector.select,
             exc,
         )
@@ -659,13 +720,49 @@ def rank_candidates(
         if key is not None:
             record = by_key.get(key)
 
+        capabilities = capabilities_for(endpoint, record)
+
+        # Cheapest check first: tags are already done, then the local
+        # capability query, then the aim filter, which may raise.
+        if not matches(capabilities, capability_query):
+            continue
+
         if filter_ is not None and not _record_matches(record, filter_):
             continue
 
-        candidates.append(Candidate(name=name, endpoint=endpoint, record=record))
+        candidates.append(
+            Candidate(
+                name=name,
+                endpoint=endpoint,
+                record=record,
+                capabilities=capabilities,
+            )
+        )
 
     candidates.sort(key=lambda c: _sort_key(c, selector.order))
     return [(candidate.name, candidate) for candidate in candidates]
+
+
+def _blocks_answer(
+    registry: EndpointRegistry, capability_query: CapabilityQuery
+) -> bool:
+    """Return whether every endpoint answers a query without the catalog.
+
+    A capability term is answerable locally when each endpoint's own
+    explicit block, or its deprecated tags, already state every key the
+    query reads. When one does not, only the catalog could, so a failed
+    fetch stays an error.
+    """
+    if capability_query.is_empty():
+        return True
+
+    wanted = capability_query.keys()
+    for name in registry.names():
+        caps = capabilities_for(registry.get(name), None)
+        if any(getattr(caps, key) is None for key in wanted):
+            return False
+
+    return True
 
 
 # ---------------------------------------------------------------------------

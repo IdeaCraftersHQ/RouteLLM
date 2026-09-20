@@ -46,11 +46,16 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "CAPABILITY_KEYS",
     "LONG_CONTEXT_TOKENS",
+    "RANGE_KEYS",
     "Capabilities",
+    "CapabilityQuery",
     "capabilities_for",
     "from_tags",
+    "matches",
     "merge",
+    "parse_capability_terms",
 ]
 
 #: Context window the deprecated `long_context` tag stands for. It is a
@@ -267,3 +272,195 @@ def capabilities_for(
     explicit = getattr(endpoint, "capabilities", None)
     tag_derived = from_tags(getattr(endpoint, "tags", None) or [])
     return merge(explicit, record, tag_derived)
+
+
+# ---------------------------------------------------------------------------
+# Selector grammar
+# ---------------------------------------------------------------------------
+
+#: Boolean capability terms a selector may carry, e.g. `vision:true`.
+#: `tools` is an alias of the catalog's `tool_call`; both spellings are
+#: answered from `Capabilities.tools`, which already merged the catalog.
+CAPABILITY_KEYS = {
+    "vision",
+    "tools",
+    "structured_output",
+    "reasoning",
+    "open_weights",
+}
+
+#: Numeric capability terms, spelled `>=N` or `<=N` only.
+RANGE_KEYS = {"context", "max_output"}
+
+#: The catalog spelling routellm accepts as an alias of `tools`.
+_TOOL_CALL_ALIAS = "tool_call"
+
+_TRUE = {"true", "yes", "1"}
+_FALSE = {"false", "no", "0"}
+
+
+class CapabilityQuery(BaseModel):
+    """The capability half of a `select` expression, already parsed.
+
+    Attributes
+    ----------
+    booleans : dict[str, bool]
+        Capability field name to the value the term demands.
+    ranges : dict[str, tuple[str, int]]
+        Capability field name to an `(op, value)` pair, `op` being
+        `">="` or `"<="`.
+    modalities_in : list[str]
+        Input modalities every candidate must accept, from `input:`.
+    """
+
+    booleans: dict[str, bool] = {}
+    ranges: dict[str, tuple[str, int]] = {}
+    modalities_in: list[str] = []
+
+    def is_empty(self) -> bool:
+        """Return whether this query constrains nothing at all."""
+        return not (self.booleans or self.ranges or self.modalities_in)
+
+    def keys(self) -> list[str]:
+        """Return every capability field this query reads."""
+        names = list(self.booleans) + list(self.ranges)
+        if self.modalities_in:
+            names.append("modalities_in")
+        return names
+
+
+def parse_capability_terms(terms: list[str]) -> CapabilityQuery:
+    """Parse routellm's own `key:value` capability terms.
+
+    `hop.aim.parse_query` accepts none of these keys, so they are split
+    out of a `select` expression before aim ever sees it. Accepted
+    spellings::
+
+        vision:true  tools:false  structured_output:true
+        reasoning:true  open_weights:true
+        context:>=200000  max_output:<=8192
+        input:image
+
+    Parameters
+    ----------
+    terms : list[str]
+        The capability terms, each already `key:value`.
+
+    Returns
+    -------
+    CapabilityQuery
+        The parsed constraints.
+
+    Raises
+    ------
+    ValueError
+        If a boolean term carries a non-boolean value, a range term
+        omits its comparison operator, or a key is not a capability.
+    """
+    booleans: dict[str, bool] = {}
+    ranges: dict[str, tuple[str, int]] = {}
+    modalities: list[str] = []
+
+    for term in terms:
+        key, _, value = term.partition(":")
+
+        if key == _TOOL_CALL_ALIAS:
+            key = "tools"
+
+        if key in CAPABILITY_KEYS:
+            booleans[key] = _as_bool(key, value)
+        elif key in RANGE_KEYS:
+            ranges[key] = _as_range(key, value)
+        elif key == "input":
+            modalities.append(value)
+        else:  # pragma: no cover - the splitter never routes anything else
+            raise ValueError(f"Selector term {term!r} is not a capability term.")
+
+    return CapabilityQuery(
+        booleans=booleans, ranges=ranges, modalities_in=modalities
+    )
+
+
+def _as_bool(key: str, value: str) -> bool:
+    """Return a boolean term's value, or raise naming the term."""
+    lowered = value.strip().lower()
+    if lowered in _TRUE:
+        return True
+    if lowered in _FALSE:
+        return False
+    raise ValueError(
+        f"Selector term {key}:{value!r} needs a boolean value; write "
+        f"{key}:true or {key}:false."
+    )
+
+
+def _as_range(key: str, value: str) -> tuple[str, int]:
+    """Return a range term's `(op, number)`, or raise naming the term.
+
+    A bare `context:200000` is rejected rather than read as equality:
+    "exactly this context window" is never what an operator means, and
+    silently treating it as `>=` would hide the typo.
+    """
+    text = value.strip()
+    for op in (">=", "<="):
+        if text.startswith(op):
+            number = text[len(op):].strip()
+            try:
+                return op, int(number)
+            except ValueError:
+                raise ValueError(
+                    f"Selector term {key}:{value!r} needs an integer after "
+                    f"{op}; write {key}:{op}200000."
+                ) from None
+
+    raise ValueError(
+        f"Selector term {key}:{value!r} needs a comparison: write "
+        f"{key}:>={text or 'N'} or {key}:<={text or 'N'}. A bare "
+        f"{key}:N would mean an exact window, which is never the intent."
+    )
+
+
+def matches(caps: Capabilities, query: CapabilityQuery) -> bool:
+    """Return whether an endpoint's capabilities satisfy a selector query.
+
+    UNKNOWN FAILS THE TERM here. A candidate whose `vision` is `None`
+    does not satisfy `vision:true`. This is the OPPOSITE of the
+    request-time default in `satisfies`, deliberately: startup is where
+    an operator can see the gap and fix it, `--capabilities` prints
+    exactly which endpoint is unknown on which key, and silently
+    selecting a model that might not do the job is worse than a clear
+    "no candidate matched".
+
+    Parameters
+    ----------
+    caps : Capabilities
+        The candidate's merged capabilities.
+    query : CapabilityQuery
+        The parsed capability terms, all ANDed.
+
+    Returns
+    -------
+    bool
+        Whether every term holds.
+    """
+    for name, wanted in query.booleans.items():
+        if getattr(caps, name) is not wanted:
+            return False
+
+    for name, (op, bound) in query.ranges.items():
+        value = getattr(caps, name)
+        if value is None:
+            return False
+        if op == ">=" and value < bound:
+            return False
+        if op == "<=" and value > bound:
+            return False
+
+    if query.modalities_in:
+        available = caps.modalities_in
+        if available is None:
+            return False
+        if not set(query.modalities_in).issubset(set(available)):
+            return False
+
+    return True
