@@ -20,5 +20,6 @@
 | `test_router_embeddings.py` | Lazy Embedding Client (endpoint/env sources, caching, import without a key) | test_client_built_from_embedding_endpoint, test_no_endpoint_and_no_env_raises_naming_both, test_router_and_server_import_without_openai_key (+ 7 more) |
 | `test_tiers.py` | Tiers (nested strong/weak pairs, recursive walk, inherited router/threshold, decision path) | test_high_score_cascades_to_the_deepest_strong_leaf, test_child_without_values_inherits_the_parent_level, test_fallback_descends_a_tier_sibling_by_weak_without_routers (+ 42 more) |
 | `test_pairing.py` | Policy-based pairing (selectors over endpoint tags + the models.dev catalog, ordering, snapshot cache, explain surface) | test_tag_only_selection_needs_no_catalog, test_catalog_term_selection, test_cost_ordering_puts_none_last (+ 31 more) |
+| `test_openai_server_models.py` | Server model listing (`GET /v1/models`) + the implicit `default` tier derived from the model flags, and the config example's `endpoints:`/`tiers:` load | test_models_lists_tiers_and_routers, test_flags_build_an_implicit_default_tier, test_no_flags_invents_no_default_tier (+ 5 more) |
 
 ⚠️ IMPORTANT: Keep this index up to date as tests are added/removed/modified. This document helps future maintainers understand test coverage at a glance.
