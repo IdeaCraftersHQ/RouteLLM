@@ -11,14 +11,14 @@ from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
 import pytest
-from policy_routing import (
+from routellm_policy_routing import (
     DEFAULT_NAMESPACE_KEY,
     CacheAction,
     CachePolicy,
     MatchStrategy,
     classify_to_policy,
 )
-from policy_routing.policy import (
+from routellm_policy_routing.policy import (
     DEFAULT_POLICY,
     JAILBREAK_HIGH,
     TENANT_NAMESPACE_KEY,
@@ -272,7 +272,7 @@ def test_cache_action_string_round_trip():
 
 
 def test_build_cache_hook_returns_callable_matching_contract():
-    from policy_routing.integrations import build_cache_hook
+    from routellm_policy_routing.integrations import build_cache_hook
 
     hook = build_cache_hook()
     classification = FakeClassification(domain="legal")
@@ -281,7 +281,7 @@ def test_build_cache_hook_returns_callable_matching_contract():
 
 
 def test_build_cache_hook_invokes_classifier_when_missing():
-    from policy_routing.integrations import build_cache_hook
+    from routellm_policy_routing.integrations import build_cache_hook
 
     calls = []
 
@@ -297,7 +297,7 @@ def test_build_cache_hook_invokes_classifier_when_missing():
 
 
 def test_build_cache_hook_no_classifier_no_classification_returns_default():
-    from policy_routing.integrations import build_cache_hook
+    from routellm_policy_routing.integrations import build_cache_hook
 
     hook = build_cache_hook()
     policy = hook(REQUEST, classification=None)
