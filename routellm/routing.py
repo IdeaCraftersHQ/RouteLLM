@@ -213,7 +213,8 @@ def resolve_tier(
     registry : EndpointRegistry
         Registry holding the tiers and endpoints.
     run_router : callable
-        `(router, threshold, prompt, pair) -> (picked, win_rate)`. It is
+        `(router, threshold, prompt, pair) -> (picked, win_rate)`, where
+        `win_rate` is None for a router that reports no score. It is
         also where the router name is validated.
 
     Returns

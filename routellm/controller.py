@@ -253,10 +253,12 @@ class Controller:
     ) -> tuple[str, Optional[float]]:
         """Run one router over one pair and report what it picked.
 
-        `Router.route` stays the decision point, so a router that
-        overrides it keeps deciding. The win rate is read from the same
-        single `calculate_strong_win_rate` call `route` makes, and is
-        None for a router that implements only `route`.
+        Delegates to `Router.route_with_score`, which scores the prompt
+        once and keeps the pick and the score consistent. A router that
+        overrides only `route` decides by its own means and reports no
+        score, so the path records `win_rate` as None. Nothing about the
+        router instance is mutated, so one instance is safe to drive
+        from several requests.
 
         Parameters
         ----------
@@ -272,7 +274,8 @@ class Controller:
         Returns
         -------
         tuple[str, float or None]
-            The side picked, and the recorded win rate.
+            The side picked, and the win rate behind it, None when the
+            router reports none.
 
         Raises
         ------
@@ -282,26 +285,13 @@ class Controller:
         self._validate_router_threshold(router, threshold)
         instance = self.routers[router]
 
-        scores: list[float] = []
-        scorer = getattr(instance, "calculate_strong_win_rate", None)
-        if scorer is None:
+        # Routers predating the hook, and test doubles, may carry only
+        # `route`; they decide for themselves and report no score.
+        scored = getattr(instance, "route_with_score", None)
+        if scored is None:
             return instance.route(prompt, threshold, pair), None
 
-        def _record(*args, **kwargs):
-            score = scorer(*args, **kwargs)
-            scores.append(score)
-            return score
-
-        # Swapped on the instance so `route` reads the recorded scorer;
-        # restored right after, leaving a router shared between requests
-        # untouched.
-        instance.calculate_strong_win_rate = _record
-        try:
-            picked = instance.route(prompt, threshold, pair)
-        finally:
-            del instance.calculate_strong_win_rate
-
-        return picked, scores[0] if scores else None
+        return scored(prompt, threshold, pair)
 
     def _route(
         self,

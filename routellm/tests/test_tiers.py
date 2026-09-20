@@ -26,6 +26,7 @@ from routellm.controller import Controller, RoutingError
 from routellm.endpoints import EndpointRegistry, Tier
 from routellm.quality import CanaryConfig, QualityManager
 from routellm.resilience import ResilienceConfig
+from routellm.routers.base import Router
 from routellm.traffic import TrafficManager, TrafficRule
 from routellm.types import ModelPair
 
@@ -54,8 +55,12 @@ CONFIG = {
 }
 
 
-class _StubRouter:
-    """Router returning a fixed win rate and counting its calls."""
+class _StubRouter(Router):
+    """Router returning a fixed win rate and counting its calls.
+
+    Only the scorer is implemented, so the base class supplies both
+    `route` and `route_with_score` and the stub reports a real score.
+    """
 
     win_rate = 0.5
     calls: list[str] = []
@@ -63,11 +68,6 @@ class _StubRouter:
     def calculate_strong_win_rate(self, prompt):
         type(self).calls.append(prompt)
         return type(self).win_rate
-
-    def route(self, prompt, threshold, routed_pair):
-        if self.calculate_strong_win_rate(prompt) >= threshold:
-            return routed_pair.strong
-        return routed_pair.weak
 
 
 def _make_router(win_rate):
@@ -847,3 +847,78 @@ def test_server_exposes_a_default_threshold_flag():
     source = (REPO_ROOT / "routellm" / "openai_server.py").read_text()
 
     assert "--default-threshold" in source
+
+
+# ---------------------------------------------------------------------------
+# The route_with_score hook
+# ---------------------------------------------------------------------------
+
+
+def test_route_only_router_reports_null_win_rate(
+    registry, tmp_path, monkeypatch, mock_completion
+):
+    """A router implementing only `route` still routes, scoring None."""
+
+    class RouteOnly(Router):
+        def calculate_strong_win_rate(self, prompt):
+            raise AssertionError("route-only router must not be scored")
+
+        def route(self, prompt, threshold, routed_pair):
+            return routed_pair.strong
+
+    monkeypatch.setitem(
+        routellm.controller.ROUTER_CLS, "hi", lambda **kw: RouteOnly()
+    )
+    controller = _controller(registry, tmp_path)
+
+    res = controller.completion(
+        model="default", messages=[{"role": "user", "content": "hard"}]
+    )
+
+    path = res._hidden_params["routellm_path"]
+    assert [entry["picked"] for entry in path] == ["premium", "cloud_strong"]
+    assert [entry["win_rate"] for entry in path] == [None, None]
+
+
+def test_scorer_called_once_per_level(registry, tmp_path, monkeypatch, mock_completion):
+    """A scoring router is scored exactly once at each tier level."""
+    calls = []
+
+    class Counting(Router):
+        def calculate_strong_win_rate(self, prompt):
+            calls.append(prompt)
+            return 0.9
+
+    monkeypatch.setitem(
+        routellm.controller.ROUTER_CLS, "hi", lambda **kw: Counting()
+    )
+    controller = _controller(registry, tmp_path)
+
+    res = controller.completion(
+        model="default", messages=[{"role": "user", "content": "the prompt"}]
+    )
+
+    assert calls == ["the prompt", "the prompt"]
+    assert [entry["win_rate"] for entry in res._hidden_params["routellm_path"]] == [
+        0.9,
+        0.9,
+    ]
+
+
+def test_routing_leaves_the_router_instance_untouched(
+    registry, tmp_path, hi_router, mock_completion
+):
+    """Walking the tree must not instrument the shared router.
+
+    One router instance serves every request, so a walk that swaps
+    attributes on it in place races once two requests overlap. The
+    scorer must still resolve to the class after a walk.
+    """
+    controller = _controller(registry, tmp_path)
+
+    controller.completion(
+        model="default", messages=[{"role": "user", "content": "hard"}]
+    )
+
+    instance = controller.routers["hi"]
+    assert "calculate_strong_win_rate" not in vars(instance)
