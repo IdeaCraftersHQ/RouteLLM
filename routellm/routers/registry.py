@@ -176,6 +176,9 @@ def discover_routers(group=ENTRY_POINT_GROUP):
     registered = []
 
     for entry_point in entry_points(group=group):
+        # Only a successful registration is skipped; a name still in
+        # discovery_failures is retried and re-warned every call, so a
+        # plugin fixed at runtime is picked up without a restart.
         if entry_point.name in ROUTER_CLS:
             continue
 
