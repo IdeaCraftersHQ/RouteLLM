@@ -402,6 +402,215 @@ def _score_row(trace: dict, scorer, spec: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Aggregation
+# ---------------------------------------------------------------------------
+
+
+def aggregate_scores(
+    rows: list,
+    min_samples: int = 30,
+    transform: str = "linear",
+    areas: Optional[dict] = None,
+) -> dict:
+    """Turn scored traces into the quality sidecar, as a dict.
+
+    Pure: no I/O, no fit import, no network. The CLI is a thin wrapper
+    around this.
+
+    A trace counts when it was scored (`score` is not null) and was not
+    served from cache: a cached answer measures the cache, not the
+    endpoint that once produced it. Canary traces DO count. They are
+    real answers from a real endpoint, and excluding them would make an
+    endpoint's measured quality depend on how much canary traffic it
+    happened to get.
+
+    An endpoint under `min_samples` is left OUT of `endpoints:` rather
+    than written with a null quality. Absent means unrated, and the
+    merge step then leaves the YAML `quality` alone; a null would mean
+    "measured, and the measurement is nothing". The same threshold
+    applies per area: an area under it is dropped from `by_area` while
+    the endpoint's overall number may still be present.
+
+    Transforms
+    ----------
+    linear
+        `quality = round(100 * mean_score)`, clamped to [0, 100]. fit
+        scores live in [0, 1] (reward-schema-v1) and `Endpoint.quality`
+        is `ge=0, le=100`, so this is the identity times 100 and the
+        number means "the mean reward, as a percentage".
+    percentile
+        Ranks the rated endpoints against each other and spreads them
+        over [0, 100]. Useful when every scorer output clusters, which
+        fit's constant `DimensionScorer` guarantees. It compares
+        endpoints to each other, so it needs at least two; with fewer
+        it falls back to linear and warns.
+
+    Parameters
+    ----------
+    rows : list[dict]
+        Rows of the scores file.
+    min_samples : int, optional
+        Below this an endpoint or area is omitted (default 30).
+    transform : str, optional
+        `linear` or `percentile` (default "linear").
+    areas : dict, optional
+        Tier name to area name. When given, a trace with no `area` of
+        its own takes the area of its tier. When None, `by_area` is
+        keyed by the raw tier name and the sidecar says so.
+
+    Returns
+    -------
+    dict
+        The sidecar, ready for `yaml.safe_dump(..., sort_keys=False)`.
+    """
+    overall: dict = {}
+    per_area: dict = {}
+
+    for row in rows:
+        if row.get("cached"):
+            continue
+        score = row.get("score")
+        if score is None:
+            continue
+        endpoint = row.get("endpoint")
+        if not endpoint:
+            continue
+
+        overall.setdefault(endpoint, []).append(float(score))
+
+        area = row.get("area")
+        if area is None and areas is not None:
+            area = areas.get(row.get("tier"))
+        if area is None:
+            area = row.get("tier")
+        if area is not None:
+            per_area.setdefault(endpoint, {}).setdefault(area, []).append(
+                float(score)
+            )
+
+    rated = {
+        name: values
+        for name, values in overall.items()
+        if len(values) >= min_samples
+    }
+
+    effective = transform
+    if transform == "percentile" and len(rated) < 2:
+        logger.warning(
+            "percentile ranks endpoints against each other and needs at "
+            "least 2 rated ones; %s rated, falling back to linear",
+            len(rated),
+        )
+        effective = "linear"
+
+    if effective == "percentile":
+        means = {name: sum(v) / len(v) for name, v in rated.items()}
+        qualities = _percentile_scale(means)
+    else:
+        qualities = {
+            name: _linear(sum(v) / len(v)) for name, v in rated.items()
+        }
+
+    endpoints: dict = {}
+    for name in sorted(rated):
+        by_area = {
+            area: {"quality": _linear(sum(v) / len(v)), "n": len(v)}
+            for area, v in sorted((per_area.get(name) or {}).items())
+            if len(v) >= min_samples
+        }
+        endpoints[name] = {
+            "quality": qualities[name],
+            "n": len(rated[name]),
+            "by_area": by_area,
+        }
+
+    return {
+        "version": 1,
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "min_samples": min_samples,
+        "transform": effective,
+        "source": "traces",
+        "area_source": "config" if areas is not None else "tier",
+        "endpoints": endpoints,
+    }
+
+
+def _linear(mean: float) -> int:
+    """Return a mean reward on the [0, 100] scale `quality` validates."""
+    return max(0, min(100, round(100 * mean)))
+
+
+def _percentile_scale(means: dict) -> dict:
+    """Spread rated endpoints over [0, 100] by their rank.
+
+    Ties share a rank, so two endpoints that scored the same get the
+    same quality rather than an arbitrary order between them.
+    """
+    ordered = sorted(set(means.values()))
+    last = len(ordered) - 1
+    return {
+        name: _clamp_int(100 * ordered.index(mean) / last) if last else 100
+        for name, mean in means.items()
+    }
+
+
+def _clamp_int(value: float) -> int:
+    """Round to an int inside [0, 100]."""
+    return max(0, min(100, round(value)))
+
+
+def load_scores(path: str) -> list:
+    """Read a scores JSONL file into a list of rows.
+
+    Parameters
+    ----------
+    path : str
+        Scores file.
+
+    Returns
+    -------
+    list[dict]
+        One row per scored trace.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the file is missing or holds no row.
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"No scores file at {path}")
+
+    rows = []
+    with open(path) as handle:
+        for number, line in enumerate(handle, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except ValueError as exc:
+                logger.warning("skipping malformed score at %s:%s: %s", path, number, exc)
+
+    if not rows:
+        raise FileNotFoundError(f"No scores to aggregate in {path}")
+    return rows
+
+
+def _areas_from_config(path: str) -> dict:
+    """Invert a config's `areas:` map into tier name to area name."""
+    import yaml
+
+    with open(path) as handle:
+        config = yaml.safe_load(handle) or {}
+
+    inverted: dict = {}
+    for area, tiers in (config.get("areas") or {}).items():
+        for tier in tiers or []:
+            inverted[tier] = area
+    return inverted
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -429,6 +638,15 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="authorise a scorer spec that calls an LLM per trace",
     )
+
+    agg = sub.add_parser("aggregate", help="aggregate scores into the sidecar")
+    agg.add_argument("--scores", required=True, help="scores JSONL")
+    agg.add_argument("--config", default=None, help="routellm YAML, read for areas:")
+    agg.add_argument("--out", required=True, help="sidecar YAML to write")
+    agg.add_argument("--min-samples", type=int, default=30)
+    agg.add_argument(
+        "--transform", choices=("linear", "percentile"), default="linear"
+    )
     return parser
 
 
@@ -450,6 +668,31 @@ def main(argv: Optional[list] = None) -> int:
         except (FileNotFoundError, ValueError, RuntimeError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
+
+    elif args.command == "aggregate":
+        import yaml
+
+        try:
+            rows = load_scores(args.scores)
+            areas = _areas_from_config(args.config) if args.config else None
+            sidecar = aggregate_scores(
+                rows,
+                min_samples=args.min_samples,
+                transform=args.transform,
+                areas=areas,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+
+        with open(args.out, "w") as handle:
+            yaml.safe_dump(sidecar, handle, sort_keys=False)
+        logger.info(
+            "wrote %s rated endpoints to %s",
+            len(sidecar["endpoints"]),
+            args.out,
+        )
+
     return 0
 
 
