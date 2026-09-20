@@ -197,3 +197,23 @@ def test_missing_flag_file_is_reported_not_traced(env):
     assert code == 1
     assert out.strip() == ""
     assert "--config" in err
+
+
+def test_paths_and_show_agree_when_no_project_marker_exists(env):
+    """Both surfaces report the project layer, absent, on the same line.
+
+    `config_paths` omits the project entry entirely when no marker was
+    found — there is no path to name — so both commands synthesize the
+    same `[absent] project` line rather than one of them staying silent.
+    """
+    env.write(env.user, {"a": 2})
+
+    _, paths_out, _ = env.run("paths")
+    _, show_out, _ = env.run("show")
+
+    project_lines = [
+        line for line in paths_out.splitlines() if "project" in line
+    ]
+    assert len(project_lines) == 1
+    assert project_lines[0].startswith("[absent]")
+    assert project_lines[0] in show_out

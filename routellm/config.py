@@ -357,8 +357,6 @@ def explain(loaded: LoadedConfig) -> str:
         The rendered explanation, newline-terminated.
     """
     lines = _chain_lines(loaded.chain)
-    if not any(entry.source == "project" for entry in loaded.chain):
-        lines.append("[absent] project (no .routellm.yaml or routellm.yaml found)")
     lines.append("")
 
     dumped = yaml.safe_dump(loaded.data, sort_keys=False)
@@ -412,13 +410,33 @@ def winning_path(chain: List[ResolvedPath]) -> Optional[ResolvedPath]:
     return None
 
 
+#: Stands in for the project layer when the walk-up found no marker.
+#: `config_paths` omits the entry entirely in that case — there is no
+#: path to name — but a chain listing that simply skipped the layer
+#: would read as though it were never searched.
+NO_PROJECT_LINE = "[absent] project (no .routellm.yaml or routellm.yaml found)"
+
+
 def _chain_lines(chain: List[ResolvedPath]) -> List[str]:
-    """Render one `[used]`/`[absent]` line per searched location."""
-    return [
+    """Render one `[used]`/`[absent]` line per searched location.
+
+    A chain carrying no project entry gets `NO_PROJECT_LINE` in its
+    place, so every surface that prints the chain reports the same six
+    layers whether or not a marker was found.
+    """
+    lines = [
         f"{'[used]  ' if entry.exists else '[absent]'} "
         f"{entry.source:<7} {entry.path}"
         for entry in chain
     ]
+    if not any(entry.source == "project" for entry in chain):
+        # After user, before the explicit layers: its place in the
+        # precedence order, not the end of the list.
+        after_user = sum(
+            1 for entry in chain if entry.source in ("system", "user")
+        )
+        lines.insert(after_user, NO_PROJECT_LINE)
+    return lines
 
 
 def main(argv: Optional[List[str]] = None) -> int:
