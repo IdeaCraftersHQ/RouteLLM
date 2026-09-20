@@ -25,11 +25,18 @@
 #               below: none of the unlisted ones takes images.
 #
 # Governance tiers select on the reach tags: `private` takes `tag:local`
-# on both sides, `vpn` takes `tag:vpn`, and a tier that writes no reach
-# term is unrestricted.
+# on both sides and never leaves our own hardware; `vpn` takes `tag:vpn`
+# and keeps the traffic on the private network, though the model at the
+# far end may still be vendor-hosted; a tier that writes no reach term
+# is unrestricted.
 #
-# Provider-agnostic: the model ids below are examples. Explain what a
-# selector actually picks on your machine before trusting it:
+# What to change before this runs anywhere. The cloud model ids are
+# real: they are public models.dev catalog ids, and pairing matches
+# them against that catalog. Everything about the local runtimes is a
+# placeholder -- the model ids read `<your-...>`, and the ports are the
+# tunnels this example assumes rather than ports you necessarily have.
+# Replace both with what your own servers report, then check what the
+# selectors actually pick before trusting them:
 #
 #   python -m routellm.pairing --config examples/multitier.yaml
 
@@ -117,31 +124,34 @@ endpoints:
 
   # An OpenAI-compatible server of our own. The `openai/` prefix routes
   # any such server through litellm; the model id must match what the
-  # server reports under its `/v1/models`.
-  colibri:
-    model: openai/qwen3.6-colibri
+  # server reports under its `/v1/models`, and the port is whichever
+  # tunnel or socket you reach it on.
+  local_server:
+    model: openai/<your-local-server-model-id>
     api_base: http://127.0.0.1:11800/v1
-    api_key_env: COLI_API_KEY
+    api_key_env: LOCAL_SERVER_API_KEY
     tags: [local, vpn, "jur:ca", slow, general, tools, long_context]
-    quality: 85
+    quality: 90
 
-  # Ollama over an ssh tunnel. Never the default 11434: that port is
-  # whatever Ollama happens to run on this machine, and this endpoint
-  # means the remote host on the other side of the tunnel.
+  # Ollama over an ssh tunnel, on your tunnel port. Never the default
+  # 11434: that is whatever Ollama happens to run on the machine the
+  # server starts on, and these endpoints mean the host at the far end
+  # of the tunnel. Quality scores are illustrative -- rank your own
+  # models against each other, the numbers only order them.
   ollama_coder:
-    model: ollama_chat/qwen3.6:27b-coding-mxfp8
+    model: ollama_chat/<your-coder-model>
     api_base: http://127.0.0.1:11500
     tags: [local, vpn, "jur:ca", slow, coder, tools]
     quality: 80
 
   ollama_coder_fast:
-    model: ollama_chat/north-mini-code-1.0
+    model: ollama_chat/<your-small-coder-model>
     api_base: http://127.0.0.1:11500
     tags: [local, vpn, "jur:ca", fast, coder, tools]
     quality: 70
 
   ollama_general_fast:
-    model: ollama_chat/ornith:9b
+    model: ollama_chat/<your-small-model>
     api_base: http://127.0.0.1:11500
     tags: [local, vpn, "jur:ca", fast, general]
     quality: 60
@@ -153,19 +163,19 @@ endpoints:
   # a claim about where they run.
 
   ollama_cloud_flash:
-    model: ollama_chat/deepseek-v4-flash:cloud
+    model: ollama_chat/<your-cloud-fast-model>
     api_base: http://127.0.0.1:11500
     tags: [cloud, "jur:us", fast, general, tools, long_context]
     quality: 76
 
   ollama_cloud_pro:
-    model: ollama_chat/deepseek-v4-pro:cloud
+    model: ollama_chat/<your-cloud-strong-model>
     api_base: http://127.0.0.1:11500
     tags: [cloud, "jur:us", slow, general, tools, long_context]
     quality: 88
 
   ollama_cloud_kimi:
-    model: ollama_chat/kimi-k2.5:cloud
+    model: ollama_chat/<your-cloud-writer-model>
     api_base: http://127.0.0.1:11500
     tags: [cloud, "jur:us", slow, writer, tools, long_context]
     quality: 86
@@ -200,6 +210,15 @@ tiers:
 
   # The quality side is restricted to reach `cloud` -- swap the term for
   # `tag:vpn` to keep an area's strong side on the private network.
+  #
+  # `tag:slow` is on the strong sides so a vendor's fast sibling cannot
+  # win both sides of one tier, which pairing rejects. With the
+  # endpoints below that narrows `coding_quality.strong` and
+  # `design_quality.strong` to a single candidate each, so those two
+  # are effectively named rather than chosen. That is fine -- adding
+  # another slow cloud coder or designer gives the policy something to
+  # decide again without the tier being touched -- but it does mean the
+  # explain table shows one line there, not a ranking.
   coding_quality:
     strong: {select: "tag:cloud tag:coder tag:slow tool_call:true", order: quality_desc}
     weak: {select: "tag:coder tag:vpn", order: quality_desc}
@@ -246,8 +265,11 @@ tiers:
     strong: {select: "tag:local", order: quality_desc}
     weak: {select: "tag:local tag:fast", order: cost_asc}
 
-  # `vpn` widens that to anything on the private network, which takes in
-  # the private cloud endpoints above once they are enabled.
+  # `vpn` is about the path, not the hardware: the traffic stays on the
+  # private network -- tailscale, or a vendor private endpoint -- but the
+  # model at the far end may still be vendor-hosted, as a vendor whose
+  # public API is also exposed privately is `cloud` and `vpn` both. Use
+  # `private` when the prompt must not leave our own hardware at all.
   vpn:
     router: jev
     threshold: 0.4
