@@ -82,6 +82,7 @@ class Router(abc.ABC):
             return routed_pair.weak
 
     def __str__(self):
-        """Return router class name as string."""
-        from routellm.routers.routers import NAME_TO_CLS
-        return NAME_TO_CLS[self.__class__]
+        """Return the name this router class is registered under."""
+        from routellm.routers.registry import name_for
+
+        return name_for(type(self))

@@ -6,6 +6,7 @@ prompts to either strong or weak models based on difficulty estimation.
 """
 
 import functools
+import logging
 import random
 
 import numpy as np
@@ -28,6 +29,13 @@ from routellm.routers.similarity_weighted.utils import (
     preprocess_battles,
 )
 from routellm.routers.base import Router, no_parallel  # noqa: F401
+from routellm.routers.registry import (  # noqa: F401
+    ROUTER_CLS,
+    discover_routers,
+    register_router,
+)
+
+logger = logging.getLogger(__name__)
 
 
 @no_parallel
@@ -427,12 +435,16 @@ class RandomRouter(Router):
 
 from routellm.routers.typesafe.router import JevRouter  # noqa: E402  # isort: skip
 
-ROUTER_CLS = {
-    "random": RandomRouter,
-    "mf": MatrixFactorizationRouter,
-    "causal_llm": CausalLLMRouter,
-    "bert": BERTRouter,
-    "sw_ranking": SWRankingRouter,
-    "jev": JevRouter,
-}
-NAME_TO_CLS = {v: k for k, v in ROUTER_CLS.items()}
+register_router("random", RandomRouter)
+register_router("mf", MatrixFactorizationRouter)
+register_router("causal_llm", CausalLLMRouter)
+register_router("bert", BERTRouter)
+register_router("sw_ranking", SWRankingRouter)
+register_router("jev", JevRouter)
+
+# Entry points come from installed packages: a broken one must never
+# keep this module from importing.
+try:
+    discover_routers()
+except Exception:  # noqa: BLE001
+    logger.warning("router entry point discovery failed", exc_info=True)
