@@ -13,6 +13,7 @@ import json
 import logging
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -179,10 +180,13 @@ def test_tier_side_accepts_a_selector_mapping():
     assert tier.strong.order == "cost_asc"
 
 
-def test_validation_skips_selector_sides(registry):
+def test_validation_skips_selector_sides():
     # A Selector side names no endpoint, so reference validation must
     # not reject it before pairing has resolved it.
-    _tiered({"select": "tag:local"}, {"select": "tag:cloud"})
+    tier = _tiered({"select": "tag:local"}, {"select": "tag:cloud"}).get_tier("default")
+
+    assert isinstance(tier.strong, Selector)
+    assert isinstance(tier.weak, Selector)
 
 
 # ---------------------------------------------------------------------------
@@ -278,6 +282,23 @@ def test_quality_tiebreaks_on_release_date(catalog, cache_dir):
     assert ordered == ["z_newer", "a_older"]
 
 
+def test_undated_sorts_after_dated_among_the_unrated(catalog, cache_dir):
+    # Neither endpoint carries a manual quality, so the release-date
+    # tiebreak decides. An endpoint with no catalog record has no date
+    # at all and must sort last, not first.
+    registry = EndpointRegistry.from_config(
+        {
+            "endpoints": {
+                "a_undated": {"model": "ollama_chat/qwen3:8b", "tags": ["mixed"]},
+                "z_dated": {"model": "gpt-4o", "tags": ["mixed"]},
+            }
+        }
+    )
+    selector = Selector(select="tag:mixed", order="quality_desc")
+    ordered = [name for name, _ in pairing.rank_candidates(registry, selector)]
+    assert ordered == ["z_dated", "a_undated"]
+
+
 def test_unrated_endpoints_sort_after_rated_ones(registry, catalog, cache_dir):
     # sonnet carries no manual quality, so it loses to every rated
     # endpoint however recent its release.
@@ -306,6 +327,20 @@ def test_unknown_query_key_surfaces_the_term(registry, catalog, cache_dir):
 def test_bare_free_text_token_rejected(registry, catalog, cache_dir):
     selector = Selector(select="tag:cloud sonnet")
     with pytest.raises(ValueError, match="sonnet"):
+        resolve_pairing(registry, selector)
+
+
+@pytest.mark.parametrize(
+    "key", ["open_weights", "structured_output", "temperature", "family"]
+)
+@pytest.mark.parametrize("value", ["true", "false"])
+def test_unsupported_catalog_term_rejected_whatever_its_value(
+    registry, catalog, cache_dir, key, value
+):
+    # A false-valued tri-state is still a term pairing cannot judge; it
+    # must be rejected rather than silently matching every candidate.
+    selector = Selector(select=f"{key}:{value}")
+    with pytest.raises(ValueError, match=key):
         resolve_pairing(registry, selector)
 
 
@@ -437,6 +472,38 @@ def test_successful_fetch_writes_the_snapshot(registry, catalog, cache_dir):
 # ---------------------------------------------------------------------------
 # Provider mapping
 # ---------------------------------------------------------------------------
+
+
+def test_fetch_gives_up_at_the_timeout_without_waiting_for_the_worker(
+    monkeypatch, cache_dir
+):
+    """A hung fetch must not hold startup past the timeout.
+
+    The worker sleeps far longer than the timeout; the call has to
+    surface `CatalogUnavailable` promptly rather than blocking until
+    the thread finishes, which is what a `with` block around the pool
+    would do through `shutdown(wait=True)`.
+    """
+    import hop.aim as aim
+
+    started = threading.Event()
+
+    class _HangingRegistry:
+        async def models(self, filter=None):
+            started.set()
+            time.sleep(10)
+            return []
+
+    monkeypatch.setattr(aim, "Registry", _HangingRegistry)
+    monkeypatch.setattr(pairing, "CATALOG_FETCH_TIMEOUT", 0.2)
+
+    start = time.monotonic()
+    with pytest.raises(CatalogUnavailable):
+        pairing._fetch_catalog()
+    elapsed = time.monotonic() - start
+
+    assert started.is_set(), "the worker never ran, so nothing was timed"
+    assert elapsed < 1.0, f"gave up after {elapsed:.2f}s, expected well under 1s"
 
 
 def test_provider_mapping_for_a_bare_openai_name():
