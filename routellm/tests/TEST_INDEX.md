@@ -17,5 +17,6 @@
 | `test_prompt_file.py` | Generic Prompt File Loader | test_load_full_file, test_unrequested_section_ignored, test_section_wrong_type_raises (+ 13 more) |
 | `test_router_registry.py` | Router Registry (register + entry-point discovery) | test_register_get_names_round_trip, test_duplicate_name_raises, test_decorator_form_registers (+ 11 more) |
 | `test_endpoints.py` | Endpoint Registry (named endpoints + per-endpoint credentials) | test_from_config_builds_named_endpoints, test_resolve_raw_model_warns_once, test_credentials_reads_env_at_call_time (+ 21 more) |
+| `test_router_embeddings.py` | Lazy Embedding Client (endpoint/env sources, caching, import without a key) | test_client_built_from_embedding_endpoint, test_no_endpoint_and_no_env_raises_naming_both, test_router_and_server_import_without_openai_key (+ 7 more) |
 
 ⚠️ IMPORTANT: Keep this index up to date as tests are added/removed/modified. This document helps future maintainers understand test coverage at a glance.

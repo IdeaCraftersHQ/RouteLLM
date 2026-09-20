@@ -20,6 +20,7 @@ from routellm.payment.gateway import PaymentGateway
 from routellm.payment.types import PaymentChallenge
 from routellm.quality import QualityManager
 from routellm.resilience import Resilience, ResilienceConfig
+from routellm.routers.embeddings import configure_embeddings
 from routellm.routers.routers import ROUTER_CLS
 from routellm.traffic import TrafficManager
 from routellm.types import Middleware, ModelPair
@@ -123,6 +124,10 @@ class Controller:
 
         if config is None:
             config = GPT_4_AUGMENTED_CONFIG
+
+        # Routers that embed prompts build their client on first use;
+        # point it at the `embedding` endpoint before any is constructed.
+        configure_embeddings(self.endpoints)
 
         router_pbar = None
         if self.progress_bar:
