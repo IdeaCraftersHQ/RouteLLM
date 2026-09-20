@@ -42,9 +42,12 @@ curl -s localhost:6060/v1/chat/completions \
   -d '{"model": "coding", "messages": [{"role": "user", "content": "hi"}]}'
 ```
 
-The model ids in the file are examples. Check what the selectors
-actually pick from your own endpoints before trusting them — this needs
-no server and makes one models.dev fetch:
+The cloud model ids in the file are real public catalog ids, so those
+selectors resolve as written. Everything about the local runtimes is a
+placeholder: the model ids read `<your-...>` and the ports are the
+tunnels the file assumes. Swap both for what your own servers report,
+then check what the selectors pick — this needs no server and makes one
+models.dev fetch:
 
 ```
 python -m routellm.pairing --config examples/multitier.yaml
@@ -53,4 +56,6 @@ python -m routellm.pairing --config examples/multitier.yaml
 Specialise a copy for a real machine rather than editing this one: swap
 in the model ids your servers report, set `quality` on anything
 models.dev does not list, and point each `api_base` at the tunnel or
-host that actually serves it.
+host that actually serves it. The `quality` numbers on the local
+endpoints are illustrative — they only rank those endpoints against
+each other, so what matters is their order, not the values.
