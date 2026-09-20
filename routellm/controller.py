@@ -17,6 +17,7 @@ from tqdm import tqdm
 
 from routellm.caching import Cache, CacheConfig
 from routellm.endpoints import EndpointRegistry, Selector
+from routellm.hints import TYPESAFE_INSTALL_HINT
 from routellm.payment.gateway import PaymentGateway
 from routellm.payment.types import PaymentChallenge
 from routellm.quality import QualityManager
@@ -203,10 +204,13 @@ class Controller:
             if tier.router is None or tier.router in to_build:
                 continue
             if tier.router not in ROUTER_CLS:
+                # `jev` is the one name an operator can reasonably
+                # expect to work, so say where it comes from.
+                hint = f" {TYPESAFE_INSTALL_HINT}" if tier.router == "jev" else ""
                 raise ValueError(
                     f"Tier {tier.name!r} names unknown router "
                     f"{tier.router!r}. Registered routers: "
-                    f"{', '.join(sorted(ROUTER_CLS)) or '<none>'}"
+                    f"{', '.join(sorted(ROUTER_CLS)) or '<none>'}.{hint}"
                 )
             to_build.append(tier.router)
 

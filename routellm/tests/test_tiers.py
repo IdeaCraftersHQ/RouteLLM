@@ -177,6 +177,27 @@ def test_unknown_reference_rejected():
     assert "nowhere" in str(excinfo.value)
 
 
+def test_unknown_reference_excludes_the_tier_being_validated():
+    """The suggestion list never offers the tier as its own side.
+
+    Naming it would suggest a one-node cycle, which the walk rejects.
+    """
+    config = {
+        "endpoints": {"a": {"model": "m"}},
+        "tiers": {
+            "t": {"strong": "a", "weak": "nowhere"},
+            "other": {"strong": "a", "weak": "a"},
+        },
+    }
+
+    with pytest.raises(ValueError) as excinfo:
+        EndpointRegistry.from_config(config)
+
+    known = str(excinfo.value).split("Known tiers and endpoints: ")[1]
+    assert "'t'" not in known
+    assert [name.strip() for name in known.rstrip(".").split(",")] == ["other", "a"]
+
+
 def test_cycle_rejected_naming_the_cycle():
     config = {
         "endpoints": {"a": {"model": "m"}},
