@@ -11,6 +11,7 @@ import pytest
 
 import routellm.routers.registry as registry
 from routellm.routers.base import Router
+from routellm.types import ModelPair
 from routellm.routers.registry import (
     ROUTER_CLS,
     discovery_failures,
@@ -194,3 +195,80 @@ def test_str_of_late_registered_instance():
     register_router("late", LateRouter)
 
     assert str(LateRouter()) == "late"
+
+
+# ---------------------------------------------------------------------------
+# Router.route / route_with_score agreement
+# ---------------------------------------------------------------------------
+
+
+class _ScoringRouter(Router):
+    """Router with a fixed score that counts how often it is asked."""
+
+    def __init__(self, win_rate):
+        self.win_rate = win_rate
+        self.calls = 0
+
+    def calculate_strong_win_rate(self, prompt):
+        self.calls += 1
+        return self.win_rate
+
+
+@pytest.mark.parametrize(
+    ("win_rate", "threshold", "expected"),
+    [
+        (0.9, 0.5, "strong"),
+        (0.1, 0.5, "weak"),
+        (0.5, 0.5, "strong"),
+    ],
+)
+def test_route_agrees_with_route_with_score(win_rate, threshold, expected):
+    pair = ModelPair(strong="strong", weak="weak")
+
+    model, score = _ScoringRouter(win_rate).route_with_score(
+        "prompt", threshold, pair
+    )
+
+    assert model == expected
+    assert score == win_rate
+    assert _ScoringRouter(win_rate).route("prompt", threshold, pair) == expected
+
+
+def test_route_with_score_scores_once():
+    router = _ScoringRouter(0.9)
+
+    router.route_with_score("prompt", 0.5, ModelPair(strong="s", weak="w"))
+
+    assert router.calls == 1
+
+
+def test_route_only_subclass_reports_no_score():
+    class RouteOnly(Router):
+        def calculate_strong_win_rate(self, prompt):
+            raise AssertionError("a route-only router must not be scored")
+
+        def route(self, prompt, threshold, routed_pair):
+            return routed_pair.weak
+
+    model, score = RouteOnly().route_with_score(
+        "prompt", 0.5, ModelPair(strong="s", weak="w")
+    )
+
+    assert model == "w"
+    assert score is None
+
+
+def test_scoring_a_prompt_leaves_the_router_untouched():
+    """Scoring must not add or remove attributes on the instance.
+
+    A router instance is shared across requests, so anything that
+    instruments it in place is unsafe once two requests overlap.
+    """
+    router = _ScoringRouter(0.9)
+
+    router.route_with_score("prompt", 0.5, ModelPair(strong="s", weak="w"))
+
+    # The scorer must still resolve to the class attribute: an instance
+    # entry means the call instrumented the object in place.
+    assert "calculate_strong_win_rate" not in vars(router)
+    assert "route" not in vars(router)

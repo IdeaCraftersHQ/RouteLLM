@@ -57,8 +57,48 @@ class Router(abc.ABC):
         """
         pass
 
+    def route_with_score(self, prompt, threshold, routed_pair):
+        """Route a prompt and report the score the decision rested on.
+
+        The scoring entry point for callers that need the win rate as
+        well as the pick, such as the tier walk that records a decision
+        path. `calculate_strong_win_rate` is called exactly once.
+
+        A subclass that overrides `route` but not this method is taken
+        as deciding by its own means: its `route` is called and the
+        score is reported as None, rather than scoring the prompt a
+        second time just to fill the field in.
+
+        Parameters
+        ----------
+        prompt : str
+            Input prompt to route.
+        threshold : float
+            Decision threshold in [0, 1]. If the win rate is greater
+            than or equal to it, the strong model is chosen.
+        routed_pair : ModelPair
+            Pair of strong and weak model names.
+
+        Returns
+        -------
+        tuple[str, float or None]
+            The chosen model name, and the win rate behind it. None
+            means this router reports no score.
+        """
+        if type(self).route is not Router.route:
+            return self.route(prompt, threshold, routed_pair), None
+
+        win_rate = self.calculate_strong_win_rate(prompt)
+        model = routed_pair.strong if win_rate >= threshold else routed_pair.weak
+
+        return model, win_rate
+
     def route(self, prompt, threshold, routed_pair):
         """Route prompt to strong or weak model based on threshold.
+
+        Delegates to `route_with_score`, so the pick and the score can
+        never disagree. A subclass overriding this method replaces the
+        decision for both entry points.
 
         Parameters
         ----------
@@ -76,10 +116,7 @@ class Router(abc.ABC):
             Name of model to route to (either routed_pair.strong or
             routed_pair.weak).
         """
-        if self.calculate_strong_win_rate(prompt) >= threshold:
-            return routed_pair.strong
-        else:
-            return routed_pair.weak
+        return self.route_with_score(prompt, threshold, routed_pair)[0]
 
     def __str__(self):
         """Return the name this router class is registered under."""
