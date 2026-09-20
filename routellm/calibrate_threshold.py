@@ -7,11 +7,11 @@ thresholds to target specific percentages of strong model usage.
 import argparse
 import json
 
-import yaml
 from datasets import Dataset, load_dataset
 from pandarallel import pandarallel
 from tqdm import tqdm
 
+from routellm.config import load_config
 from routellm.controller import Controller
 from routellm.routers.routers import ROUTER_CLS
 
@@ -20,7 +20,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--battles_dataset", type=str, default="lmsys/lmsys-arena-human-preference-55k"
     )
-    parser.add_argument("--config", type=str, default=None)
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help=(
+            "Explicit config file, merged last over the discovered chain "
+            "(system, user, project, ROUTELLM_CONFIG). Run "
+            "`python -m routellm.config paths` to see the chain."
+        ),
+    )
     parser.add_argument(
         "--routers",
         nargs="+",
@@ -39,7 +48,7 @@ if __name__ == "__main__":
         battles_df = load_dataset(args.battles_dataset, split="train").to_pandas()
         controller = Controller(
             routers=args.routers,
-            config=yaml.safe_load(open(args.config, "r")) if args.config else None,
+            config=load_config(explicit=args.config).data,
             # This is not needed since we only calculate the win rate
             routed_pair=None,
             progress_bar=True,
