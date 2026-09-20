@@ -62,6 +62,8 @@ class JevRouter(Router):
         Prompts longer than this are truncated before being sent.
     instructions : str, optional
         Override for the default Noul question.
+    criteria : dict, optional
+        Override for the default yes/no criteria passed to the Noul.
     base_url : str, optional
         Override for the API base URL. ``None`` uses the SDK default.
     transport : httpx2.BaseTransport, optional
@@ -80,6 +82,7 @@ class JevRouter(Router):
         max_retries=3,
         max_prompt_chars=100_000,
         instructions=None,
+        criteria=None,
         base_url=None,
         transport=None,
     ):
@@ -89,9 +92,10 @@ class JevRouter(Router):
         self.instructions = (
             DEFAULT_INSTRUCTIONS if instructions is None else instructions
         )
+        self.criteria = DEFAULT_CRITERIA if criteria is None else criteria
         self._noul = typesafe_sdk.Noul(
             instructions=self.instructions,
-            criteria=DEFAULT_CRITERIA,
+            criteria=self.criteria,
         )
         self.client = typesafe_sdk.TypeSafeClient(
             model=model,

@@ -1,6 +1,7 @@
-"""Abstract base classes and implementations for prompt routing.
+"""Router implementations for prompt routing.
 
-This module provides router classes that compute confidence scores for routing
+The abstract base class lives in `routellm.routers.base`; this module
+provides router classes that compute confidence scores for routing
 prompts to either strong or weak models based on difficulty estimation.
 """
 
