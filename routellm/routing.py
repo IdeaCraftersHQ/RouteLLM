@@ -187,12 +187,74 @@ def _first_hit(own, parent, request, default) -> tuple[Any, str]:
     return None, SOURCE_DEFAULT
 
 
+def forced_side(
+    label: str,
+    strong: str,
+    weak: str,
+    requirements: Optional[Any],
+    check: Optional[Callable[[str, Any], Optional[str]]],
+    error_cls: type,
+) -> Optional[tuple[str, str, str]]:
+    """Return the side capability checking forces, or None for "unchanged".
+
+    None means the router decides as it always has: either no
+    requirements were derived, or both sides can serve the request.
+
+    Parameters
+    ----------
+    label : str
+        Tier name, or a description of the flat pair, for the error.
+    strong, weak : str
+        The two sides.
+    requirements : Requirements, optional
+        What the request needs.
+    check : callable, optional
+        `(side, requirements) -> failed requirement name or None`.
+    error_cls : type
+        Exception raised when neither side can serve the request.
+
+    Returns
+    -------
+    tuple[str, str, str] or None
+        `(picked, "strong" | "weak", requirement the OTHER side failed)`,
+        or None when the level is unchanged.
+
+    Raises
+    ------
+    error_cls
+        If neither side can serve the request.
+    """
+    if requirements is None or check is None or requirements.is_empty():
+        return None
+
+    strong_failed = check(strong, requirements)
+    weak_failed = check(weak, requirements)
+
+    if strong_failed is None and weak_failed is None:
+        return None
+
+    if strong_failed is None:
+        return strong, "strong", weak_failed
+    if weak_failed is None:
+        return weak, "weak", strong_failed
+
+    raise error_cls(
+        f"Tier {label!r} has no side that can serve this request: "
+        f"{strong_failed}. Configured sides: {strong} ({strong_failed}), "
+        f"{weak} ({weak_failed})."
+    )
+
+
 def resolve_tier(
     tier_name: str,
     prompt: str,
     inherited: dict[str, Any],
     registry: EndpointRegistry,
     run_router: Callable[[str, float, str], float],
+    *,
+    requirements: Optional[Any] = None,
+    check: Optional[Callable[[str, Any], Optional[str]]] = None,
+    error_cls: type = ValueError,
 ) -> tuple[str, list[dict[str, Any]]]:
     """Walk the tier tree from `tier_name` down to one endpoint.
 
@@ -200,6 +262,14 @@ def resolve_tier(
     the ORIGINAL prompt, and takes the strong side when the win rate
     clears the threshold. A side that is itself a tier is recursed into
     with this level's values as the inherited ones.
+
+    With `requirements` and `check`, each level's two sides are checked
+    for fitness BEFORE its router runs, so a request that needs vision
+    never pays for a classifier call that was going to pick a blind
+    model. Three outcomes: both sides pass and the level is unchanged;
+    exactly one passes and it is taken with no router call, the entry
+    recording `capability_forced` and `capability_requirement`; neither
+    passes and `error_cls` is raised naming the tier and the failures.
 
     Parameters
     ----------
@@ -216,21 +286,46 @@ def resolve_tier(
         `(router, threshold, prompt, pair) -> (picked, win_rate)`, where
         `win_rate` is None for a router that reports no score. It is
         also where the router name is validated.
+    requirements : Requirements, optional
+        What the request needs. None, or an empty one, leaves the
+        existing code path untouched, byte for byte.
+    check : callable, optional
+        `(side, requirements) -> failed requirement name or None`.
+    error_cls : type
+        Exception raised when no side can serve the request. Passed in
+        so this module keeps importing nothing from `controller.py`.
 
     Returns
     -------
     tuple[str, list[dict]]
         The endpoint name landed on, and one path entry per level.
+
+    Raises
+    ------
+    error_cls
+        If neither side of some level can serve the request.
     """
     tier = registry.get_tier(tier_name)
     level = resolve_level(tier.router, tier.threshold, inherited)
 
-    picked, win_rate = run_router(
-        level["router"],
-        level["threshold"],
-        prompt,
-        ModelPair(strong=tier.strong, weak=tier.weak),
+    forced = forced_side(
+        tier_name,
+        str(tier.strong),
+        str(tier.weak),
+        requirements,
+        check,
+        error_cls,
     )
+
+    if forced is None:
+        picked, win_rate = run_router(
+            level["router"],
+            level["threshold"],
+            prompt,
+            ModelPair(strong=tier.strong, weak=tier.weak),
+        )
+    else:
+        picked, win_rate = forced[0], None
 
     entry = {
         "tier": tier_name,
@@ -241,6 +336,9 @@ def resolve_tier(
         "win_rate": win_rate,
         "picked": picked,
     }
+    if forced is not None:
+        entry["capability_forced"] = forced[1]
+        entry["capability_requirement"] = forced[2]
 
     if not registry.has_tier(picked):
         return picked, [entry]
@@ -251,7 +349,14 @@ def resolve_tier(
         "parent_threshold": level["threshold"],
     }
     leaf, child_path = resolve_tier(
-        picked, prompt, child_inherited, registry, run_router
+        picked,
+        prompt,
+        child_inherited,
+        registry,
+        run_router,
+        requirements=requirements,
+        check=check,
+        error_cls=error_cls,
     )
 
     return leaf, [entry] + child_path

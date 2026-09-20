@@ -42,6 +42,7 @@ from pydantic import BaseModel
 if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
     from routellm.endpoints import Endpoint
     from routellm.pairing import ModelRecord
+    from routellm.requirements import Requirements
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +54,15 @@ __all__ = [
     "CapabilityQuery",
     "capabilities_for",
     "from_tags",
+    "build_tier_index",
+    "catalog_records",
     "matches",
     "merge",
     "parse_capability_terms",
+    "satisfies",
+    "side_capabilities",
+    "union",
+    "usable_sibling",
 ]
 
 #: Context window the deprecated `long_context` tag stands for. It is a
@@ -464,3 +471,291 @@ def matches(caps: Capabilities, query: CapabilityQuery) -> bool:
             return False
 
     return True
+
+
+# ---------------------------------------------------------------------------
+# Request-time fitness
+# ---------------------------------------------------------------------------
+
+#: Requirements in the order `satisfies` checks them, so the name it
+#: reports for a side that fails several is stable.
+_REQUIREMENT_ORDER = ("vision", "tools", "structured_output", "context")
+
+#: (endpoint, requirement) pairs whose unknown assumption has been
+#: logged. One INFO line per pair per process.
+_assumed: set[tuple[str, str]] = set()
+
+
+def satisfies(
+    caps: Capabilities,
+    reqs: "Requirements",
+    strict: bool,
+    name: str = "",
+) -> Optional[str]:
+    """Return the first requirement a side cannot serve, or None.
+
+    UNKNOWN AT REQUEST TIME serves the request: a `None` capability
+    satisfies the requirement unless `strict` is True. This is the
+    OPPOSITE of `matches` at selection time, deliberately. Default
+    `strict=False` means today's configs, which know nothing about any
+    local endpoint, keep routing exactly as they do now; an operator
+    who would rather refuse than surprise sets `strict: true` on that
+    endpoint. Both behaviours are documented side by side in the
+    README.
+
+    `context` is judged only when BOTH `reqs.context_needed` and
+    `caps.context` are set: the count is an estimate, and it never
+    refuses a request whose endpoint declares no context window.
+
+    Parameters
+    ----------
+    caps : Capabilities
+        The side's merged capabilities.
+    reqs : Requirements
+        What the request needs.
+    strict : bool
+        Whether an unknown capability refuses instead of serving.
+    name : str, optional
+        The side's name, used only in the assumption log line.
+
+    Returns
+    -------
+    str or None
+        The name of the first failed requirement, one of "vision",
+        "tools", "structured_output", "context", or None when the side
+        can serve the request.
+    """
+    for requirement in _REQUIREMENT_ORDER:
+        if requirement == "context":
+            needed = reqs.context_needed
+            window = caps.context
+            if needed is not None and window is not None and needed > window:
+                return "context"
+            continue
+
+        if not getattr(reqs, requirement):
+            continue
+
+        value = getattr(caps, requirement)
+        if value is True:
+            continue
+        if value is False:
+            return requirement
+
+        # Unknown.
+        if strict:
+            return requirement
+        _log_assumption(name, requirement)
+
+    return None
+
+
+def _log_assumption(name: str, requirement: str) -> None:
+    """Log, once per (endpoint, requirement), that unknown meant yes."""
+    key = (name, requirement)
+    if key in _assumed:
+        return
+
+    _assumed.add(key)
+    logger.info(
+        "endpoint %s: %s unknown, assuming it is supported; set "
+        "capabilities.%s or strict: true to change that.",
+        name or "<unnamed>",
+        requirement,
+        requirement,
+    )
+
+
+def union(parts: list[Capabilities]) -> Capabilities:
+    """Return the optimistic union of several capability records.
+
+    A tier satisfies a requirement if ANY reachable leaf does, so a
+    boolean is True when any part says True, False when every part that
+    knows says False, and None when no part knows. The numeric fields
+    take the largest known value, and `modalities_in` the union of
+    every stated list.
+
+    Parameters
+    ----------
+    parts : list[Capabilities]
+        The reachable leaves' capabilities.
+
+    Returns
+    -------
+    Capabilities
+        The union, `None` on every key no part could answer.
+    """
+    if not parts:
+        return Capabilities()
+
+    values: dict[str, object] = {}
+
+    for name in ("vision", "tools", "structured_output", "reasoning", "open_weights"):
+        known = [getattr(part, name) for part in parts if getattr(part, name) is not None]
+        if known:
+            values[name] = any(known)
+
+    for name in ("context", "max_output"):
+        known = [getattr(part, name) for part in parts if getattr(part, name) is not None]
+        if known:
+            values[name] = max(known)
+
+    modalities: list[str] = []
+    for part in parts:
+        for modality in part.modalities_in or []:
+            if modality not in modalities:
+                modalities.append(modality)
+    if modalities:
+        values["modalities_in"] = modalities
+
+    return Capabilities(**values)
+
+
+def build_tier_index(
+    registry, records: Optional[dict[str, "ModelRecord"]] = None
+) -> dict[str, Capabilities]:
+    """Return each tier's union over every leaf reachable from it.
+
+    Computed once, bottom-up over the tier graph. Depth is already
+    capped at `MAX_TIER_DEPTH` and `_validate_tiers` has already proven
+    the graph acyclic, so a plain recursion terminates; there is
+    deliberately no second cycle check here.
+
+    Call this AFTER selectors are resolved and the registry has been
+    revalidated, so every tier side is a name rather than a policy.
+
+    Parameters
+    ----------
+    registry : EndpointRegistry
+        Registry whose tiers and endpoints are folded.
+    records : dict[str, ModelRecord], optional
+        Catalog record per endpoint name, when one is available.
+
+    Returns
+    -------
+    dict[str, Capabilities]
+        One entry per tier name.
+    """
+    records = records or {}
+    index: dict[str, Capabilities] = {}
+
+    def _walk(name: str) -> Capabilities:
+        if not registry.has_tier(name):
+            return capabilities_for(registry.resolve(name), records.get(name))
+
+        cached = index.get(name)
+        if cached is not None:
+            return cached
+
+        tier = registry.get_tier(name)
+        merged = union([_walk(str(tier.strong)), _walk(str(tier.weak))])
+        index[name] = merged
+        return merged
+
+    for tier_name in registry.tier_names():
+        _walk(tier_name)
+
+    return index
+
+
+def side_capabilities(
+    name: str,
+    registry,
+    tier_index: dict[str, Capabilities],
+    records: Optional[dict[str, "ModelRecord"]] = None,
+) -> Capabilities:
+    """Return the capabilities of one tier side, tier or endpoint.
+
+    A tier name reads the prebuilt index; anything else is resolved as
+    an endpoint and merged on the spot.
+
+    Parameters
+    ----------
+    name : str
+        The side, a tier name or an endpoint name.
+    registry : EndpointRegistry
+        Registry holding both.
+    tier_index : dict[str, Capabilities]
+        The index `build_tier_index` returned.
+    records : dict[str, ModelRecord], optional
+        Catalog record per endpoint name.
+
+    Returns
+    -------
+    Capabilities
+        The side's capabilities, optimistic for a tier.
+    """
+    if registry.has_tier(name):
+        return tier_index.get(name, Capabilities())
+
+    return capabilities_for(registry.resolve(name), (records or {}).get(name))
+
+
+def catalog_records(registry) -> dict[str, "ModelRecord"]:
+    """Return the catalog record per endpoint, empty when unavailable.
+
+    Capabilities are an enrichment over what an endpoint already
+    declares, so a missing or unreachable catalog degrades to explicit
+    blocks rather than failing controller construction. Never raises.
+
+    Parameters
+    ----------
+    registry : EndpointRegistry
+        Registry whose endpoints are looked up.
+
+    Returns
+    -------
+    dict[str, ModelRecord]
+        Endpoint name to its models.dev record.
+    """
+    if not registry.names():
+        return {}
+
+    try:
+        from routellm.pairing import records_for_registry
+
+        return records_for_registry(registry)
+    except Exception as exc:
+        logger.debug("no catalog records for the capability index: %s", exc)
+        return {}
+
+
+def usable_sibling(
+    sibling: Optional[str],
+    reqs: "Requirements",
+    check,
+) -> bool:
+    """Return whether a fallback sibling can serve this request.
+
+    A fallback to a model that cannot take the request is worse than no
+    fallback at all: it turns one provider error into two. An empty
+    `Requirements` keeps every sibling, which is what makes a plain
+    request's fallback chain identical to what it was.
+
+    Parameters
+    ----------
+    sibling : str, optional
+        The candidate fallback, None when there is none.
+    reqs : Requirements
+        What the request needs.
+    check : callable
+        `(side, requirements) -> failed requirement name or None`.
+
+    Returns
+    -------
+    bool
+        Whether the sibling stays in the chain.
+    """
+    if sibling is None or reqs is None or reqs.is_empty():
+        return True
+
+    failed = check(sibling, reqs)
+    if failed is None:
+        return True
+
+    logger.info(
+        "fallback %s dropped: it cannot serve this request (%s)",
+        sibling,
+        failed,
+    )
+    return False
