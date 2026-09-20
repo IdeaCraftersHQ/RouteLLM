@@ -13,6 +13,7 @@ import logging
 
 from routellm.routers.base import Router
 from routellm.routers.typesafe import require_typesafe_sdk
+from routellm.routers.typesafe.prompts import RouterPrompt, _resolve, load_prompt_file
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,10 @@ class JevRouter(Router):
         Override for the default Noul question.
     criteria : dict, optional
         Override for the default yes/no criteria passed to the Noul.
+    prompt_file : str or os.PathLike, optional
+        YAML prompt file supplying ``router.instructions`` and
+        ``router.criteria``. Most specific wins: explicit kwarg, then
+        file value, then built-in default.
     base_url : str, optional
         Override for the API base URL. ``None`` uses the SDK default.
     transport : httpx2.BaseTransport, optional
@@ -83,16 +88,28 @@ class JevRouter(Router):
         max_prompt_chars=100_000,
         instructions=None,
         criteria=None,
+        prompt_file=None,
         base_url=None,
         transport=None,
     ):
         typesafe_sdk = require_typesafe_sdk()
 
-        self.max_prompt_chars = max_prompt_chars
-        self.instructions = (
-            DEFAULT_INSTRUCTIONS if instructions is None else instructions
+        file_prompt = (
+            RouterPrompt() if prompt_file is None else load_prompt_file(prompt_file)[0]
         )
-        self.criteria = dict(DEFAULT_CRITERIA) if criteria is None else criteria
+        self.instructions, instructions_source = _resolve(
+            instructions, file_prompt.instructions, DEFAULT_INSTRUCTIONS
+        )
+        self.criteria, criteria_source = _resolve(
+            criteria, file_prompt.criteria, dict(DEFAULT_CRITERIA)
+        )
+        logger.debug(
+            "jev router prompt sources instructions=%s criteria=%s",
+            instructions_source,
+            criteria_source,
+        )
+
+        self.max_prompt_chars = max_prompt_chars
         self._noul = typesafe_sdk.Noul(
             instructions=self.instructions,
             criteria=self.criteria,
