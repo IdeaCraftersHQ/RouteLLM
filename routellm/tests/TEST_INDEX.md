@@ -14,11 +14,7 @@
 | `test_resilience_caching_traffic.py` | Resilience Caching Traffic | test_resilience_retry, test_resilience_fallback, test_traffic_manager_conditional_routing (+ 1 more) |
 | `test_x402_integration.py` | X402 Integration | test_full_402_flow |
 | `test_xrr_integration.py` | Xrr Integration | test_controller_with_xrr |
-| `test_typesafe_guard.py` | TypeSafe SDK Guard | test_require_typesafe_sdk_returns_module_when_importable, test_require_typesafe_sdk_raises_with_extra_hint_when_missing |
-| `test_jev_intent_detector.py` | Jev Intent Detector | test_detect_intent_returns_choice, test_confidence_floor_returns_general, test_probabilities_map_matches_intents (+ 4 more) |
-| `test_jev_router.py` | JevRouter (mock transport) | test_win_rate_is_noul_probability, test_route_threshold, test_prompt_truncated (+ 6 more) |
 | `test_prompt_file.py` | Generic Prompt File Loader | test_load_full_file, test_unrequested_section_ignored, test_section_wrong_type_raises (+ 13 more) |
-| `test_jev_prompts.py` | Jev Prompt File Wiring (router + detector) | test_router_file_values_reach_request, test_router_kwarg_beats_file, test_detector_instructions_kwarg_beats_file (+ 9 more) |
 | `test_router_registry.py` | Router Registry (register + entry-point discovery) | test_register_get_names_round_trip, test_duplicate_name_raises, test_decorator_form_registers (+ 11 more) |
 
 ⚠️ IMPORTANT: Keep this index up to date as tests are added/removed/modified. This document helps future maintainers understand test coverage at a glance.

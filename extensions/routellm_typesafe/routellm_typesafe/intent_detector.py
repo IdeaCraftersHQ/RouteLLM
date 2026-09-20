@@ -9,9 +9,10 @@ IntentModelSelector.
 import logging
 from typing import Any, Dict, List, Optional
 
+import typesafe_sdk
+
 from routellm.middleware.intent_model_selector import IntentModelMapping
 from routellm.prompts import PromptFile, resolve
-from routellm.routers.typesafe import require_typesafe_sdk
 
 logger = logging.getLogger(__name__)
 
@@ -90,14 +91,7 @@ class JevIntentDetector:
         transport : httpx2.BaseTransport, optional
             Transport handed to the SDK client (default None). Useful
             for tests.
-
-        Raises
-        ------
-        ImportError
-            If the typesafe-sdk optional dependency is not installed.
         """
-        typesafe_sdk = require_typesafe_sdk()
-
         self.intent_mappings = intent_mappings
         self.model = model
         self.timeout = timeout

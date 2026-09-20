@@ -9,7 +9,7 @@ from routellm.middleware.intent_model_selector import (
     IntentModelMapping,
     IntentModelSelector,
 )
-from routellm.middleware.jev_intent_detector import JevIntentDetector
+from routellm_typesafe.intent_detector import JevIntentDetector
 
 CODING_MAPPING = IntentModelMapping(
     intent="coding",

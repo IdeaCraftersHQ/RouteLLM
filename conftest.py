@@ -9,7 +9,6 @@ Also stubs x402 so X402Adapter tests can exercise the adapter logic without
 the real PyPI package installed.
 """
 import sys
-from pathlib import Path
 from unittest.mock import MagicMock
 
 
@@ -42,12 +41,10 @@ class _FakeRandomRouter:
 _fake_routers_mod = _stub("routellm.routers.routers")
 _fake_routers_mod.ROUTER_CLS = {"random": lambda **kw: _FakeRandomRouter()}
 
-_fake_routers_pkg = _stub("routellm.routers")
-# Real __path__ so Python can still resolve genuine submodules (e.g.
-# routellm.routers.typesafe) via namespace-package lookup; only
-# routellm.routers.routers itself is stubbed above.
-_fake_routers_pkg.__path__ = [str(Path(__file__).parent / "routellm" / "routers")]
-sys.modules.setdefault("routellm.routers", _fake_routers_pkg)
+# Only the module is stubbed, never the `routellm.routers` package:
+# that directory has no __init__.py, so a stub there would shadow the
+# namespace package and hide the real, torch-free `base` and `registry`
+# siblings that the registry tests import.
 sys.modules["routellm.routers.routers"] = _fake_routers_mod
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "routellm-typesafe"
+version = "0.1.0"
+description = "TypeSafe Jev router and intent detector for routellm. Registers the 'jev' router through the routellm.routers entry point group."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Jad Bitar" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    # Routellm core (sibling package); installed via local path / editable in dev
+    "routellm",
+    "typesafe-sdk>=0.7,<1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.entry-points."routellm.routers"]
+jev = "routellm_typesafe.router:JevRouter"
+
+[tool.setuptools.packages.find]
+include = ["routellm_typesafe*"]
+exclude = ["tests*"]

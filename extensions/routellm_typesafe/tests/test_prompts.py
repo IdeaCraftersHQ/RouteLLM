@@ -14,24 +14,24 @@ import pytest
 
 from routellm.controller import ModelPair
 from routellm.middleware.intent_model_selector import IntentModelMapping
-from routellm.middleware.jev_intent_detector import (
+from routellm.prompts import PromptFile
+from routellm_typesafe.intent_detector import (
     DEFAULT_INSTRUCTIONS as DETECTOR_DEFAULT_INSTRUCTIONS,
 )
-from routellm.middleware.jev_intent_detector import (
+from routellm_typesafe.intent_detector import (
     GENERAL_DESCRIPTION,
     JevIntentDetector,
 )
-from routellm.middleware.jev_intent_detector import PROMPT_SCHEMA as DETECTOR_SCHEMA
-from routellm.prompts import PromptFile
-from routellm.routers.typesafe.router import (
+from routellm_typesafe.intent_detector import PROMPT_SCHEMA as DETECTOR_SCHEMA
+from routellm_typesafe.router import (
     DEFAULT_CRITERIA,
     DEFAULT_INSTRUCTIONS,
     JevRouter,
 )
-from routellm.routers.typesafe.router import PROMPT_SCHEMA as ROUTER_SCHEMA
+from routellm_typesafe.router import PROMPT_SCHEMA as ROUTER_SCHEMA
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
-EXAMPLE_PROMPT_FILE = REPO_ROOT / "prompts" / "jev.example.yaml"
+PACKAGE_ROOT = pathlib.Path(__file__).resolve().parents[1]
+EXAMPLE_PROMPT_FILE = PACKAGE_ROOT / "prompts" / "jev.example.yaml"
 
 FULL_FILE = textwrap.dedent(
     """\

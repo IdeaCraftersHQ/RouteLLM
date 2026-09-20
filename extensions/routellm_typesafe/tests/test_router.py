@@ -4,10 +4,8 @@ All requests go through httpx2.MockTransport, never the network. Every
 fixture sets TYPESAFE_API_KEY: TypeSafeClient requires it even with a
 mock transport, since the key check happens before any request is sent.
 """
-import importlib.util
 import json
 import logging
-import sys
 
 import httpx2
 import pytest
@@ -15,8 +13,8 @@ import typesafe_sdk
 
 import routellm.routers.registry as registry
 
-from routellm.routers.typesafe.router import DEFAULT_CRITERIA, JevRouter
 from routellm.types import ModelPair
+from routellm_typesafe.router import DEFAULT_CRITERIA, JevRouter
 
 RESPONSE_BODY = {
     "model": "jev-1.13.0",
@@ -113,7 +111,7 @@ def test_default_criteria_not_shared_between_routers():
 
 
 def test_debug_log_records_response_model_id(router, caplog):
-    caplog.set_level(logging.DEBUG, logger="routellm.routers.typesafe.router")
+    caplog.set_level(logging.DEBUG, logger="routellm_typesafe.router")
 
     router.calculate_strong_win_rate("hello world")
 
@@ -136,44 +134,36 @@ def test_api_error_propagates():
         router.close()
 
 
-def test_missing_sdk_error(monkeypatch):
-    monkeypatch.setitem(sys.modules, "typesafe_sdk", None)
+class _FakeEntryPoint:
+    """Stand-in for the `jev` entry point this package declares."""
 
-    with pytest.raises(ImportError, match=r"routellm\[typesafe\]"):
-        JevRouter()
+    name = "jev"
+
+    def load(self):
+        return JevRouter
 
 
-# `routellm.routers.routers` imports torch at module level; the root
-# conftest.py stubs it out under pytest so ROUTER_CLS there is fake. To
-# check the real registration, load routers.py directly from its file path
-# under a private module name, bypassing the stub in sys.modules. Its
-# register_router calls populate the shared registry dict.
-@pytest.mark.skipif(
-    importlib.util.find_spec("torch") is None, reason="torch not installed"
-)
-# routers.py transitively imports causal_llm/prompt_format.py, a
-# pre-existing module with Pydantic v1-style @validator decorators; that
-# deprecation warning is unrelated to JevRouter and only surfaces because
-# this test loads the real module.
-@pytest.mark.filterwarnings("ignore::pydantic.PydanticDeprecatedSince20")
-def test_registered():
+# The real entry point only resolves once the package is pip-installed,
+# which the standalone test run does not require. Patching
+# `entry_points` in the registry namespace exercises the same code path
+# with the same name and target class the pyproject declares.
+def test_registered_through_entry_point(monkeypatch):
+    def fake_entry_points(group=None):
+        assert group == registry.ENTRY_POINT_GROUP
+        return [_FakeEntryPoint()]
+
+    monkeypatch.setattr(registry, "entry_points", fake_entry_points)
+
     saved = dict(registry.ROUTER_CLS)
+    saved_failures = dict(registry.discovery_failures)
     registry.reset_registry()
     try:
-        spec = importlib.util.spec_from_file_location(
-            "_real_routellm_routers_for_test",
-            importlib.util.find_spec("routellm.routers.typesafe.router").origin.replace(
-                "typesafe/router.py", "routers.py"
-            ),
-        )
-        real_routers = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(real_routers)
-
-        assert real_routers.ROUTER_CLS["jev"] is JevRouter
+        assert registry.discover_routers() == ["jev"]
         assert registry.get_router_class("jev") is JevRouter
     finally:
         registry.reset_registry()
         registry.ROUTER_CLS.update(saved)
+        registry.discovery_failures.update(saved_failures)
 
 
 _ABSENT = object()

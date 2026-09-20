@@ -38,7 +38,6 @@ GPT_4_AUGMENTED_CONFIG = {
     "causal_llm": {
         "checkpoint_path": "routellm/causal_llm_gpt4_augmented",
     },
-    "jev": {"max_prompt_chars": 100000},
 }
 
 
