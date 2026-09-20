@@ -228,6 +228,7 @@ def test_stream_is_forwarded_only_when_the_client_set_it(tmp_path, flat_config):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_help_lists_host_with_a_loopback_default():
     """`--help` documents `--host` and names its loopback default."""
     result = subprocess.run(
@@ -243,6 +244,7 @@ def test_help_lists_host_with_a_loopback_default():
     assert "127.0.0.1" in result.stdout
 
 
+@pytest.mark.slow
 def test_host_flag_is_accepted_and_defaults_to_loopback():
     """`--host` parses, and omitting it yields `127.0.0.1`."""
     probe = (
@@ -305,6 +307,7 @@ print(json.dumps({"failures": registry.discovery_failures}))
 """
 
 
+@pytest.mark.slow
 def test_middleware_entry_point_loads_during_controller_import():
     """A middleware-backed entry point must not re-enter a half-built module.
 
