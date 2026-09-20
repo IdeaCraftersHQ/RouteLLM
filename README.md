@@ -598,7 +598,7 @@ class MyRouter(Router):
         ...
 ```
 
-The client is built on first call and cached. The controller calls `configure_embeddings` with its endpoint registry before constructing any router, so an endpoint named `embedding` in the config points those calls at a different provider than the completions; with no such endpoint, the client falls back to `OPENAI_BASE_URL` / `OPENAI_API_KEY`. That endpoint supplies the base URL and the credential only — the model each router embeds with stays the router's own `embedding_model`. When neither source supplies a key, the first embedding call raises a `RuntimeError` naming both ways to fix it. Tests that need their own client call `reset_embedding_client()`.
+The client is built on first call and cached. The controller calls `configure_embeddings` with its endpoint registry before constructing any router, so an endpoint named `embedding` in the config points those calls at a different provider than the completions; with no such endpoint, the client falls back to `OPENAI_BASE_URL` / `OPENAI_API_KEY`. The two fields resolve independently, so an endpoint naming an `api_base` but no `api_key_env` keeps that base and takes only the key from the environment. That endpoint supplies the base URL and the credential only — the model each router embeds with stays the router's own `embedding_model`. When neither source supplies a key, the first embedding call raises a `RuntimeError` naming both ways to fix it. Tests that need their own client call `reset_embedding_client()`.
 
 ### Adding a new benchmark
 

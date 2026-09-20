@@ -92,6 +92,59 @@ def test_endpoint_missing_env_variable_raises(fake_openai, monkeypatch):
     assert "EMBEDDING_KEY" in str(excinfo.value)
 
 
+def test_keyless_endpoint_keeps_its_base_with_the_environment_key(
+    fake_openai, monkeypatch
+):
+    """A base without a key must not send embeddings to OpenAI.
+
+    Base URL and credential resolve independently: the endpoint's
+    `api_base` stands even when only the environment supplies the key.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
+    configure_embeddings(
+        _registry(
+            model="text-embedding-3-small",
+            api_base="http://127.0.0.1:11500/v1",
+        )
+    )
+
+    get_embedding_client()
+
+    fake_openai.assert_called_once_with(
+        base_url="http://127.0.0.1:11500/v1", api_key="env-key"
+    )
+
+
+def test_keyless_endpoint_without_a_base_still_uses_the_environment_base(
+    fake_openai, monkeypatch
+):
+    """An endpoint setting neither leaves both to the environment."""
+    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://localhost:9999/v1")
+    configure_embeddings(_registry(model="text-embedding-3-small"))
+
+    get_embedding_client()
+
+    fake_openai.assert_called_once_with(
+        base_url="http://localhost:9999/v1", api_key="env-key"
+    )
+
+
+def test_keyless_endpoint_with_a_base_and_no_key_anywhere_raises(fake_openai):
+    """A base alone is not credentials; the error still names both."""
+    configure_embeddings(
+        _registry(
+            model="text-embedding-3-small",
+            api_base="http://127.0.0.1:11500/v1",
+        )
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        get_embedding_client()
+
+    assert "OPENAI_API_KEY" in str(excinfo.value)
+
+
 def test_registry_without_embedding_endpoint_falls_back_to_env(
     fake_openai, monkeypatch
 ):
