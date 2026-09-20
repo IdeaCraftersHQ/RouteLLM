@@ -16,5 +16,6 @@
 | `test_xrr_integration.py` | Xrr Integration | test_controller_with_xrr |
 | `test_typesafe_guard.py` | TypeSafe SDK Guard | test_require_typesafe_sdk_returns_module_when_importable, test_require_typesafe_sdk_raises_with_extra_hint_when_missing |
 | `test_jev_intent_detector.py` | Jev Intent Detector | test_detect_intent_returns_choice, test_confidence_floor_returns_general, test_probabilities_map_matches_intents (+ 4 more) |
+| `test_jev_router.py` | JevRouter (mock transport) | test_win_rate_is_noul_probability, test_route_threshold, test_prompt_truncated (+ 6 more) |
 
 ⚠️ IMPORTANT: Keep this index up to date as tests are added/removed/modified. This document helps future maintainers understand test coverage at a glance.
