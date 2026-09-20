@@ -228,7 +228,7 @@ python -m routellm.openai_server --routers mf jev --config config.example.yaml
 - `--config` is the single source for the server's endpoints, tiers, and router settings. If unspecified, the server defaults to our best-performing router configuration and routes the flat `--strong-model`/`--weak-model` pair (see [Configuration](#configuration) for details).
 - `--strong-model` and `--weak-model` name that flat pair. Both together or neither; each may name a configured endpoint or a raw model name.
 - `--default-threshold` is the threshold used by a level that names none and whose request carries none. Default `0.5`.
-- `--host` is the interface to bind. Default `127.0.0.1`. The server is unauthenticated, so a wider bind exposes it to that network: widen it only behind a proxy that authenticates.
+- `--host` is the interface to bind. Default `127.0.0.1`. The server is unauthenticated, so a wider bind exposes it to that network: widen it only behind a proxy that authenticates. Changed: the server previously bound `0.0.0.0`. Pass `--host 0.0.0.0` to restore that, only behind an authenticating proxy.
 - `--port` is the port to listen on. Default `6060`.
 
 For most use-cases, **we recommend the `mf` router** as we have evaluated it to be very strong and lightweight.

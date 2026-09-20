@@ -216,6 +216,19 @@ response.
 - `routellm/tests/test_openai_server_models.py::test_no_flags_invents_no_default_tier`
 - `routellm/tests/test_openai_server_models.py::test_one_model_flag_alone_is_an_argparse_error`
 - `routellm/tests/test_openai_server_models.py::test_config_example_loads_into_the_registry`
+- `routellm/tests/test_openai_server_models.py::test_config_example_builds_a_controller_on_a_stock_install`
+
+## Breaking changes
+
+- **Server bind address.** `--host` now defaults to `127.0.0.1`; the
+  server previously bound `0.0.0.0`. An existing deployment reached
+  over the LAN stops answering until it passes `--host 0.0.0.0`, which
+  should be done only behind a proxy that authenticates, since the
+  server itself does not.
+- **Cache, resilience, and trace keys.** These are now endpoint names
+  rather than raw litellm model strings. Entries a previous version
+  wrote under the raw names go unread, so an existing SQLite cache
+  starts cold rather than returning wrong answers.
 
 ## Related
 

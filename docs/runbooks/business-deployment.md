@@ -223,6 +223,9 @@ LAN unless you widen it. The server is unauthenticated: pass anything
 other than a loopback address only behind a proxy that authenticates,
 and never expose it directly.
 
+Changed: the server previously bound `0.0.0.0`. Pass `--host 0.0.0.0`
+to restore that, only behind an authenticating proxy.
+
 Wrap as a systemd unit (`/etc/systemd/system/routellm.service`)
 with restart-on-failure and an env-file for secrets. Belt and braces
 over the loopback bind: `IPAddressAllow=localhost` with
