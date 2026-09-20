@@ -18,6 +18,6 @@
 | `test_jev_intent_detector.py` | Jev Intent Detector | test_detect_intent_returns_choice, test_confidence_floor_returns_general, test_probabilities_map_matches_intents (+ 4 more) |
 | `test_jev_router.py` | JevRouter (mock transport) | test_win_rate_is_noul_probability, test_route_threshold, test_prompt_truncated (+ 6 more) |
 | `test_prompt_file.py` | Generic Prompt File Loader | test_load_full_file, test_unrequested_section_ignored, test_section_wrong_type_raises (+ 13 more) |
-| `test_jev_prompts.py` | Jev Prompt File Wiring (router + detector) | test_router_file_values_reach_request, test_router_kwarg_beats_file, test_detector_instructions_kwarg_beats_file (+ 7 more) |
+| `test_jev_prompts.py` | Jev Prompt File Wiring (router + detector) | test_router_file_values_reach_request, test_router_kwarg_beats_file, test_detector_instructions_kwarg_beats_file (+ 9 more) |
 
 ⚠️ IMPORTANT: Keep this index up to date as tests are added/removed/modified. This document helps future maintainers understand test coverage at a glance.

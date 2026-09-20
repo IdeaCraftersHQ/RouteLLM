@@ -184,6 +184,15 @@ def test_router_rejects_non_string_criteria_value(tmp_path):
     assert str(path) in str(excinfo.value)
 
 
+def test_router_empty_prompt_file_path_raises(captured):
+    """An empty path is a bad path, not "no prompt file"."""
+    with pytest.raises(FileNotFoundError):
+        JevRouter(
+            prompt_file="",
+            transport=_transport(ROUTER_RESPONSE_BODY, captured),
+        )
+
+
 # --- detector -------------------------------------------------------------
 
 
@@ -248,3 +257,13 @@ def test_detector_without_file_uses_defaults(captured):
     question = captured["body"]["questions"]["intent"]
     assert "Classify the user prompt" in question["instructions"]
     assert question["criteria"]["general"] == GENERAL_DESCRIPTION
+
+
+def test_detector_empty_prompt_file_path_raises(captured):
+    """An empty path is a bad path, not "no prompt file"."""
+    with pytest.raises(FileNotFoundError):
+        JevIntentDetector(
+            [CODING_MAPPING],
+            prompt_file="",
+            transport=_transport(DETECTOR_RESPONSE_BODY, captured),
+        )

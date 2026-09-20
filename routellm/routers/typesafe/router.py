@@ -132,7 +132,7 @@ class JevRouter(Router):
 
         section = (
             PromptFile.load(prompt_file).section(PROMPT_SECTION, PROMPT_SCHEMA)
-            if prompt_file
+            if prompt_file is not None
             else {}
         )
         file_criteria = section.get("criteria")

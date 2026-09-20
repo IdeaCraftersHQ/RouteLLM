@@ -106,7 +106,7 @@ class JevIntentDetector:
 
         section = (
             PromptFile.load(prompt_file).section(PROMPT_SECTION, PROMPT_SCHEMA)
-            if prompt_file
+            if prompt_file is not None
             else {}
         )
         self.instructions, instructions_source = resolve(
