@@ -15,3 +15,4 @@ jev:
     # model and timeout default to the SDK env (TYPESAFE_DEFAULT_MODEL, 10s)
     # calibrated 2026-09-20 against jev-1.13.0; pin model: jev-1.13.0 to keep thresholds stable
     max_prompt_chars: 100000
+    # prompt_file: prompts/jev.example.yaml  # copy + edit wording without code changes

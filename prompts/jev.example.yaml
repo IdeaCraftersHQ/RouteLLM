@@ -1,0 +1,17 @@
+# Copy this file, edit the wording below, then point config.yaml at it
+# via prompt_file (or pass prompt_file=... directly) and restart.
+
+router:
+  instructions: |-
+    Would a frontier-class model answer this prompt materially better than a small, cheap model?
+  criteria:
+    "true": |-
+      The prompt needs multi-step reasoning, code beyond boilerplate, handling of long or ambiguous input, or precise domain knowledge.
+    "false": |-
+      The prompt is a greeting, a simple lookup, a short rewrite, or plain formatting work.
+
+intent_detector:
+  instructions: |-
+    Classify the user prompt into exactly one intent. Pick 'general' when none of the other intents fit.
+  general_description: |-
+    none of the listed intents fit

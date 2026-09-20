@@ -259,6 +259,8 @@ We also provide detailed instructions on how to train the LLM-based classifier i
 
 For the full details, refer to our [paper](https://arxiv.org/abs/2406.18665).
 
+The `jev` router's question and criteria can be edited without code changes by passing `prompt_file=...` (a YAML file, see `prompts/jev.example.yaml` for the format) to `JevRouter`, or a `prompt_file:` entry under `jev:` in your config. The file is adapter-agnostic: each adapter reads its own named section from it and ignores sections it doesn't recognize, so a future adapter can add its own section to the same file. Precedence is explicit kwarg > prompt file > built-in default.
+
 ## Intent-Based Routing
 
 RouteLLM now supports intent-based routing, which allows you to route queries to specialized models based on detected intents. This is particularly useful when you have domain-specific models that excel at particular types of tasks.
@@ -366,9 +368,14 @@ intent_mappings = [
 
 detector = JevIntentDetector(intent_mappings)
 
+# Or load its instructions and general-intent description from a prompt file:
+detector = JevIntentDetector(intent_mappings, prompt_file="prompts/jev.example.yaml")
+
 default_pair = ModelPair(strong="gpt-4-1106-preview", weak="anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1")
 intent_selector = IntentModelSelector(intent_mappings, default_pair, intent_detector=detector)
 ```
+
+Like the `jev` router, `JevIntentDetector` reads its own `intent_detector` section from the same `prompt_file` (see `prompts/jev.example.yaml`), with the same precedence: explicit kwarg > prompt file > built-in default.
 
 ## Configuration
 
