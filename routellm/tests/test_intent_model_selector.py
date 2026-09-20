@@ -222,6 +222,37 @@ class TestIntentModelSelectorPluggableDetector(unittest.TestCase):
         mock_completion.assert_not_called()
 
 
+def test_save_intent_config_accepts_a_bare_filename(monkeypatch, tmp_path):
+    """A path with no directory component writes into the cwd.
+
+    `os.path.dirname` returns "" for a bare filename, which `makedirs`
+    rejects; the directory is only created when there is one.
+    """
+    from routellm.middleware.intent_config import (
+        load_intent_config,
+        save_intent_config,
+    )
+
+    selector = IntentModelSelector(
+        intent_mappings=[
+            IntentModelMapping(
+                intent="legal",
+                model_pair=None,
+                description="Legal review",
+            )
+        ],
+        default_model_pair=None,
+        intent_tiers={"legal": "premium"},
+    )
+
+    monkeypatch.chdir(tmp_path)
+    save_intent_config(selector, "intents.yaml")
+
+    assert (tmp_path / "intents.yaml").is_file()
+    loaded = load_intent_config("intents.yaml")
+    assert [m.intent for m in loaded.intent_mappings] == ["legal"]
+
+
 # Import sys and os at the top of the file to ensure they're available
 import sys
 import os

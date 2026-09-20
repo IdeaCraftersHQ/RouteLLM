@@ -124,7 +124,11 @@ def save_intent_config(selector: IntentModelSelector, config_path: str) -> None:
         config["intents"][mapping.intent] = entry
     
     # Save to file
-    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+    # Handle the case where config_path has no directory component
+    directory = os.path.dirname(config_path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+
     with open(config_path, 'w') as f:
         yaml.dump(config, f, default_flow_style=False)
 
