@@ -75,6 +75,22 @@ def test_model_from_config(router, captured):
     assert captured["body"]["model"] == "jev-1.13.0"
 
 
+def test_custom_criteria_in_request(captured):
+    criteria = {"true": "custom yes case", "false": "custom no case"}
+
+    def handler(request):
+        captured["body"] = json.loads(request.content)
+        return httpx2.Response(200, json=RESPONSE_BODY)
+
+    router = JevRouter(
+        criteria=criteria, transport=httpx2.MockTransport(handler)
+    )
+    router.calculate_strong_win_rate("hello world")
+    router.close()
+
+    assert captured["body"]["questions"]["strong"]["criteria"] == criteria
+
+
 def test_api_error_propagates():
     def handler(request):
         return httpx2.Response(429, json={"error": "rate limited"})
