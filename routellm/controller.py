@@ -15,6 +15,7 @@ from litellm import acompletion, completion
 from tqdm import tqdm
 
 from routellm.caching import Cache, CacheConfig
+from routellm.endpoints import EndpointRegistry
 from routellm.payment.gateway import PaymentGateway
 from routellm.payment.types import PaymentChallenge
 from routellm.quality import QualityManager
@@ -68,6 +69,7 @@ class Controller:
         cache_config: Optional[CacheConfig] = None,
         traffic_manager: Optional[TrafficManager] = None,
         quality_manager: Optional[QualityManager] = None,
+        endpoints: Optional[EndpointRegistry] = None,
     ):
         """Initialize controller with routers and configuration.
 
@@ -100,6 +102,10 @@ class Controller:
             Traffic management and load balancing.
         quality_manager : QualityManager, optional
             Quality and canary testing manager.
+        endpoints : EndpointRegistry, optional
+            Named endpoints with their own base URL and credential.
+            Empty registry when None, which leaves every model name a
+            raw litellm model name using `api_base` / `api_key`.
         """
         self.default_model_pair = ModelPair(strong=strong_model, weak=weak_model)
         self.routers = {}
@@ -113,6 +119,7 @@ class Controller:
         self.cache = Cache(cache_config)
         self.traffic_manager = traffic_manager or TrafficManager()
         self.quality_manager = quality_manager or QualityManager()
+        self.endpoints = endpoints or EndpointRegistry()
 
         if config is None:
             config = GPT_4_AUGMENTED_CONFIG
@@ -162,6 +169,41 @@ class Controller:
 
         return router, threshold
 
+    def _endpoint_call_params(
+        self, model_name: str
+    ) -> tuple[str, Optional[str], Optional[str], dict[str, Any]]:
+        """Turn a model name into the parameters of one litellm call.
+
+        The name is resolved through the endpoint registry, its
+        credentials fall back to the controller defaults, and the load
+        balancer overrides either when it returns one. Precedence:
+        balancer, then endpoint, then controller default.
+
+        Parameters
+        ----------
+        model_name : str
+            Endpoint name, or a raw litellm model name.
+
+        Returns
+        -------
+        tuple[str, str or None, str or None, dict]
+            The `(model, api_base, api_key, extra)` to pass to litellm.
+            `extra` is the endpoint's, and request kwargs override it.
+        """
+        endpoint = self.endpoints.resolve(model_name)
+        api_base, api_key = endpoint.credentials(self.api_base, self.api_key)
+
+        # Balancers stay keyed on the routed name, as the cache and
+        # trace keys are, so a named endpoint balances under its name.
+        # balance() echoes its argument back when no balancer matches,
+        # in which case the endpoint's own model is what litellm wants.
+        balanced_model, balanced_key, balanced_base = self.traffic_manager.balance(
+            model_name
+        )
+        model = endpoint.model if balanced_model == model_name else balanced_model
+
+        return model, balanced_base or api_base, balanced_key or api_key, endpoint.extra
+
     def _validate_router_threshold(self, router: str, threshold: float):
         if router not in self.routers:
             raise RoutingError(f"Router {router} not found.")
@@ -210,6 +252,12 @@ class Controller:
         Router and threshold can be specified explicitly or parsed from
         model name using format "router-{router}-{threshold}" (e.g.,
         "router-sw_ranking-0.5").
+
+        Cache, resilience, and trace keys are the routed name: the
+        endpoint name for a configured endpoint, the raw model name
+        otherwise. Adopting endpoint names therefore changes existing
+        SQLite cache keys, and prior entries for the same model go
+        unread.
 
         Parameters
         ----------
@@ -276,18 +324,15 @@ class Controller:
         if other_model not in models_to_try:
             models_to_try.append(other_model)
 
-        api_base = self.api_base
-        api_key = self.api_key
-
         last_err = None
         for model_name in models_to_try:
-            # 3. Apply load balancing
-            model, balanced_key, balanced_base = self.traffic_manager.balance(model_name)
-            curr_api_base = balanced_base or api_base
-            curr_api_key = balanced_key or api_key
+            # 3. Resolve the endpoint, then apply load balancing
+            model, curr_api_base, curr_api_key, extra = self._endpoint_call_params(
+                model_name
+            )
 
             def _call():
-                kwargs_copy = dict(kwargs)
+                kwargs_copy = {**extra, **kwargs}
                 kwargs_copy["model"] = model
                 return completion(
                     api_base=curr_api_base,
@@ -378,13 +423,13 @@ class Controller:
 
         last_err = None
         for model_name in models_to_try:
-            # 3. Apply load balancing
-            model, balanced_key, balanced_base = self.traffic_manager.balance(model_name)
-            curr_api_base = balanced_base or self.api_base
-            curr_api_key = balanced_key or self.api_key
-            
+            # 3. Resolve the endpoint, then apply load balancing
+            model, curr_api_base, curr_api_key, extra = self._endpoint_call_params(
+                model_name
+            )
+
             async def _call(extra_headers={}):
-                kwargs_copy = dict(kwargs)
+                kwargs_copy = {**extra, **kwargs}
                 kwargs_copy["model"] = model
                 return await acompletion(
                     api_base=curr_api_base,
