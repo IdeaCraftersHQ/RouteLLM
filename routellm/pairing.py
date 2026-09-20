@@ -194,12 +194,22 @@ class Candidate:
         The endpoint's merged capabilities, built once per candidate by
         `rank_candidates` and read by the capability terms and the
         `max_output_desc` order.
+    effective_quality : int, optional
+        The quality this candidate was actually ordered on: the
+        per-area measurement when there is one, the endpoint's overall
+        number otherwise, and None when it has neither.
+    quality_area : str, optional
+        The area `effective_quality` came from, None when it is the
+        overall number. Shown in the candidate table so a surprising
+        pick names its own source.
     """
 
     name: str
     endpoint: Endpoint
     record: Optional[ModelRecord] = None
     capabilities: Optional[Capabilities] = None
+    effective_quality: Optional[int] = None
+    quality_area: Optional[str] = None
 
     @property
     def total_cost(self) -> Optional[float]:
@@ -593,12 +603,19 @@ def _record_matches(record: Optional[ModelRecord], filter_) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _sort_key(candidate: Candidate, order: str):
+def _sort_key(candidate: Candidate, order: str, area: Optional[str] = None):
     """Return the sort key placing `candidate` under `order`.
 
     Missing values always sort last, whichever direction the order
     runs, so an unpriced or unlisted endpoint is never promoted to the
     front by the absence of data.
+
+    Under a `quality_*` order the number read is the per-area one when
+    `area` is set and the registry measured one for this endpoint,
+    then the endpoint's overall `quality`, and only then the unrated
+    bucket. Falling back to the overall number rather than straight to
+    unrated matters: an endpoint measured everywhere except this one
+    area is still better known than one measured nowhere.
     """
     record = candidate.record
 
@@ -609,7 +626,9 @@ def _sort_key(candidate: Candidate, order: str):
         return (0, cost if order == "cost_asc" else -cost, candidate.name)
 
     if order in ("quality_asc", "quality_desc"):
-        quality = candidate.endpoint.quality
+        quality = candidate.effective_quality
+        if quality is None:
+            quality = candidate.endpoint.quality
         release = _release_key(record)
         if quality is None:
             # Unrated endpoints sort after every rated one, and among
@@ -658,7 +677,9 @@ def _index_catalog(records: list[ModelRecord]) -> dict[tuple[str, str], ModelRec
 
 
 def rank_candidates(
-    registry: EndpointRegistry, selector: Selector
+    registry: EndpointRegistry,
+    selector: Selector,
+    area: Optional[str] = None,
 ) -> list[tuple[str, Candidate]]:
     """Return the endpoints matching a selector, best first.
 
@@ -668,6 +689,10 @@ def rank_candidates(
         Registry whose endpoints are the candidate pool.
     selector : Selector
         The policy to apply.
+    area : str, optional
+        The area the selector sits in. When given, a `quality_*` order
+        reads each endpoint's measured number for that area in
+        preference to its overall one.
 
     Returns
     -------
@@ -743,8 +768,25 @@ def rank_candidates(
                 capabilities=capabilities,
             )
         )
+        measured = None
+        if area is not None:
+            measured = (getattr(registry, "area_quality", {}) or {}).get(
+                name, {}
+            ).get(area)
 
-    candidates.sort(key=lambda c: _sort_key(c, selector.order))
+        candidates.append(
+            Candidate(
+                name=name,
+                endpoint=endpoint,
+                record=record,
+                effective_quality=(
+                    measured if measured is not None else endpoint.quality
+                ),
+                quality_area=area if measured is not None else None,
+            )
+        )
+
+    candidates.sort(key=lambda c: _sort_key(c, selector.order, area))
     return [(candidate.name, candidate) for candidate in candidates]
 
 
@@ -812,7 +854,11 @@ def records_for_registry(
     return found
 
 
-def resolve_pairing(registry: EndpointRegistry, selector: Selector) -> str:
+def resolve_pairing(
+    registry: EndpointRegistry,
+    selector: Selector,
+    area: Optional[str] = None,
+) -> str:
     """Return the endpoint name a selector picks.
 
     The ordered candidate table is logged at INFO, so a surprising pick
@@ -824,6 +870,8 @@ def resolve_pairing(registry: EndpointRegistry, selector: Selector) -> str:
         Registry whose endpoints are the candidate pool.
     selector : Selector
         The policy to apply.
+    area : str, optional
+        The area of the tier this selector sits in.
 
     Returns
     -------
@@ -837,7 +885,7 @@ def resolve_pairing(registry: EndpointRegistry, selector: Selector) -> str:
     CatalogUnavailable
         If `select` carries a catalog term and no catalog can be had.
     """
-    ranked = rank_candidates(registry, selector)
+    ranked = rank_candidates(registry, selector, area)
     if not ranked:
         raise ValueError(
             f"Selector {selector.select!r} matches no configured endpoint. "
@@ -845,9 +893,10 @@ def resolve_pairing(registry: EndpointRegistry, selector: Selector) -> str:
         )
 
     logger.info(
-        "selector %r order %s picked %s from: %s",
+        "selector %r order %s%s picked %s from: %s",
         selector.select,
         selector.order,
+        f" in area {area}" if area else "",
         ranked[0][0],
         ", ".join(describe_candidate(candidate) for _, candidate in ranked),
     )
@@ -858,9 +907,16 @@ def describe_candidate(candidate: Candidate) -> str:
     """Return a one-line description of a candidate for logs and tables."""
     cost = candidate.total_cost
     record = candidate.record
+
+    quality = candidate.effective_quality
+    source = f" [{candidate.quality_area}]" if candidate.quality_area else ""
+    if quality is None:
+        quality = candidate.endpoint.quality
+        source = ""
+
     return (
         f"{candidate.name}(model={candidate.endpoint.model}, "
-        f"quality={candidate.endpoint.quality}, "
+        f"quality={quality}{source}, "
         f"cost={'-' if cost is None else f'{cost:.4g}'}, "
         f"context={record.context if record else '-'})"
     )
@@ -887,11 +943,12 @@ def resolve_registry_pairings(registry: EndpointRegistry) -> None:
         If a selector carries a catalog term and no catalog can be had.
     """
     for tier in registry.tiers.values():
+        area = registry.area_of(tier.name)
         resolved: dict[str, str] = {}
         for side in ("strong", "weak"):
             value = getattr(tier, side)
             if isinstance(value, Selector):
-                resolved[side] = resolve_pairing(registry, value)
+                resolved[side] = resolve_pairing(registry, value, area)
 
         if not resolved:
             continue
@@ -1113,7 +1170,9 @@ def _explain(config_path: Optional[str] = None) -> str:
     -------
     str
         A plain-text report, one block per tier side that selects,
-        then one line per configured intent naming the tier it enters.
+        each preceded by its area when it has one and each candidate
+        naming the quality it was ordered on, then one line per
+        configured intent naming the tier it enters.
     """
     config = load_config(explicit=config_path).data
 
@@ -1122,13 +1181,16 @@ def _explain(config_path: Optional[str] = None) -> str:
 
     for name in registry.tier_names():
         tier = registry.get_tier(name)
+        area = registry.area_of(name)
+        if area:
+            lines.append(f"{name}: area {area}")
         for side in ("strong", "weak"):
             value = getattr(tier, side)
             if not isinstance(value, Selector):
                 lines.append(f"{name}.{side}: {value} (named)")
                 continue
 
-            ranked = rank_candidates(registry, value)
+            ranked = rank_candidates(registry, value, area)
             if not ranked:
                 raise ValueError(
                     f"Tier {name!r} {side} selector {value.select!r} matches "
