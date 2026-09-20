@@ -251,6 +251,7 @@ The full list of routers:
 3. `bert`: Uses a BERT classifier trained on the preference data.
 4. `causal_llm`: Uses a LLM-based classifier tuned on the preference data.
 5. `random`: Randomly routes to either model.
+6. `jev`: Uses TypeSafe's Jev System One model (hosted API, no local weights); install with `pip install "routellm[typesafe]"` and set `TYPESAFE_API_KEY`.
 
 While these routers have been trained on the `gpt-4-1106-preview` and `mixtral-8x7b-instruct-v0.1` model pair, we have found that these routers generalize well to other strong and weak model pairs as well. Therefore, you can replace the model pair used for routing without having to retrain these models!
 
@@ -320,9 +321,19 @@ For more advanced use cases, you can use our `DomainIntentDetector` to fine-tune
 
 ```python
 from routellm.middleware.domain_intent_detector import DomainIntentDetector
+from routellm.middleware.intent_model_selector import IntentModelMapping, IntentModelSelector
+from routellm.types import ModelPair
 
-# Create a detector with custom intents
-detector = DomainIntentDetector(intents=["coding", "math", "creative"])
+intent_mappings = [
+    IntentModelMapping(
+        intent="coding",
+        model_pair=ModelPair(strong="gpt-4-1106-preview", weak="anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1"),
+        description="Coding questions",
+    ),
+]
+
+# Create a detector with the same mappings used for routing
+detector = DomainIntentDetector(intent_mappings=intent_mappings)
 
 # Add examples for each intent
 detector.add_examples("coding", [
@@ -332,7 +343,31 @@ detector.add_examples("coding", [
 ])
 
 # Use in your intent selector
-intent_selector = IntentModelSelector(intent_detector=detector)
+default_pair = ModelPair(strong="gpt-4-1106-preview", weak="anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1")
+intent_selector = IntentModelSelector(intent_mappings, default_pair, intent_detector=detector)
+```
+
+### TypeSafe Jev Intent Detection
+
+`JevIntentDetector` classifies a prompt with a single TypeSafe Choice question instead of embeddings, so it needs no examples:
+
+```python
+from routellm.middleware.intent_model_selector import IntentModelMapping, IntentModelSelector
+from routellm.middleware.jev_intent_detector import JevIntentDetector
+from routellm.types import ModelPair
+
+intent_mappings = [
+    IntentModelMapping(
+        intent="coding",
+        model_pair=ModelPair(strong="gpt-4-1106-preview", weak="anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1"),
+        description="Coding questions",
+    ),
+]
+
+detector = JevIntentDetector(intent_mappings)
+
+default_pair = ModelPair(strong="gpt-4-1106-preview", weak="anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1")
+intent_selector = IntentModelSelector(intent_mappings, default_pair, intent_detector=detector)
 ```
 
 ## Configuration
@@ -340,6 +375,8 @@ intent_selector = IntentModelSelector(intent_detector=detector)
 The configuration for routers is specified in either the `config` argument for `Controller` or by passing in the path to a YAML file using the `--config` flag. It is a top-level mapping from router name to the keyword arguments used for router initialization.
 
 An example configuration is provided in the `config.example.yaml` file - it provides the configurations for routers that have trained on Arena data augmented using GPT-4 as a judge. The models and datasets used are all hosted on Hugging Face under the [RouteLLM](https://huggingface.co/routellm) and [LMSYS](https://huggingface.co/lmsys) organizations.
+
+The `jev` router and `JevIntentDetector` are backed by TypeSafe's hosted API instead of local checkpoints: set `TYPESAFE_API_KEY` (required), and optionally `TYPESAFE_BASE_URL` (default `https://api.typesafe.ai`) and `TYPESAFE_DEFAULT_MODEL` (default `jev-latest`, which currently resolves to `jev-1.13.0`) — pin `TYPESAFE_DEFAULT_MODEL=jev-1.13.0` once you've calibrated a threshold against a specific model version, since `jev-latest` moves on release.
 
 ## Contribution
 
