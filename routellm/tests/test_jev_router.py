@@ -13,6 +13,8 @@ import httpx2
 import pytest
 import typesafe_sdk
 
+import routellm.routers.registry as registry
+
 from routellm.routers.typesafe.router import DEFAULT_CRITERIA, JevRouter
 from routellm.types import ModelPair
 
@@ -144,7 +146,8 @@ def test_missing_sdk_error(monkeypatch):
 # `routellm.routers.routers` imports torch at module level; the root
 # conftest.py stubs it out under pytest so ROUTER_CLS there is fake. To
 # check the real registration, load routers.py directly from its file path
-# under a private module name, bypassing the stub in sys.modules.
+# under a private module name, bypassing the stub in sys.modules. Its
+# register_router calls populate the shared registry dict.
 @pytest.mark.skipif(
     importlib.util.find_spec("torch") is None, reason="torch not installed"
 )
@@ -154,27 +157,30 @@ def test_missing_sdk_error(monkeypatch):
 # this test loads the real module.
 @pytest.mark.filterwarnings("ignore::pydantic.PydanticDeprecatedSince20")
 def test_registered():
-    spec = importlib.util.spec_from_file_location(
-        "_real_routellm_routers_for_test",
-        importlib.util.find_spec("routellm.routers.typesafe.router").origin.replace(
-            "typesafe/router.py", "routers.py"
-        ),
-    )
-    real_routers = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(real_routers)
+    saved = dict(registry.ROUTER_CLS)
+    registry.reset_registry()
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "_real_routellm_routers_for_test",
+            importlib.util.find_spec("routellm.routers.typesafe.router").origin.replace(
+                "typesafe/router.py", "routers.py"
+            ),
+        )
+        real_routers = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(real_routers)
 
-    assert real_routers.ROUTER_CLS["jev"] is JevRouter
+        assert real_routers.ROUTER_CLS["jev"] is JevRouter
+        assert registry.get_router_class("jev") is JevRouter
+    finally:
+        registry.reset_registry()
+        registry.ROUTER_CLS.update(saved)
 
 
-def test_str_is_jev(router, monkeypatch):
-    # Router.__str__ looks up routellm.routers.routers.NAME_TO_CLS, which
-    # under pytest is the conftest stub (a MagicMock), not the real mapping.
-    # Patch the stub directly, via sys.modules, so __str__ resolves without
-    # importing torch.
-    stub_routers = sys.modules["routellm.routers.routers"]
-
-    monkeypatch.setattr(
-        stub_routers, "NAME_TO_CLS", {JevRouter: "jev"}, raising=False
-    )
-
-    assert str(router) == "jev"
+def test_str_is_jev(router):
+    # Router.__str__ resolves through the registry, which is real and
+    # torch-free even though routellm.routers.routers is stubbed here.
+    registry.register_router("jev", JevRouter, replace=True)
+    try:
+        assert str(router) == "jev"
+    finally:
+        registry.ROUTER_CLS.pop("jev", None)
