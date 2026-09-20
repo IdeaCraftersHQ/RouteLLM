@@ -13,7 +13,7 @@
       "label": "routellm server"
     }
   },
-  "postCreateCommand": "uv venv --python 3.12 .venv && uv pip install -e \".[dev,serve]\" && pre-commit install && echo 'Dev environment ready. Run: PYTHONPATH=. python -m pytest routellm/tests -q'",
+  "postCreateCommand": "uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -e \".[dev,serve]\" && pre-commit install && echo 'Dev environment ready. Run: PYTHONPATH=. python -m pytest routellm/tests -q'",
   "remoteEnv": {
     "PYTHONPATH": "${containerWorkspaceFolder}"
   },
