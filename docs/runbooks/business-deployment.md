@@ -444,7 +444,9 @@ name for a configured endpoint, the raw model string otherwise. Moving
 a deployment onto named endpoints therefore changes every cache key,
 and entries written under the old raw model names go unread. The old
 rows are not wrong, just unreachable; prune them or accept one cold
-period.
+period. The key also covers the generation parameters, and a server
+that once forwarded unset sampling defaults no longer does, so rows
+written before that change go unread for the same reason.
 
 ## Verification
 
