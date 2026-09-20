@@ -84,6 +84,14 @@ def test_endpoint_empty_model_rejected():
         Endpoint(name="cloud_strong", model="")
 
 
+def test_resolve_empty_name_raises(registry):
+    with pytest.raises(ValueError):
+        registry.resolve("")
+
+    with pytest.raises(ValueError):
+        registry.resolve("   ")
+
+
 def test_get_unknown_name_lists_known_names(registry):
     with pytest.raises(KeyError) as excinfo:
         registry.get("missing")
@@ -314,6 +322,44 @@ def test_controller_balancer_overrides_endpoint(controller, mock_completion):
     assert kwargs["api_key"] == "balanced-key"
 
 
+def test_controller_balancer_target_model_equal_to_endpoint_name(
+    controller, mock_completion
+):
+    # The balancer's selected target carries a model string equal to the
+    # registry name it balances. Nothing about that collision means
+    # "no balancer matched", so its model must still reach litellm
+    # alongside its base and key.
+    from routellm.traffic import (
+        LoadBalancer,
+        LoadBalancerConfig,
+        LoadBalancerEndpoint,
+    )
+
+    controller.traffic_manager.load_balancers["local_fast"] = LoadBalancer(
+        LoadBalancerConfig(
+            strategy="round-robin",
+            endpoints=[
+                LoadBalancerEndpoint(
+                    model="local_fast",
+                    api_base="https://balanced.base",
+                    api_key="balanced-key",
+                )
+            ],
+        )
+    )
+
+    controller.completion(
+        router="random",
+        threshold=0.5,
+        messages=[{"role": "user", "content": "hello"}],
+    )
+
+    kwargs = mock_completion.call_args[1]
+    assert kwargs["model"] == "local_fast"
+    assert kwargs["api_base"] == "https://balanced.base"
+    assert kwargs["api_key"] == "balanced-key"
+
+
 def test_controller_raw_model_still_works(mock_completion):
     from routellm.caching import CacheConfig
     from routellm.controller import Controller
@@ -337,3 +383,60 @@ def test_controller_raw_model_still_works(mock_completion):
     assert kwargs["model"] == "gpt-3.5-turbo"
     assert kwargs["api_base"] == "https://default.base"
     assert kwargs["api_key"] == "default-key"
+
+
+@pytest.fixture
+def mock_acompletion(monkeypatch):
+    """Patch `routellm.controller.acompletion`, return the mock."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    res = MagicMock()
+    res.model_dump.return_value = {"id": "test", "choices": []}
+    mock = AsyncMock(return_value=res)
+    monkeypatch.setattr("routellm.controller.acompletion", mock)
+    return mock
+
+
+@pytest.mark.asyncio
+async def test_acompletion_passes_endpoint_call_params(
+    controller, mock_acompletion, monkeypatch
+):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setattr(
+        controller.routers["random"],
+        "route",
+        lambda prompt, threshold, model_pair: model_pair.strong,
+    )
+
+    await controller.acompletion(
+        router="random",
+        threshold=0.5,
+        messages=[{"role": "user", "content": "hello"}],
+        timeout=5,
+    )
+
+    kwargs = mock_acompletion.call_args[1]
+    assert kwargs["model"] == "gpt-4o"
+    assert kwargs["api_base"] == "https://default.base"
+    assert kwargs["api_key"] == "test"
+    assert kwargs["timeout"] == 5
+
+
+@pytest.mark.asyncio
+async def test_acompletion_applies_endpoint_extra(
+    controller, mock_acompletion, monkeypatch
+):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setattr(
+        controller.routers["random"],
+        "route",
+        lambda prompt, threshold, model_pair: model_pair.strong,
+    )
+
+    await controller.acompletion(
+        router="random",
+        threshold=0.5,
+        messages=[{"role": "user", "content": "hello"}],
+    )
+
+    assert mock_acompletion.call_args[1]["timeout"] == 60

@@ -209,7 +209,9 @@ class EndpointRegistry:
         anonymous endpoint whose model is the given string and which
         carries no base URL and no credential, so the controller
         defaults apply. The first anonymous resolution of each distinct
-        string logs one warning; repeats stay quiet.
+        string logs one warning; repeats stay quiet. The set of
+        already-warned names is per registry instance, so a new
+        registry warns afresh.
 
         Parameters
         ----------
@@ -220,7 +222,17 @@ class EndpointRegistry:
         -------
         Endpoint
             The configured or anonymous endpoint.
+
+        Raises
+        ------
+        ValueError
+            If `name_or_model` is empty or only whitespace.
         """
+        if not name_or_model or not name_or_model.strip():
+            raise ValueError(
+                "Endpoint name or model must be a non-empty string"
+            )
+
         endpoint = self._endpoints.get(name_or_model)
         if endpoint is not None:
             return endpoint
