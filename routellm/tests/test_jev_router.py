@@ -176,11 +176,18 @@ def test_registered():
         registry.ROUTER_CLS.update(saved)
 
 
+_ABSENT = object()
+
+
 def test_str_is_jev(router):
     # Router.__str__ resolves through the registry, which is real and
     # torch-free even though routellm.routers.routers is stubbed here.
+    saved = registry.ROUTER_CLS.get("jev", _ABSENT)
     registry.register_router("jev", JevRouter, replace=True)
     try:
         assert str(router) == "jev"
     finally:
-        registry.ROUTER_CLS.pop("jev", None)
+        if saved is _ABSENT:
+            registry.ROUTER_CLS.pop("jev", None)
+        else:
+            registry.ROUTER_CLS["jev"] = saved
