@@ -1,0 +1,133 @@
+"""Tests for JevRouter against a mock TypeSafe transport.
+
+All requests go through httpx2.MockTransport, never the network. Every
+fixture sets TYPESAFE_API_KEY: TypeSafeClient requires it even with a
+mock transport, since the key check happens before any request is sent.
+"""
+import importlib.util
+import json
+import sys
+
+import httpx2
+import pytest
+import typesafe_sdk
+
+from routellm.routers.typesafe.router import JevRouter
+from routellm.types import ModelPair
+
+RESPONSE_BODY = {
+    "model": "jev-1.13.0",
+    "usage": {"input_tokens": 1, "output_tokens": 0},
+    "answers": {"strong": {"type": "noul", "noul": 0.83}},
+}
+
+
+@pytest.fixture(autouse=True)
+def api_key(monkeypatch):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test")
+
+
+@pytest.fixture
+def captured():
+    """Mutable box the mock handler stashes the decoded request body into."""
+    return {}
+
+
+@pytest.fixture
+def router(captured):
+    def handler(request):
+        captured["body"] = json.loads(request.content)
+        return httpx2.Response(200, json=RESPONSE_BODY)
+
+    router = JevRouter(model="jev-1.13.0", transport=httpx2.MockTransport(handler))
+    yield router
+    router.close()
+
+
+def test_win_rate_is_noul_probability(router):
+    assert router.calculate_strong_win_rate("hello world") == 0.83
+
+
+def test_route_threshold(router):
+    pair = ModelPair(strong="gpt-4", weak="gpt-3.5-turbo")
+
+    assert router.route("hello world", 0.5, pair) == "gpt-4"
+    assert router.route("hello world", 0.9, pair) == "gpt-3.5-turbo"
+
+
+def test_prompt_truncated(captured):
+    def handler(request):
+        captured["body"] = json.loads(request.content)
+        return httpx2.Response(200, json=RESPONSE_BODY)
+
+    router = JevRouter(
+        max_prompt_chars=10, transport=httpx2.MockTransport(handler)
+    )
+    router.calculate_strong_win_rate("x" * 100)
+    router.close()
+
+    assert len(captured["body"]["state"]["prompt"]) == 10
+
+
+def test_model_from_config(router, captured):
+    router.calculate_strong_win_rate("hello world")
+
+    assert captured["body"]["model"] == "jev-1.13.0"
+
+
+def test_api_error_propagates():
+    def handler(request):
+        return httpx2.Response(429, json={"error": "rate limited"})
+
+    router = JevRouter(transport=httpx2.MockTransport(handler), max_retries=0)
+    try:
+        with pytest.raises(typesafe_sdk.TypeSafeRateLimitError):
+            router.calculate_strong_win_rate("hello world")
+    finally:
+        router.close()
+
+
+def test_missing_sdk_error(monkeypatch):
+    monkeypatch.setitem(sys.modules, "typesafe_sdk", None)
+
+    with pytest.raises(ImportError, match=r"routellm\[typesafe\]"):
+        JevRouter()
+
+
+# `routellm.routers.routers` imports torch at module level; the root
+# conftest.py stubs it out under pytest so ROUTER_CLS there is fake. To
+# check the real registration, load routers.py directly from its file path
+# under a private module name, bypassing the stub in sys.modules.
+@pytest.mark.skipif(
+    importlib.util.find_spec("torch") is None, reason="torch not installed"
+)
+# routers.py transitively imports causal_llm/prompt_format.py, a
+# pre-existing module with Pydantic v1-style @validator decorators; that
+# deprecation warning is unrelated to JevRouter and only surfaces because
+# this test loads the real module.
+@pytest.mark.filterwarnings("ignore::pydantic.PydanticDeprecatedSince20")
+def test_registered():
+    spec = importlib.util.spec_from_file_location(
+        "_real_routellm_routers_for_test",
+        importlib.util.find_spec("routellm.routers.typesafe.router").origin.replace(
+            "typesafe/router.py", "routers.py"
+        ),
+    )
+    real_routers = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(real_routers)
+
+    assert real_routers.ROUTER_CLS["jev"] is JevRouter
+
+
+def test_str_is_jev(router, monkeypatch):
+    # Router.__str__ looks up routellm.routers.routers.NAME_TO_CLS, which
+    # under pytest is the conftest stub (a MagicMock), not the real mapping.
+    # Patch the stub directly, via sys.modules, so __str__ resolves without
+    # importing torch.
+    stub_routers = sys.modules["routellm.routers.routers"]
+
+    monkeypatch.setattr(
+        stub_routers, "NAME_TO_CLS", {JevRouter: "jev"}, raising=False
+    )
+
+    assert str(router) == "jev"
