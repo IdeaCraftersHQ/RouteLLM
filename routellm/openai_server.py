@@ -18,11 +18,86 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from routellm.controller import Controller, RoutingError
-from routellm.endpoints import EndpointRegistry
+from routellm.endpoints import Endpoint, EndpointRegistry, Tier
 from routellm.routers.routers import ROUTER_CLS
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 CONTROLLER = None
+
+#: `created` for every listed model: the moment this process came up.
+#: The listing is derived from the config, so it never changes while the
+#: process lives.
+SERVER_START = int(time.time())
+
+#: Endpoint names the implicit `default` tier is built under. Hyphens are
+#: reserved for the model-name grammar, so these carry none.
+IMPLICIT_STRONG = "implicit_strong"
+IMPLICIT_WEAK = "implicit_weak"
+
+
+def build_registry(file_config: Optional[dict]) -> EndpointRegistry:
+    """Build the endpoint registry the server routes against.
+
+    `--config` is the single source for endpoints and tiers. When that
+    config carries no `default` tier and both `--strong-model` and
+    `--weak-model` are given, the two are wrapped as endpoints and
+    joined into an implicit `default` tier running `--routers[0]` at
+    `--default-threshold`, so a flat command line still answers a
+    request addressed to `default`. A config `default` wins; the flags
+    are then left to the flat pair the controller keeps.
+
+    Parameters
+    ----------
+    file_config : dict, optional
+        The loaded YAML config, or None when `--config` was not given.
+
+    Returns
+    -------
+    EndpointRegistry
+        Registry holding the configured endpoints and tiers, plus the
+        implicit `default` tier when one was derived.
+    """
+    registry = EndpointRegistry.from_config(file_config or {})
+
+    if registry.has_tier("default"):
+        logging.info("default tier: from --config")
+        return registry
+
+    if not args.strong_model or not args.weak_model:
+        return registry
+
+    endpoints = {name: registry.get(name) for name in registry.names()}
+
+    # A flag may name a configured endpoint, which already carries its
+    # own base URL and credential; only a raw model name needs wrapping.
+    sides = {}
+    for side, flag, wrapper in (
+        ("strong", args.strong_model, IMPLICIT_STRONG),
+        ("weak", args.weak_model, IMPLICIT_WEAK),
+    ):
+        if flag in endpoints:
+            sides[side] = flag
+            continue
+        endpoints[wrapper] = Endpoint(name=wrapper, model=flag)
+        sides[side] = wrapper
+
+    tiers = registry.tiers
+    tiers["default"] = Tier(
+        name="default",
+        router=args.routers[0] if args.routers else None,
+        threshold=args.default_threshold,
+        strong=sides["strong"],
+        weak=sides["weak"],
+    )
+
+    logging.info(
+        "default tier: implicit, %s/%s at %s over %s",
+        args.strong_model,
+        args.weak_model,
+        args.default_threshold,
+        args.routers[0] if args.routers else "<none>",
+    )
+    return EndpointRegistry(endpoints, tiers)
 
 
 @asynccontextmanager
@@ -41,7 +116,7 @@ async def lifespan(app):
     # handoff. A file holding nothing else leaves None, which keeps the
     # router defaults.
     file_config = yaml.safe_load(open(args.config, "r")) if args.config else None
-    endpoints = EndpointRegistry.from_config(file_config or {})
+    endpoints = build_registry(file_config)
     router_config = dict(file_config or {})
     router_config.pop("endpoints", None)
     router_config.pop("tiers", None)
@@ -172,6 +247,43 @@ async def create_chat_completion(request: ChatCompletionRequest):
     if path is not None:
         body["routellm"] = {"path": path}
     return JSONResponse(content=body)
+
+
+@app.get("/v1/models")
+async def list_models():
+    """List every model name this server answers to.
+
+    Two families of id: one per configured tier, addressable bare or
+    as `router-<tier>`, and one `router-<name>-<default_threshold>` per
+    loaded router. The legacy flat form carries a threshold, and only a
+    concrete one is a usable id, so each router is listed at the
+    server's `--default-threshold`; any other threshold still routes.
+
+    Returns
+    -------
+    JSONResponse
+        An OpenAI model list, `data` sorted by id.
+    """
+    ids = set(CONTROLLER.endpoints.tier_names())
+    ids.update(
+        f"router-{name}-{CONTROLLER.default_threshold}"
+        for name in CONTROLLER.routers
+    )
+
+    return JSONResponse(
+        content={
+            "object": "list",
+            "data": [
+                {
+                    "id": model_id,
+                    "object": "model",
+                    "created": SERVER_START,
+                    "owned_by": "routellm",
+                }
+                for model_id in sorted(ids)
+            ],
+        }
+    )
 
 
 @app.get("/health")
