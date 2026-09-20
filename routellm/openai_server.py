@@ -7,7 +7,6 @@ import argparse
 import logging
 import os
 import time
-from collections import defaultdict
 from typing import AsyncGenerator, Dict, List, Literal, Optional, Union
 
 import fastapi
@@ -16,17 +15,14 @@ import uvicorn
 import yaml
 from fastapi.concurrency import asynccontextmanager
 from fastapi.responses import JSONResponse, StreamingResponse
-from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
 from routellm.controller import Controller, RoutingError
+from routellm.endpoints import EndpointRegistry
 from routellm.routers.routers import ROUTER_CLS
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 CONTROLLER = None
-
-openai_client = AsyncOpenAI()
-count = defaultdict(lambda: defaultdict(int))
 
 
 @asynccontextmanager
@@ -40,11 +36,21 @@ async def lifespan(app):
         if key:
             gateway = X402Adapter(private_key=key)
 
+    # `endpoints:` belongs to the registry; the rest of the file stays
+    # router config, so it is popped out before the handoff. A file
+    # holding nothing else leaves None, which keeps the router defaults.
+    file_config = yaml.safe_load(open(args.config, "r")) if args.config else None
+    endpoints = EndpointRegistry.from_config(file_config or {})
+    router_config = dict(file_config or {})
+    router_config.pop("endpoints", None)
+    router_config = router_config or None
+
     CONTROLLER = Controller(
         routers=args.routers,
-        config=yaml.safe_load(open(args.config, "r")) if args.config else None,
+        config=router_config,
         strong_model=args.strong_model,
         weak_model=args.weak_model,
+        endpoints=endpoints,
         api_base=args.base_url,
         api_key=args.api_key,
         progress_bar=True,
@@ -183,9 +189,17 @@ parser.add_argument(
     type=str,
     default=None,
 )
-parser.add_argument("--strong-model", type=str, default="gpt-4-1106-preview")
 parser.add_argument(
-    "--weak-model", type=str, default="anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1"
+    "--strong-model",
+    help="Endpoint name from the config, or a raw model name",
+    type=str,
+    default="gpt-4-1106-preview",
+)
+parser.add_argument(
+    "--weak-model",
+    help="Endpoint name from the config, or a raw model name",
+    type=str,
+    default="anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1",
 )
 parser.add_argument(
     "--payment-provider",
