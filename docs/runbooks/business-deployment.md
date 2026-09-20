@@ -352,8 +352,13 @@ pip install -e './extensions/typesafe'    # registers the jev router
 pip install -e '.[pairing]'               # only if a tier side selects
 ```
 
-The `pairing` extra pulls its catalog client from a git URL and needs
-Python 3.11 or newer. Skip it unless a tier uses `select:`.
+The `pairing` extra pulls its catalog client from a git URL
+(`hop-top-aim` from `hop-top/poly-aim`, see the `pairing` entry in
+`pyproject.toml`) and needs Python 3.11 or newer — that package's own
+`pyproject.toml` declares `requires-python = ">=3.11"`, which
+`python -c "import importlib.metadata as m;
+print(m.metadata('hop-top-aim')['Requires-Python'])"` echoes once it is
+installed. Skip the extra unless a tier uses `select:`.
 
 ### Serve
 
@@ -365,9 +370,16 @@ python -m routellm.openai_server \
 
 `--config` is the single source for endpoints and tiers. The example
 config's `default` tier names `mf` and `0.12`, so neither
-`--strong-model` nor `--weak-model` is needed; when a config carries no
-`default` tier, those two flags derive an implicit one instead. The
-startup log says which is in effect.
+`--strong-model` nor `--weak-model` is needed.
+
+When a config carries no `default` tier, passing both flags derives an
+implicit one from them instead. Passing neither derives nothing: no
+`default` tier exists, none is listed on `/v1/models`, and
+`router-<router>-<threshold>` falls back to the historic
+`gpt-4-1106-preview` / `anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1`
+pair with a startup WARNING saying so. The two flags must be given
+together; one alone is an argument error. The startup log says which
+`default` tier is in effect.
 
 Check what the server answers to:
 

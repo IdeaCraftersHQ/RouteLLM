@@ -34,15 +34,20 @@ controller.acompletion = AsyncMock(return_value=res)
 """
 
 
-def _run(tmp_path, argv, body):
+def _spawn(tmp_path, argv, body):
     """Run `body` in a subprocess against a server built from `argv`."""
-    result = subprocess.run(
+    return subprocess.run(
         [sys.executable, "-c", _PREAMBLE.format(argv=argv) + body],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
         env={"PYTHONPATH": ".", "PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
     )
+
+
+def _run(tmp_path, argv, body):
+    """Run `body` and return the JSON its last line printed."""
+    result = _spawn(tmp_path, argv, body)
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout.strip().splitlines()[-1])
 
@@ -58,6 +63,20 @@ def tiered_config(tmp_path):
         "tiers:\n"
         "  premium: {strong: big, weak: small}\n"
         "  default: {strong: premium, weak: small}\n"
+    )
+    return config
+
+
+@pytest.fixture
+def no_default_config(tmp_path):
+    """A config carrying a tier, but not one named `default`."""
+    config = tmp_path / "no-default.yaml"
+    config.write_text(
+        "endpoints:\n"
+        "  big: {model: m_big}\n"
+        "  small: {model: m_small}\n"
+        "tiers:\n"
+        "  premium: {strong: big, weak: small}\n"
     )
     return config
 
@@ -222,6 +241,70 @@ print(json.dumps({"sides": sides, "names": names,
     assert payload["sides"] == ["big", "small"]
     assert payload["names"] == ["big", "small"]
     assert payload["path"][0]["picked"] in ("big", "small")
+
+
+@pytest.mark.slow
+def test_no_flags_invents_no_default_tier(tmp_path, no_default_config):
+    """Neither flag and no config `default`: nothing is derived.
+
+    The tier is not invented, so it is not advertised either, and no
+    `implicit_*` endpoint is registered. The legacy flat form still
+    routes, against the historic pair, and that assumption is announced
+    at WARNING so it is visible without `--verbose`.
+    """
+    result = _spawn(
+        tmp_path,
+        ["x", "--config", str(no_default_config), "--routers", "random"],
+        """
+with TestClient(server.app) as client:
+    ids = [item["id"] for item in client.get("/v1/models").json()["data"]]
+    names = server.CONTROLLER.endpoints.names()
+    pair = server.CONTROLLER.model_pair
+    reply = client.post(
+        "/v1/chat/completions",
+        json={"model": "router-random-0.5",
+              "messages": [{"role": "user", "content": "hi"}]},
+    )
+print(json.dumps({"ids": ids, "names": names, "status": reply.status_code,
+                  "pair": [pair.strong, pair.weak]}))
+""",
+    )
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+
+    assert "default" not in payload["ids"]
+    assert payload["ids"] == ["premium", "router-random-0.5"]
+    assert payload["names"] == ["big", "small"]
+    assert not [name for name in payload["names"] if name.startswith("implicit")]
+
+    # The legacy flat form keeps answering, against the historic pair.
+    assert payload["status"] == 200
+    assert payload["pair"] == [
+        "gpt-4-1106-preview",
+        "anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1",
+    ]
+
+    assert "gpt-4-1106-preview" in result.stderr
+    assert "anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1" in result.stderr
+    assert "define a 'default' tier" in result.stderr
+
+
+@pytest.mark.slow
+def test_one_model_flag_alone_is_an_argparse_error(tmp_path, no_default_config):
+    """One side of a pair is never enough; argparse rejects it."""
+    for flag, value in (
+        ("--strong-model", "gpt-4o"),
+        ("--weak-model", "ollama_chat/qwen3:8b"),
+    ):
+        result = _spawn(
+            tmp_path,
+            ["x", "--config", str(no_default_config), "--routers", "random",
+             flag, value],
+            "print('{}')\n",
+        )
+
+        assert result.returncode != 0
+        assert "must be given together" in result.stderr
 
 
 # ---------------------------------------------------------------------------
