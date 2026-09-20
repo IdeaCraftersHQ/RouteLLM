@@ -5,6 +5,7 @@ models based on prompt difficulty. Supports caching, resilience,
 quality management, and payment gateway integration.
 """
 
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -22,8 +23,11 @@ from routellm.quality import QualityManager
 from routellm.resilience import Resilience, ResilienceConfig
 from routellm.routers.embeddings import configure_embeddings
 from routellm.routers.routers import ROUTER_CLS
+from routellm.routing import parse_model_name, resolve_level, resolve_tier, sibling_of
 from routellm.traffic import TrafficManager
 from routellm.types import Middleware, ModelPair
+
+logger = logging.getLogger(__name__)
 
 # Default config for routers augmented using golden label data from GPT-4.
 # Kept broadly in sync with config.example.yaml.
@@ -58,8 +62,8 @@ class Controller:
     def __init__(
         self,
         routers: list[str],
-        strong_model: str,
-        weak_model: str,
+        strong_model: Optional[str] = None,
+        weak_model: Optional[str] = None,
         config: Optional[dict[str, dict[str, Any]]] = None,
         api_base: Optional[str] = None,
         api_key: Optional[str] = None,
@@ -71,6 +75,8 @@ class Controller:
         traffic_manager: Optional[TrafficManager] = None,
         quality_manager: Optional[QualityManager] = None,
         endpoints: Optional[EndpointRegistry] = None,
+        default_router: Optional[str] = None,
+        default_threshold: float = 0.5,
     ):
         """Initialize controller with routers and configuration.
 
@@ -78,10 +84,13 @@ class Controller:
         ----------
         routers : list[str]
             List of router names to initialize (e.g., ["sw_ranking", "bert"]).
-        strong_model : str
-            Name of strong/expensive model (e.g., "gpt-4").
-        weak_model : str
-            Name of weak/cheap model (e.g., "gpt-3.5-turbo").
+            Routers named by any tier are instantiated too.
+        strong_model : str, optional
+            Name of strong/expensive model (e.g., "gpt-4"). May be None
+            when the registry carries a `default` tier.
+        weak_model : str, optional
+            Name of weak/cheap model (e.g., "gpt-3.5-turbo"). May be
+            None when the registry carries a `default` tier.
         config : dict, optional
             Router-specific configurations. Uses GPT-4 augmented defaults
             if None.
@@ -107,8 +116,32 @@ class Controller:
             Named endpoints with their own base URL and credential.
             Empty registry when None, which leaves every model name a
             raw litellm model name using `api_base` / `api_key`.
+        default_router : str, optional
+            Router used by a tier level that names none and whose
+            request carries none. Falls back to `routers[0]`.
+        default_threshold : float
+            Threshold used under the same conditions. Default 0.5.
+
+        Raises
+        ------
+        ValueError
+            If both models are None and no `default` tier is configured,
+            or a tier names a router that is not registered.
         """
-        self.default_model_pair = ModelPair(strong=strong_model, weak=weak_model)
+        self.endpoints = endpoints or EndpointRegistry()
+
+        if strong_model is None and weak_model is None:
+            if not self.endpoints.has_tier("default"):
+                raise ValueError(
+                    "Controller needs strong_model and weak_model, or a "
+                    "registry carrying a 'default' tier."
+                )
+            self.default_model_pair = None
+        else:
+            self.default_model_pair = ModelPair(strong=strong_model, weak=weak_model)
+
+        self.default_router = default_router or (routers[0] if routers else None)
+        self.default_threshold = default_threshold
         self.routers = {}
         self.api_base = api_base
         self.api_key = api_key
@@ -120,7 +153,6 @@ class Controller:
         self.cache = Cache(cache_config)
         self.traffic_manager = traffic_manager or TrafficManager()
         self.quality_manager = quality_manager or QualityManager()
-        self.endpoints = endpoints or EndpointRegistry()
 
         if config is None:
             config = GPT_4_AUGMENTED_CONFIG
@@ -129,11 +161,35 @@ class Controller:
         # point it at the `embedding` endpoint before any is constructed.
         configure_embeddings(self.endpoints)
 
+        # A tier's router must exist too, but it is named in the config
+        # file rather than on the command line, so it is checked here
+        # against the live ROUTER_CLS: extensions register by discovery,
+        # so a name unknown at import may be known by now.
+        to_build = list(routers)
+        for tier in self.endpoints.tiers.values():
+            if tier.router is None or tier.router in to_build:
+                continue
+            if tier.router not in ROUTER_CLS:
+                raise ValueError(
+                    f"Tier {tier.name!r} names unknown router "
+                    f"{tier.router!r}. Registered routers: "
+                    f"{', '.join(sorted(ROUTER_CLS)) or '<none>'}"
+                )
+            to_build.append(tier.router)
+
+        collisions = sorted(set(self.endpoints.tier_names()) & set(ROUTER_CLS))
+        if collisions:
+            raise ValueError(
+                "Names are both a tier and a router: "
+                f"{', '.join(collisions)}. Tier and router names must be "
+                "distinct."
+            )
+
         router_pbar = None
         if self.progress_bar:
-            router_pbar = tqdm(total=len(routers), desc="Initializing routers")
+            router_pbar = tqdm(total=len(to_build), desc="Initializing routers")
 
-        for router in routers:
+        for router in to_build:
             router_config = config.get(router, {})
             self.routers[router] = ROUTER_CLS[router](**router_config)
             if router_pbar:
@@ -141,38 +197,298 @@ class Controller:
 
     @property
     def model_pair(self) -> ModelPair:
+        """Return the flat strong/weak pair the controller was built with.
+
+        Returns
+        -------
+        ModelPair
+            The configured pair.
+
+        Raises
+        ------
+        RoutingError
+            If the controller carries tiers only, which the evaluation
+            and calibration entry points cannot route against.
+        """
+        if self.default_model_pair is None:
+            raise RoutingError(
+                "This controller routes through tiers and has no flat model "
+                "pair; evals need --strong-model/--weak-model."
+            )
         return self.default_model_pair
 
-    def _get_model_pair_for_prompt(self, prompt: str) -> ModelPair:
-        """Get the model pair to use for a given prompt, checking middleware."""
+    def _get_model_pair_for_prompt(self, prompt: str) -> Optional[ModelPair]:
+        """Get the model pair a middleware asks for, or None."""
         for m in self.middleware:
             pair = m.get_model_pair(prompt)
             if pair:
                 return pair
-        return self.default_model_pair
+        return None
 
-    def _parse_model_name(self, model_name: str) -> tuple[str, float]:
-        """Parse router and threshold from model name."""
-        if not model_name.startswith("router-"):
-            raise RoutingError(
-                f"Invalid model name: {model_name}. Model name must start with 'router-'"
-            )
+    def _parse_model_name(
+        self, model_name: str
+    ) -> tuple[Optional[str], Optional[str], Optional[float]]:
+        """Split a model name into a tier, a router, and a threshold.
 
-        parts = model_name.split("-")
-        if len(parts) != 3:
-            raise RoutingError(
-                f"Invalid model name: {model_name}. Model name must be in the format 'router-[router name]-[threshold]'"
-            )
+        Parameters
+        ----------
+        model_name : str
+            The request's model string, in any of the four forms
+            `routellm.routing` documents.
 
-        router = parts[1]
+        Returns
+        -------
+        tuple[str or None, str or None, float or None]
+            The `(tier, router, threshold)` the name asks for.
+
+        Raises
+        ------
+        RoutingError
+            If the name is malformed or names an unconfigured tier.
+        """
+        return parse_model_name(model_name, self.endpoints, RoutingError)
+
+    def _run_router(
+        self, router: str, threshold: float, prompt: str, pair: ModelPair
+    ) -> tuple[str, Optional[float]]:
+        """Run one router over one pair and report what it picked.
+
+        `Router.route` stays the decision point, so a router that
+        overrides it keeps deciding. The win rate is read from the same
+        single `calculate_strong_win_rate` call `route` makes, and is
+        None for a router that implements only `route`.
+
+        Parameters
+        ----------
+        router : str
+            Router name, validated against the instantiated routers.
+        threshold : float
+            Decision threshold in [0, 1].
+        prompt : str
+            Prompt to score.
+        pair : ModelPair
+            The two sides this level chooses between.
+
+        Returns
+        -------
+        tuple[str, float or None]
+            The side picked, and the recorded win rate.
+
+        Raises
+        ------
+        RoutingError
+            If the router is unknown or the threshold is out of range.
+        """
+        self._validate_router_threshold(router, threshold)
+        instance = self.routers[router]
+
+        scores: list[float] = []
+        scorer = getattr(instance, "calculate_strong_win_rate", None)
+        if scorer is None:
+            return instance.route(prompt, threshold, pair), None
+
+        def _record(*args, **kwargs):
+            score = scorer(*args, **kwargs)
+            scores.append(score)
+            return score
+
+        # Swapped on the instance so `route` reads the recorded scorer;
+        # restored right after, leaving a router shared between requests
+        # untouched.
+        instance.calculate_strong_win_rate = _record
         try:
-            threshold = float(parts[2])
-        except ValueError:
-            raise RoutingError(
-                f"Invalid threshold: {parts[2]}. Threshold must be a float."
+            picked = instance.route(prompt, threshold, pair)
+        finally:
+            del instance.calculate_strong_win_rate
+
+        return picked, scores[0] if scores else None
+
+    def _route(
+        self,
+        prompt: str,
+        kwargs: dict[str, Any],
+        tier: Optional[str],
+        router: Optional[str],
+        threshold: Optional[float],
+    ) -> tuple[str, list[dict[str, Any]]]:
+        """Choose one endpoint for a prompt and record how it was chosen.
+
+        A traffic rule or a middleware that returns a pair bypasses the
+        tree: that pair is routed flat with the root level's resolved
+        router and threshold, and the path carries a single entry naming
+        where the pair came from.
+
+        Parameters
+        ----------
+        prompt : str
+            The request's prompt.
+        kwargs : dict
+            The request kwargs, which traffic rules read.
+        tier : str, optional
+            Tier addressed by the model name, if any.
+        router : str, optional
+            Request-level router from the model name, if any.
+        threshold : float, optional
+            Request-level threshold from the model name, if any.
+
+        Returns
+        -------
+        tuple[str, list[dict]]
+            The endpoint name to call, and the decision path.
+
+        Raises
+        ------
+        RoutingError
+            If no tier applies and the controller carries no flat pair.
+        """
+        inherited = {
+            "parent_router": None,
+            "parent_threshold": None,
+            "request_router": router,
+            "request_threshold": threshold,
+            "default_router": self.default_router,
+            "default_threshold": self.default_threshold,
+        }
+
+        overridden = self.traffic_manager.get_model_pair(prompt, kwargs)
+        pair_from = "traffic_rule"
+        if overridden is None:
+            overridden = self._get_model_pair_for_prompt(prompt)
+            pair_from = "middleware"
+
+        if overridden is None and tier is not None:
+            return resolve_tier(
+                tier, prompt, inherited, self.endpoints, self._run_router
             )
 
-        return router, threshold
+        # A bypassed pair, or a controller with no tiers at all, routes
+        # flat at the root level's resolved values.
+        root_tier = self.endpoints.get_tier(tier) if tier is not None else None
+        level = resolve_level(
+            root_tier.router if root_tier else None,
+            root_tier.threshold if root_tier else None,
+            inherited,
+        )
+
+        pair = overridden or self.default_model_pair
+        if pair is None:
+            raise RoutingError(
+                "No tier applies to this request and the controller carries "
+                "no strong_model/weak_model pair."
+            )
+
+        picked, win_rate = self._run_router(
+            level["router"], level["threshold"], prompt, pair
+        )
+
+        entry = {
+            "tier": None,
+            "router": level["router"],
+            "router_from": level["router_from"],
+            "threshold": level["threshold"],
+            "threshold_from": level["threshold_from"],
+            "win_rate": win_rate,
+            "picked": picked,
+        }
+        if overridden is not None:
+            entry["pair_from"] = pair_from
+
+        return picked, [entry]
+
+    def _models_to_try(
+        self,
+        picked: str,
+        path: list[dict[str, Any]],
+        pair: Optional[ModelPair],
+    ) -> tuple[str, list[str], Optional[str]]:
+        """Build the fallback chain for one request.
+
+        Order: the canary when one fires, the picked leaf, then the
+        sibling of the final pick. A tier-valued sibling is descended by
+        its `weak` side without running any router.
+
+        Parameters
+        ----------
+        picked : str
+            Endpoint the routing decision landed on.
+        path : list[dict]
+            The decision path, whose last tier entry names the sibling.
+        pair : ModelPair or None
+            The flat pair, when the tree was bypassed or absent.
+
+        Returns
+        -------
+        tuple[str, list[str], str or None]
+            The endpoint the request is attributed to, the ordered names
+            to try, and the name the sibling was written under.
+        """
+        if self.quality_manager.should_canary():
+            model_to_use = self.quality_manager.canary_config.canary_model
+        else:
+            model_to_use = picked
+
+        models_to_try = [model_to_use]
+        if picked not in models_to_try:
+            models_to_try.append(picked)
+
+        found = sibling_of(path, self.endpoints)
+        if found is not None:
+            sibling, reference = found
+        elif pair is not None:
+            sibling = pair.weak if picked == pair.strong else pair.strong
+            reference = sibling
+        else:
+            sibling, reference = None, None
+
+        if sibling is not None and sibling not in models_to_try:
+            models_to_try.append(sibling)
+
+        return model_to_use, models_to_try, reference
+
+    def _attach_path(
+        self,
+        res,
+        path: list[dict[str, Any]],
+        used: str,
+        picked: str,
+        sibling_reference: Optional[str],
+    ):
+        """Log the decision path and attach it to a response.
+
+        Recorded in `_hidden_params` only: an extra attribute would leak
+        into the cached `model_dump()`.
+
+        Parameters
+        ----------
+        res : ModelResponse
+            The response to annotate.
+        path : list[dict]
+            The decision path.
+        used : str
+            Endpoint that answered, which may be a fallback.
+        picked : str
+            Endpoint the routing decision landed on.
+        sibling_reference : str or None
+            Name the sibling was written under on its tier, recorded as
+            `fallback_from` when the sibling is what answered.
+
+        Returns
+        -------
+        ModelResponse
+            The same response.
+        """
+        final = [dict(entry) for entry in path]
+        if final and used != picked:
+            final[-1]["fallback_from"] = sibling_reference or used
+
+        logger.info("routing path: %s -> %s", final, used)
+
+        try:
+            res._hidden_params["routellm_path"] = final
+        except (AttributeError, TypeError):
+            logger.warning("response carries no _hidden_params; path not attached")
+
+        return res
 
     def _endpoint_call_params(
         self, model_name: str
@@ -258,8 +574,9 @@ class Controller:
         difficulty score and threshold.
 
         Router and threshold can be specified explicitly or parsed from
-        model name using format "router-{router}-{threshold}" (e.g.,
-        "router-sw_ranking-0.5").
+        the model name, which also addresses a tier. A tiered request
+        walks the tree, one router call per level, and the decision path
+        comes back on `response._hidden_params["routellm_path"]`.
 
         Cache, resilience, and trace keys are the routed name: the
         endpoint name for a configured endpoint, the raw model name
@@ -288,30 +605,26 @@ class Controller:
         RoutingError
             If router/threshold invalid or model name malformed.
         """
-        if "model" in kwargs:
-            router, threshold = self._parse_model_name(kwargs["model"])
+        tier = None
+        request_name = kwargs.get("model")
+        if request_name is not None:
+            tier, router, threshold = self._parse_model_name(request_name)
+        else:
+            request_name = router
 
-        self._validate_router_threshold(router, threshold)
-        
         prompt = kwargs["messages"][-1]["content"]
 
-        # 1. Apply traffic rules for conditional routing
-        overridden_pair = self.traffic_manager.get_model_pair(prompt, kwargs)
-        if overridden_pair:
-            model_pair = overridden_pair
-        else:
-            model_pair = self._get_model_pair_for_prompt(prompt)
+        # 1. Route: traffic rules and middleware bypass the tree, a tier
+        #    walks it, and a bare pair routes flat.
+        routed_model, path = self._route(prompt, kwargs, tier, router, threshold)
 
-        routed_model = self.routers[router].route(prompt, threshold, model_pair)
+        # 2. Apply canary testing and build the fallback chain.
+        model_to_use, models_to_try, sibling_reference = self._models_to_try(
+            routed_model, path, self.default_model_pair
+        )
+        is_canary = model_to_use != routed_model
 
-        # 2. Apply canary testing
-        is_canary = self.quality_manager.should_canary()
-        if is_canary:
-            model_to_use = self.quality_manager.canary_config.canary_model
-        else:
-            model_to_use = routed_model
-
-        self.model_counts[router][model_to_use] += 1
+        self.model_counts[request_name][model_to_use] += 1
 
         # Try cache
         cache_params = {k: v for k, v in kwargs.items() if k not in ["messages", "model"]}
@@ -321,16 +634,9 @@ class Controller:
             res = ModelResponse(**cached_res)
             # Record trace for cached response too
             self.quality_manager.record_trace(prompt, model_to_use, res.model_dump(), {"cached": True, "is_canary": is_canary})
-            return res
-
-        # Fallback chain: model_to_use -> routed_model -> other model in pair
-        models_to_try = [model_to_use]
-        if routed_model not in models_to_try:
-            models_to_try.append(routed_model)
-        
-        other_model = model_pair.weak if routed_model == model_pair.strong else model_pair.strong
-        if other_model not in models_to_try:
-            models_to_try.append(other_model)
+            return self._attach_path(
+                res, path, model_to_use, routed_model, sibling_reference
+            )
 
         last_err = None
         for model_name in models_to_try:
@@ -365,7 +671,9 @@ class Controller:
                 # Record trace
                 self.quality_manager.record_trace(prompt, model_name, res.model_dump(), {"is_canary": is_canary and model_name == model_to_use})
 
-                return res
+                return self._attach_path(
+                    res, path, model_name, routed_model, sibling_reference
+                )
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).warning(
@@ -373,7 +681,7 @@ class Controller:
                 )
                 last_err = e
                 continue
-        
+
         if last_err:
             raise last_err
 
@@ -385,31 +693,27 @@ class Controller:
         threshold: Optional[float] = None,
         **kwargs,
     ):
-        if "model" in kwargs:
-            router, threshold = self._parse_model_name(kwargs["model"])
+        tier = None
+        request_name = kwargs.get("model")
+        if request_name is not None:
+            tier, router, threshold = self._parse_model_name(request_name)
+        else:
+            request_name = router
 
-        self._validate_router_threshold(router, threshold)
-        
         prompt = kwargs["messages"][-1]["content"]
-        
-        # 1. Apply traffic rules for conditional routing
-        overridden_pair = self.traffic_manager.get_model_pair(prompt, kwargs)
-        if overridden_pair:
-            model_pair = overridden_pair
-        else:
-            model_pair = self._get_model_pair_for_prompt(prompt)
-            
-        routed_model = self.routers[router].route(prompt, threshold, model_pair)
-        
-        # 2. Apply canary testing
-        is_canary = self.quality_manager.should_canary()
-        if is_canary:
-            model_to_use = self.quality_manager.canary_config.canary_model
-        else:
-            model_to_use = routed_model
-            
-        self.model_counts[router][model_to_use] += 1
-        
+
+        # 1. Route: traffic rules and middleware bypass the tree, a tier
+        #    walks it, and a bare pair routes flat.
+        routed_model, path = self._route(prompt, kwargs, tier, router, threshold)
+
+        # 2. Apply canary testing and build the fallback chain.
+        model_to_use, models_to_try, sibling_reference = self._models_to_try(
+            routed_model, path, self.default_model_pair
+        )
+        is_canary = model_to_use != routed_model
+
+        self.model_counts[request_name][model_to_use] += 1
+
         # Try cache
         cache_params = {k: v for k, v in kwargs.items() if k not in ["messages", "model"]}
         cached_res = await self.cache.aget(prompt, model_to_use, cache_params)
@@ -418,16 +722,9 @@ class Controller:
             res = ModelResponse(**cached_res)
             # Record trace for cached response too
             self.quality_manager.record_trace(prompt, model_to_use, res.model_dump(), {"cached": True, "is_canary": is_canary})
-            return res
-
-        # Fallback chain: model_to_use -> routed_model -> other model in pair
-        models_to_try = [model_to_use]
-        if routed_model not in models_to_try:
-            models_to_try.append(routed_model)
-        
-        other_model = model_pair.weak if routed_model == model_pair.strong else model_pair.strong
-        if other_model not in models_to_try:
-            models_to_try.append(other_model)
+            return self._attach_path(
+                res, path, model_to_use, routed_model, sibling_reference
+            )
 
         last_err = None
         for model_name in models_to_try:
@@ -472,8 +769,10 @@ class Controller:
                 
                 # Record trace
                 self.quality_manager.record_trace(prompt, model_name, res.model_dump(), {"is_canary": is_canary and model_name == model_to_use})
-                
-                return res
+
+                return self._attach_path(
+                    res, path, model_name, routed_model, sibling_reference
+                )
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).warning(
