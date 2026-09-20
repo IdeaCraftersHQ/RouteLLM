@@ -19,29 +19,37 @@ class IntentModelMapping:
     ----------
     intent : str
         Intent label (e.g., "math", "code", "general").
-    model_pair : ModelPair
-        Model pair for this intent.
+    model_pair : ModelPair, optional
+        Model pair for this intent. None when the mapping exists only
+        to describe the intent to a detector, as it does for a selector
+        that picks tiers rather than pairs.
     description : str, optional
         Human-readable description of intent mapping (default "").
     """
 
     intent: str
-    model_pair: ModelPair
+    model_pair: Optional[ModelPair] = None
     description: str = ""
 
 
 class IntentModelSelector:
     """Middleware for intent-based model pair selection.
 
-    Detects user intent and routes to appropriate model pair.
+    Detects user intent and routes to an appropriate model pair, a
+    tier, or both. A selector whose mappings carry no pair is a
+    tier-only middleware: `get_tier` names the tier the request enters
+    and `get_model_pair` falls through to `default_model_pair`, which
+    such a selector leaves None so the controller walks the tier tree
+    instead of bypassing it with a flat pair.
     """
-    
+
     def __init__(
         self,
         intent_mappings: List[IntentModelMapping],
-        default_model_pair: ModelPair,
+        default_model_pair: Optional[ModelPair] = None,
         intent_detection_model: str = "gpt-3.5-turbo",
         intent_detector: Optional[Any] = None,
+        intent_tiers: Optional[Dict[str, str]] = None,
     ):
         """Initialize the intent-based model selector.
 
@@ -49,8 +57,10 @@ class IntentModelSelector:
         ----------
         intent_mappings : list[IntentModelMapping]
             List of mappings from intents to model pairs.
-        default_model_pair : ModelPair
-            Default model pair to use when no intent matches.
+        default_model_pair : ModelPair, optional
+            Default model pair to use when no intent matches. None for
+            a selector that picks tiers only, which keeps
+            `get_model_pair` from bypassing the tier tree.
         intent_detection_model : str, optional
             Model to use for intent detection (default "gpt-3.5-turbo").
         intent_detector : Optional[Any], optional
@@ -58,15 +68,26 @@ class IntentModelSelector:
             None, which uses the built-in litellm classification path). Any
             object exposing `detect_intent(prompt) -> str` works, e.g.
             DomainIntentDetector or JevIntentDetector.
+        intent_tiers : dict[str, str], optional
+            Intent label to tier name (default None, no tier
+            selection). An intent absent from it leaves the request in
+            the tier it addressed.
         """
         self.intent_mappings = intent_mappings
         self.default_model_pair = default_model_pair
         self.intent_detection_model = intent_detection_model
         self.intent_detector = intent_detector
+        self.intent_tiers = dict(intent_tiers or {})
         self.intent_cache = {}  # Cache detected intents
-        
-        # Create a lookup dictionary for faster access
-        self.intent_lookup = {mapping.intent: mapping.model_pair for mapping in intent_mappings}
+
+        # Create a lookup dictionary for faster access. A mapping that
+        # carries no pair is left out, so it falls through to the
+        # default rather than shadowing it with None.
+        self.intent_lookup = {
+            mapping.intent: mapping.model_pair
+            for mapping in intent_mappings
+            if mapping.model_pair is not None
+        }
     
     def detect_intent(self, prompt: str) -> str:
         """Detect the intent of a prompt using an LLM.
@@ -88,8 +109,10 @@ class IntentModelSelector:
         if prompt in self.intent_cache:
             return self.intent_cache[prompt]
 
-        # Get available intents and their descriptions
-        intents = [mapping.intent for mapping in self.intent_mappings]
+        # Get available intents and their descriptions. A tier-only
+        # selector carries no mappings, so the labels it maps to tiers
+        # are part of its vocabulary too.
+        intents = self.get_available_intents()
 
         # Delegate to a pluggable detector when configured, skipping the
         # litellm classification path entirely.
@@ -104,9 +127,11 @@ class IntentModelSelector:
             mapping.intent: mapping.description for mapping in self.intent_mappings
         }
 
-        # Create a formatted list of intents with descriptions for the prompt
+        # Create a formatted list of intents with descriptions for the
+        # prompt. A label that reaches here from intent_tiers alone
+        # carries no description.
         intent_options = "\n".join([
-            f"- {intent}: {intent_descriptions[intent]}"
+            f"- {intent}: {intent_descriptions.get(intent, '')}"
             for intent in intents
         ])
 
@@ -249,7 +274,7 @@ Respond in JSON format like this:
             print(f"Error analyzing intent confidence: {e}")
             return {"error": str(e), "best_match": "general"}
 
-    def get_model_pair(self, prompt: str) -> ModelPair:
+    def get_model_pair(self, prompt: str) -> Optional[ModelPair]:
         """Get the appropriate model pair based on the detected intent.
 
         Parameters
@@ -259,22 +284,51 @@ Respond in JSON format like this:
 
         Returns
         -------
-        ModelPair
-            Model pair appropriate for the detected intent. Returns
-            default_model_pair if intent not found.
+        ModelPair or None
+            Model pair appropriate for the detected intent, falling
+            back to `default_model_pair`. None when neither carries a
+            pair, which leaves the request in the tier tree.
         """
         intent = self.detect_intent(prompt)
         return self.intent_lookup.get(intent, self.default_model_pair)
-        
+
+    def get_tier(self, prompt: str) -> Optional[str]:
+        """Get the tier the detected intent asks the request to enter.
+
+        Shares `detect_intent`'s cache, so a controller asking for both
+        a tier and a pair classifies the prompt once.
+
+        Parameters
+        ----------
+        prompt : str
+            The user prompt to analyze.
+
+        Returns
+        -------
+        str or None
+            Tier mapped to the detected intent, or None when the intent
+            maps to none, which leaves the request in the tier it
+            addressed.
+        """
+        if not self.intent_tiers:
+            return None
+
+        return self.intent_tiers.get(self.detect_intent(prompt))
+
     def get_available_intents(self) -> List[str]:
         """Get a list of all available intents.
 
         Returns
         -------
         list[str]
-            List of intent names configured in this selector.
+            Intent names this selector maps, whether to a model pair or
+            to a tier, in mapping order then tier-mapping order.
         """
-        return [mapping.intent for mapping in self.intent_mappings]
+        intents = [mapping.intent for mapping in self.intent_mappings]
+        intents.extend(
+            intent for intent in self.intent_tiers if intent not in intents
+        )
+        return intents
     
     def save_mappings(self, filepath: str) -> None:
         """Save intent mappings to a JSON file.
