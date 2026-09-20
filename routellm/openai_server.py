@@ -36,13 +36,15 @@ async def lifespan(app):
         if key:
             gateway = X402Adapter(private_key=key)
 
-    # `endpoints:` belongs to the registry; the rest of the file stays
-    # router config, so it is popped out before the handoff. A file
-    # holding nothing else leaves None, which keeps the router defaults.
+    # `endpoints:` and `tiers:` belong to the registry; the rest of the
+    # file stays router config, so they are popped out before the
+    # handoff. A file holding nothing else leaves None, which keeps the
+    # router defaults.
     file_config = yaml.safe_load(open(args.config, "r")) if args.config else None
     endpoints = EndpointRegistry.from_config(file_config or {})
     router_config = dict(file_config or {})
     router_config.pop("endpoints", None)
+    router_config.pop("tiers", None)
     router_config = router_config or None
 
     CONTROLLER = Controller(
@@ -55,6 +57,8 @@ async def lifespan(app):
         api_key=args.api_key,
         progress_bar=True,
         payment_gateway=gateway,
+        default_router=args.routers[0] if args.routers else None,
+        default_threshold=args.default_threshold,
     )
     yield
     CONTROLLER = None
@@ -130,9 +134,18 @@ async def stream_response(response) -> AsyncGenerator:
 
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest):
-    # The model name field contains the parameters for routing.
-    # Model name uses format router-[router name]-[threshold] e.g. router-bert-0.7
-    # The router type and threshold is used for routing that specific request.
+    """Route one chat completion and return it in OpenAI's shape.
+
+    The model field carries the routing parameters in any of four
+    forms: `<tier>:router-<r>-<thr>`, `router-<r>-<thr>`,
+    `router-<tier>`, or a bare `<tier>`. A tiered request walks the
+    tier tree, one router call per level.
+
+    A non-streamed response carries the decision path under a top-level
+    `routellm` key, which OpenAI clients ignore. A streamed response
+    carries it in the server logs only, since its chunks follow the SSE
+    shape the client parses.
+    """
     logging.info(f"Received request: {request}")
     try:
         res = await CONTROLLER.acompletion(
@@ -146,12 +159,19 @@ async def create_chat_completion(request: ChatCompletionRequest):
 
     logging.info(CONTROLLER.model_counts)
 
+    hidden = getattr(res, "_hidden_params", None)
+    path = hidden.get("routellm_path") if isinstance(hidden, dict) else None
+    logging.info(f"Routing path: {path}")
+
     if request.stream:
         return StreamingResponse(
             content=stream_response(res), media_type="text/event-stream"
         )
-    else:
-        return JSONResponse(content=res.model_dump())
+
+    body = res.model_dump()
+    if path is not None:
+        body["routellm"] = {"path": path}
+    return JSONResponse(content=body)
 
 
 @app.get("/health")
@@ -200,6 +220,12 @@ parser.add_argument(
     help="Endpoint name from the config, or a raw model name",
     type=str,
     default="anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1",
+)
+parser.add_argument(
+    "--default-threshold",
+    help="Threshold for a tier level that names none and whose request carries none",
+    type=float,
+    default=0.5,
 )
 parser.add_argument(
     "--payment-provider",
