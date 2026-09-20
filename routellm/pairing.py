@@ -754,7 +754,8 @@ def _explain(config_path: str) -> str:
     Returns
     -------
     str
-        A plain-text report, one block per tier side that selects.
+        A plain-text report, one block per tier side that selects,
+        then one line per configured intent naming the tier it enters.
     """
     import yaml
 
@@ -786,6 +787,10 @@ def _explain(config_path: str) -> str:
                 marker = "->" if position == 0 else "  "
                 lines.append(f"  {marker} {describe_candidate(candidate)}")
         lines.append("")
+
+    intent_tiers = ((config.get("intents") or {}).get("tiers")) or {}
+    for intent in sorted(intent_tiers):
+        lines.append(f"intent {intent} -> tier {intent_tiers[intent]}")
 
     return "\n".join(lines).rstrip()
 

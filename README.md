@@ -361,6 +361,29 @@ python -m routellm.pairing --config config.example.yaml
 
 Every selector is resolved to an endpoint name before the tier graph is validated a second time, so nothing downstream ever sees one.
 
+### Intents
+
+There are two ways to pick the area of expertise a request is answered from. An app that already knows names the tier itself, in the `model` field. An app that does not sends `default` and lets an intent classifier pick, which is what an `intents:` section turns on:
+
+```yaml
+intents:
+  detector: jev          # or litellm
+  model: jev-1           # the model the detector classifies with
+  confidence_floor: 0.6  # jev only: below it, no intent is claimed
+  descriptions:
+    legal: contracts, statutes, and case law
+    code: writing or debugging software
+  tiers:
+    legal: legal_tier
+    code: premium
+```
+
+Each intent maps to a tier. A classified prompt enters that tier; an intent mapped to none, or a prompt the classifier declines to label, leaves the request in the tier it addressed. Every mapped tier must exist, which is checked at startup.
+
+A classifier never overrules an app that chose a tier by name: an intent-selected tier is honoured only for a request addressed to `default`, or to a tier that opts in with `intent_routing: true`. A tier that is passed over this way says so on the decision path, as `intent_ignored`, and a tier entered by intent carries `tier_from: intent`. `default` can opt out with `intent_routing: false`.
+
+`detector: jev` classifies with one TypeSafe Jev question and needs the extension: `pip install -e extensions/typesafe`. `detector: litellm` asks the `model` to classify in a prompt built from the `descriptions`, and needs nothing extra. Both read the same `descriptions`, so the wording that tells the classifier what an intent means lives in one place. `python -m routellm.pairing --config` prints one `intent <label> -> tier <name>` line per mapping.
+
 ### Threshold Calibration
 
 The threshold used for routing controls the cost-quality tradeoff. The range of meaningful thresholds varies depending on the type of router and the queries you receive. Therefore, we recommend calibrating thresholds using a sample of your incoming queries, as well as the % of queries you'd like to route to the stronger model.
