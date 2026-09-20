@@ -101,6 +101,29 @@ cd RouteLLM
 pip install -e .[serve,eval]
 ```
 
+**Policy-based pairing (optional)**
+
+A tier side may select over the configured endpoints instead of naming
+one, using endpoint tags plus the [models.dev](https://models.dev)
+catalog. That needs the `pairing` extra, whose client is not on PyPI
+and requires Python 3.11 or newer:
+
+```
+pip install "routellm[pairing]"
+```
+
+To work against a checkout of the client instead:
+
+```
+pip install -e /path/to/poly-aim/py
+```
+
+Inspect how a config's selectors resolve without starting a server:
+
+```
+python -m routellm.pairing --config config.yaml
+```
+
 ## Quickstart
 
 Let's walkthrough replacing an existing OpenAI client to route queries between LLMs instead of using only a single model.

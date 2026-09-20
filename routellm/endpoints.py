@@ -32,6 +32,16 @@ Tier and endpoint names share one namespace and are validated together
 at load: every side must name a known endpoint or tier, the graph must
 be acyclic, and it may not nest deeper than `MAX_TIER_DEPTH` levels.
 
+A side may instead be a `Selector`, saying what it wants rather than
+naming it. `routellm.pairing` resolves every selector to an endpoint
+name at controller construction, before this validation runs a second
+time, so nothing downstream sees one::
+
+    tiers:
+      default:
+        strong: {select: "tool_call:true reasoning:true", order: quality_desc}
+        weak:   {select: "tag:local", order: cost_asc}
+
 Names are restricted to `[A-Za-z0-9_]+`; hyphens are reserved for the
 model-name grammar that splits on '-'.
 """
@@ -39,7 +49,7 @@ model-name grammar that splits on '-'.
 import logging
 import os
 import re
-from typing import Any, Optional
+from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -48,6 +58,46 @@ logger = logging.getLogger(__name__)
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
 
 MAX_TIER_DEPTH = 4
+
+#: Orderings a `Selector` may ask for over its candidates.
+SelectorOrder = Literal[
+    "cost_asc",
+    "cost_desc",
+    "quality_asc",
+    "quality_desc",
+    "context_desc",
+]
+
+
+class Selector(BaseModel):
+    """A policy standing in for an endpoint name on a tier side.
+
+    Instead of naming one endpoint, a side may say what it wants: a
+    `select` expression over endpoint tags and models.dev facts, and
+    an `order` deciding which matching endpoint wins. Selectors are
+    resolved to endpoint names once, at controller construction, by
+    `routellm.pairing`; nothing downstream ever sees one.
+
+    Attributes
+    ----------
+    select : str
+        Space-separated terms, all ANDed. `tag:<label>` matches an
+        endpoint's own tags; every other `key:value` term is a
+        models.dev catalog term.
+    order : str
+        Which matching endpoint wins, one of `SelectorOrder`.
+        Default `quality_desc`.
+    """
+
+    select: str
+    order: SelectorOrder = "quality_desc"
+
+    @field_validator("select")
+    @classmethod
+    def _validate_select(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Selector select must be a non-empty string")
+        return value
 
 
 class Endpoint(BaseModel):
@@ -156,17 +206,18 @@ class Tier(BaseModel):
         Router to run at this level. Inherited when None.
     threshold : float, optional
         Decision threshold in [0, 1] for this level. Inherited when None.
-    strong : str
-        Endpoint or tier taken when the win rate clears the threshold.
-    weak : str
-        Endpoint or tier taken otherwise.
+    strong : str or Selector
+        Endpoint or tier taken when the win rate clears the threshold,
+        or a `Selector` resolved to one at controller construction.
+    weak : str or Selector
+        Endpoint or tier taken otherwise, or a `Selector`.
     """
 
     name: str
     router: Optional[str] = None
     threshold: Optional[float] = Field(default=None, ge=0, le=1)
-    strong: str
-    weak: str
+    strong: Union[str, Selector]
+    weak: Union[str, Selector]
 
     @field_validator("name")
     @classmethod
@@ -180,7 +231,11 @@ class Tier(BaseModel):
 
     @field_validator("strong", "weak")
     @classmethod
-    def _validate_reference(cls, value: str) -> str:
+    def _validate_reference(
+        cls, value: Union[str, Selector]
+    ) -> Union[str, Selector]:
+        if isinstance(value, Selector):
+            return value
         if not value.strip():
             raise ValueError("Tier strong and weak must be non-empty strings")
         return value
@@ -262,6 +317,20 @@ class EndpointRegistry:
 
         return cls(endpoints, tiers)
 
+    def revalidate(self) -> None:
+        """Re-run tier validation after the tiers were rewritten in place.
+
+        `routellm.pairing` replaces selector sides with endpoint names
+        at controller construction; this re-checks the graph those names
+        now form.
+
+        Raises
+        ------
+        ValueError
+            On the same conditions as construction.
+        """
+        self._validate_tiers()
+
     def _validate_tiers(self) -> None:
         """Check the tier namespace, its references, cycles, and depth."""
         if not self._tiers:
@@ -277,6 +346,11 @@ class EndpointRegistry:
 
         for tier in self._tiers.values():
             for side, reference in (("strong", tier.strong), ("weak", tier.weak)):
+                # A Selector names nothing yet; `routellm.pairing`
+                # rewrites it into an endpoint name before the
+                # controller validates the resolved registry.
+                if isinstance(reference, Selector):
+                    continue
                 if reference in self._tiers or reference in self._endpoints:
                     continue
                 known = ", ".join(sorted(self._tiers) + self.names()) or "<none>"
@@ -320,7 +394,7 @@ class EndpointRegistry:
 
         tier = self._tiers[name]
         for reference in (tier.strong, tier.weak):
-            if reference in self._tiers:
+            if not isinstance(reference, Selector) and reference in self._tiers:
                 self._walk(reference, path)
 
     @property
