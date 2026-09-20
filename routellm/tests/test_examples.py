@@ -36,9 +36,9 @@ ENTRY_TIERS = (
 
 #: One record per `(provider, id)` the example's cloud endpoints map
 #: onto. Endpoints whose litellm provider has no models.dev counterpart
-#: -- Ollama, openrouter, cohere, and the OpenAI-compatible local server
-#: -- deliberately get none: they are tag-only candidates, and their
-#: absence here is part of what the example is written against.
+#: -- Ollama and the OpenAI-compatible local server -- deliberately get
+#: none: they are tag-only candidates, and their absence here is part of
+#: what the example is written against.
 FAKE_CATALOG = [
     ModelRecord(
         provider="anthropic",
@@ -99,6 +99,29 @@ FAKE_CATALOG = [
         reasoning=True,
         context=1048576,
         release_date="2026-05-19",
+    ),
+    # models.dev namespaces openrouter ids by vendor, exactly as the
+    # litellm model name does after its own prefix is stripped.
+    ModelRecord(
+        provider="openrouter",
+        id="deepseek/deepseek-v4.1-flash",
+        cost_input=0.15,
+        cost_output=0.6,
+        tool_call=True,
+        reasoning=True,
+        context=1048576,
+        release_date="2026-09-10",
+    ),
+    # cohere ids are bare; litellm's `cohere_chat` maps onto them.
+    ModelRecord(
+        provider="cohere",
+        id="command-a-03-2025",
+        cost_input=2.5,
+        cost_output=10.0,
+        tool_call=True,
+        reasoning=False,
+        context=256000,
+        release_date="2025-03-13",
     ),
     ModelRecord(
         provider="openai",

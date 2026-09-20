@@ -18,6 +18,9 @@
 #               endpoints models.dev holds no record of, because for
 #               every other endpoint the catalog answers the same
 #               question and a hand-written tag would drift from it.
+#               In practice that is the models served by a local
+#               runtime: Ollama and our own OpenAI-compatible
+#               server. Every hosted vendor here is in the catalog.
 #               `vision` is in the vocabulary but on no endpoint
 #               below: none of the unlisted ones takes images.
 #
@@ -72,23 +75,21 @@ endpoints:
     tags: [cloud, "jur:us", fast, general, designer]
     quality: 84
 
-  # openrouter aggregates other vendors' models; litellm's `openrouter`
-  # provider has no models.dev counterpart, so this endpoint is a
-  # tag-only candidate: it satisfies `tag:` terms and fails every
-  # catalog term, including `tool_call:true`. Hence the capability tag.
+  # openrouter aggregates other vendors' models. models.dev lists it,
+  # namespacing each id by its vendor exactly as litellm's model name
+  # does, so this endpoint answers catalog terms like any other.
   openrouter_open:
     model: openrouter/deepseek/deepseek-v4.1-flash
     api_key_env: OPENROUTER_API_KEY
-    tags: [cloud, "jur:us", fast, general, tools, long_context]
+    tags: [cloud, "jur:us", fast, general]
     quality: 78
 
   # cohere is a Canadian vendor whose public API is also exposed on our
-  # private network, so it carries both reach tags. litellm's
-  # `cohere_chat` provider maps to no models.dev id either.
+  # private network, so it carries both reach tags.
   cohere_command:
     model: cohere_chat/command-a-03-2025
     api_key_env: COHERE_API_KEY
-    tags: [cloud, vpn, "jur:ca", slow, writer, tools, long_context]
+    tags: [cloud, vpn, "jur:ca", slow, writer]
     quality: 79
 
   # --- private cloud endpoints: reach `vpn` --------------------------
@@ -281,7 +282,7 @@ tiers:
 
   general_quality:
     strong: {select: "tool_call:true", order: quality_desc}
-    weak: {select: "tag:vpn tag:tools", order: quality_desc}
+    weak: {select: "tag:vpn tool_call:true", order: quality_desc}
 
   general_fast:
     strong: {select: "tag:fast", order: quality_desc}
