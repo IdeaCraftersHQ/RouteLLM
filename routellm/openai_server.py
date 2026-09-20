@@ -34,6 +34,37 @@ SERVER_START = int(time.time())
 IMPLICIT_STRONG = "implicit_strong"
 IMPLICIT_WEAK = "implicit_weak"
 
+#: The pair this server has always routed `router-<r>-<thr>` against.
+#: Used only when the caller names no pair and the config defines no
+#: `default` tier, so the legacy flat form keeps answering. It is never
+#: registered as an endpoint and never advertised on `/v1/models`.
+LEGACY_STRONG = "gpt-4-1106-preview"
+LEGACY_WEAK = "anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1"
+
+
+def legacy_pair() -> tuple[str, str]:
+    """Return the historic flat pair, warning that it was assumed.
+
+    Reached only when neither model flag was given and the config
+    defines no `default` tier. The warning goes out at WARNING so it is
+    visible without `--verbose`: routing against a pair the caller never
+    named is a fact they should see.
+
+    Returns
+    -------
+    tuple[str, str]
+        The `(strong, weak)` model names to hand the controller.
+    """
+    logging.warning(
+        "No --strong-model/--weak-model and no 'default' tier in --config; "
+        "routing 'router-<router>-<threshold>' against the historic pair "
+        "%s / %s. Pass both flags, or define a 'default' tier, to choose "
+        "the pair yourself.",
+        LEGACY_STRONG,
+        LEGACY_WEAK,
+    )
+    return LEGACY_STRONG, LEGACY_WEAK
+
 
 def build_registry(file_config: Optional[dict]) -> EndpointRegistry:
     """Build the endpoint registry the server routes against.
@@ -43,8 +74,13 @@ def build_registry(file_config: Optional[dict]) -> EndpointRegistry:
     `--weak-model` are given, the two are wrapped as endpoints and
     joined into an implicit `default` tier running `--routers[0]` at
     `--default-threshold`, so a flat command line still answers a
-    request addressed to `default`. A config `default` wins; the flags
-    are then left to the flat pair the controller keeps.
+    request addressed to `default`.
+
+    A config `default` tier wins, and the flags are then left to the
+    flat pair the controller keeps. Neither flag and no config
+    `default` derives nothing: no tier is invented and none is
+    advertised, and the legacy flat form routes against the historic
+    pair instead.
 
     Parameters
     ----------
@@ -61,9 +97,16 @@ def build_registry(file_config: Optional[dict]) -> EndpointRegistry:
 
     if registry.has_tier("default"):
         logging.info("default tier: from --config")
+        if args.strong_model or args.weak_model:
+            logging.info(
+                "--strong-model/--weak-model ignored for the 'default' tier: "
+                "the config defines one. They remain the flat pair."
+            )
         return registry
 
-    if not args.strong_model or not args.weak_model:
+    # Argparse has already rejected exactly one of the two, so either
+    # both are set or neither is.
+    if not args.strong_model:
         return registry
 
     endpoints = {name: registry.get(name) for name in registry.names()}
@@ -122,11 +165,18 @@ async def lifespan(app):
     router_config.pop("tiers", None)
     router_config = router_config or None
 
+    # Neither flag and no tier to route into leaves the legacy flat form
+    # with nothing to pair; fall back to the pair this server has always
+    # used rather than refusing requests it used to answer.
+    strong_model, weak_model = args.strong_model, args.weak_model
+    if not strong_model and not endpoints.has_tier("default"):
+        strong_model, weak_model = legacy_pair()
+
     CONTROLLER = Controller(
         routers=args.routers,
         config=router_config,
-        strong_model=args.strong_model,
-        weak_model=args.weak_model,
+        strong_model=strong_model,
+        weak_model=weak_model,
         endpoints=endpoints,
         api_base=args.base_url,
         api_key=args.api_key,
@@ -323,15 +373,18 @@ parser.add_argument(
 )
 parser.add_argument(
     "--strong-model",
-    help="Endpoint name from the config, or a raw model name",
+    help=(
+        "Endpoint name from the config, or a raw model name. Pass with "
+        "--weak-model to derive a 'default' tier when the config defines none."
+    ),
     type=str,
-    default="gpt-4-1106-preview",
+    default=None,
 )
 parser.add_argument(
     "--weak-model",
-    help="Endpoint name from the config, or a raw model name",
+    help="Endpoint name from the config, or a raw model name. See --strong-model.",
     type=str,
-    default="anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1",
+    default=None,
 )
 parser.add_argument(
     "--default-threshold",
@@ -351,6 +404,15 @@ parser.add_argument(
     help="Env var holding wallet private key",
 )
 args = parser.parse_args()
+
+# A flat pair needs both sides. One alone would silently pair with the
+# historic default for the other, which is never what the caller meant.
+if bool(args.strong_model) != bool(args.weak_model):
+    parser.error(
+        "--strong-model and --weak-model must be given together: one alone "
+        "cannot form a pair. Pass both, or neither and define a 'default' "
+        "tier in --config."
+    )
 
 if args.verbose:
     logging.basicConfig(level=logging.INFO)

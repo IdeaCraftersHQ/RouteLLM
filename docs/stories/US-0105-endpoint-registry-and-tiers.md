@@ -61,9 +61,12 @@ response.
       graph is re-validated, and explainable via
       `python -m routellm.pairing --config <file>`
 - [x] `GET /v1/models` lists every tier name plus
-      `router-<name>-<default_threshold>` per loaded router; a config
-      with no `default` tier and both model flags derives an implicit
-      one, and a config `default` tier wins
+      `router-<name>-<default_threshold>` per loaded router, and never
+      a tier that was not configured or derived
+- [x] A config `default` tier always wins; with none, both model flags
+      together derive an implicit one and neither flag derives nothing
+      at all, leaving the legacy flat form on the historic pair with a
+      startup warning. One flag alone is an argument error
 
 ## Implementation notes
 
@@ -76,8 +79,9 @@ response.
   `resolve_registry_pairings`, snapshot under `ROUTELLM_CATALOG_CACHE`
 - `routellm/routers/embeddings.py` — `configure_embeddings`,
   `get_embedding_client`, `reset_embedding_client`
-- `routellm/openai_server.py` — `build_registry`, `GET /v1/models`,
-  `--default-threshold`, the `routellm` key on the response
+- `routellm/openai_server.py` — `build_registry`, `legacy_pair`,
+  `GET /v1/models`, `--default-threshold`, the `routellm` key on the
+  response
 - `config.example.yaml` — worked `endpoints:`/`tiers:` pair spanning a
   cloud model, Ollama, and colibri
 
@@ -209,6 +213,8 @@ response.
 - `routellm/tests/test_openai_server_models.py::test_flags_build_an_implicit_default_tier`
 - `routellm/tests/test_openai_server_models.py::test_config_default_tier_wins_over_the_flags`
 - `routellm/tests/test_openai_server_models.py::test_implicit_tier_reuses_a_configured_endpoint`
+- `routellm/tests/test_openai_server_models.py::test_no_flags_invents_no_default_tier`
+- `routellm/tests/test_openai_server_models.py::test_one_model_flag_alone_is_an_argparse_error`
 - `routellm/tests/test_openai_server_models.py::test_config_example_loads_into_the_registry`
 
 ## Related

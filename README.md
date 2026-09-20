@@ -226,6 +226,7 @@ python -m routellm.openai_server --routers mf jev --config config.example.yaml
 
 - `--routers` specifies the list of routers available to the server. For instance, here, the server is started with two available routers, `mf` and `jev` (see below for the list of routers). The first one is the default for a request that names none.
 - `--config` is the single source for the server's endpoints, tiers, and router settings. If unspecified, the server defaults to our best-performing router configuration and routes the flat `--strong-model`/`--weak-model` pair (see [Configuration](#configuration) for details).
+- `--strong-model` and `--weak-model` name that flat pair. Both together or neither; each may name a configured endpoint or a raw model name.
 - `--default-threshold` is the threshold used by a level that names none and whose request carries none. Default `0.5`.
 
 For most use-cases, **we recommend the `mf` router** as we have evaluated it to be very strong and lightweight.
@@ -308,7 +309,15 @@ Clients address the router through the `model` field, in any of four forms:
 
 A request-level router and threshold sit below a tier's own values in the inheritance order, so they fill in the levels that name none rather than overriding the levels that do.
 
-The `default` tier is what makes the legacy form keep working: an existing OpenAI client sending `router-mf-0.5` reaches the tree without changing its model field. When the config defines no `default` tier and both `--strong-model` and `--weak-model` are given, the server derives an implicit one from them, running `--routers[0]` at `--default-threshold`. A config `default` tier always wins; which one is in effect is logged at startup.
+The `default` tier is what makes the legacy form keep working: an existing OpenAI client sending `router-mf-0.5` reaches the tree without changing its model field. Where that tier comes from depends on what you pass:
+
+| `--config` has a `default` tier | `--strong-model` + `--weak-model` | Result |
+|---|---|---|
+| yes | either | the config tier; the flags are ignored for it and stay the flat pair |
+| no | both given | an implicit `default` tier from the two, running `--routers[0]` at `--default-threshold` |
+| no | neither given | no `default` tier at all — none is invented and none is listed on `/v1/models`. `router-<r>-<thr>` still routes, against the historic `gpt-4-1106-preview` / `anyscale/mistralai/Mixtral-8x7B-Instruct-v0.1` pair, and the server warns at startup that it assumed it |
+
+The two flags must be given together: one alone cannot form a pair and is an argument error. Which `default` tier is in effect is logged at startup.
 
 ### `GET /v1/models`
 
