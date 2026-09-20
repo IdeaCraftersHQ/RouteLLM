@@ -1,0 +1,304 @@
+# A multi-tier instance: several providers behind one server, with the
+# choice of which model answers made by policy rather than by hand.
+#
+# Four axes carry the whole configuration, and every one of them is a
+# tag on an endpoint:
+#
+#   governance  reach, a set: `local` (runs on our own hardware),
+#               `vpn` (reachable only over the private network -- a
+#               tailscale host, or a private cloud endpoint such as AWS
+#               Bedrock or Google Vertex), `cloud` (public internet).
+#               An endpoint may carry several: a model on our own box
+#               that is also reachable over tailscale is `local` and
+#               `vpn`. Jurisdiction is a second, single tag:
+#               `jur:us` or `jur:ca`.
+#   performance `fast` or `slow`.
+#   expertise   `coder`, `writer`, `designer`, `general`.
+#   capability  `tools`, `vision`, `long_context` -- written only for
+#               endpoints models.dev holds no record of, because for
+#               every other endpoint the catalog answers the same
+#               question and a hand-written tag would drift from it.
+#               `vision` is in the vocabulary but on no endpoint
+#               below: none of the unlisted ones takes images.
+#
+# Governance tiers select on the reach tags: `private` takes `tag:local`
+# on both sides, `vpn` takes `tag:vpn`, and a tier that writes no reach
+# term is unrestricted.
+#
+# Provider-agnostic: the model ids below are examples. Explain what a
+# selector actually picks on your machine before trusting it:
+#
+#   python -m routellm.pairing --config examples/multitier.yaml
+
+endpoints:
+
+  # --- cloud, direct APIs: reach `cloud`, jurisdiction US -------------
+  # models.dev holds a record for each, so they carry no capability
+  # tags: `tool_call:true` in a selector is answered from the catalog.
+
+  anthropic_strong:
+    model: anthropic/claude-sonnet-5
+    api_key_env: ANTHROPIC_API_KEY
+    tags: [cloud, "jur:us", slow, general, writer]
+    quality: 95
+
+  anthropic_fast:
+    model: anthropic/claude-haiku-4-5
+    api_key_env: ANTHROPIC_API_KEY
+    tags: [cloud, "jur:us", fast, general, coder]
+    quality: 82
+
+  openai_strong:
+    model: gpt-5.4
+    api_key_env: OPENAI_API_KEY
+    tags: [cloud, "jur:us", slow, general, coder]
+    quality: 94
+
+  openai_fast:
+    model: gpt-5.4-mini
+    api_key_env: OPENAI_API_KEY
+    tags: [cloud, "jur:us", fast, general, writer]
+    quality: 83
+
+  gemini_strong:
+    model: gemini/gemini-3.1-pro-preview
+    api_key_env: GEMINI_API_KEY
+    tags: [cloud, "jur:us", slow, general, designer]
+    quality: 93
+
+  gemini_fast:
+    model: gemini/gemini-3.5-flash
+    api_key_env: GEMINI_API_KEY
+    tags: [cloud, "jur:us", fast, general, designer]
+    quality: 84
+
+  # openrouter aggregates other vendors' models; litellm's `openrouter`
+  # provider has no models.dev counterpart, so this endpoint is a
+  # tag-only candidate: it satisfies `tag:` terms and fails every
+  # catalog term, including `tool_call:true`. Hence the capability tag.
+  openrouter_open:
+    model: openrouter/deepseek/deepseek-v4.1-flash
+    api_key_env: OPENROUTER_API_KEY
+    tags: [cloud, "jur:us", fast, general, tools, long_context]
+    quality: 78
+
+  # cohere is a Canadian vendor whose public API is also exposed on our
+  # private network, so it carries both reach tags. litellm's
+  # `cohere_chat` provider maps to no models.dev id either.
+  cohere_command:
+    model: cohere_chat/command-a-03-2025
+    api_key_env: COHERE_API_KEY
+    tags: [cloud, vpn, "jur:ca", slow, writer, tools, long_context]
+    quality: 79
+
+  # --- private cloud endpoints: reach `vpn` --------------------------
+  # The same frontier models, reached over a private endpoint instead of
+  # the public API, so they are `vpn` rather than `cloud` and they hold
+  # their own credential variables. Enable when the account is wired.
+  #
+  # bedrock_strong:
+  #   model: bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0
+  #   tags: [vpn, "jur:us", slow, general, writer, tools, long_context]
+  #   extra:
+  #     aws_region_name: us-east-1
+  #   # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION_NAME
+  #
+  # vertex_strong:
+  #   model: vertex_ai/gemini-2.5-pro
+  #   tags: [vpn, "jur:us", slow, general, designer]
+  #   # GOOGLE_APPLICATION_CREDENTIALS, VERTEXAI_PROJECT, VERTEXAI_LOCATION
+
+  # --- on our own hardware: reach `local` + `vpn`, jurisdiction CA ----
+  # Reachable on this box directly and from elsewhere over tailscale.
+  # models.dev lists neither an Ollama model nor an OpenAI-compatible
+  # server's own ids, so every endpoint here is a tag-only candidate and
+  # carries its capability tags and a manual `quality` by hand.
+
+  # An OpenAI-compatible server of our own. The `openai/` prefix routes
+  # any such server through litellm; the model id must match what the
+  # server reports under its `/v1/models`.
+  colibri:
+    model: openai/qwen3.6-colibri
+    api_base: http://127.0.0.1:11800/v1
+    api_key_env: COLI_API_KEY
+    tags: [local, vpn, "jur:ca", slow, general, tools, long_context]
+    quality: 85
+
+  # Ollama over an ssh tunnel. Never the default 11434: that port is
+  # whatever Ollama happens to run on this machine, and this endpoint
+  # means the remote host on the other side of the tunnel.
+  ollama_coder:
+    model: ollama_chat/qwen3.6:27b-coding-mxfp8
+    api_base: http://127.0.0.1:11500
+    tags: [local, vpn, "jur:ca", slow, coder, tools]
+    quality: 80
+
+  ollama_coder_fast:
+    model: ollama_chat/north-mini-code-1.0
+    api_base: http://127.0.0.1:11500
+    tags: [local, vpn, "jur:ca", fast, coder, tools]
+    quality: 70
+
+  ollama_general_fast:
+    model: ollama_chat/ornith:9b
+    api_base: http://127.0.0.1:11500
+    tags: [local, vpn, "jur:ca", fast, general]
+    quality: 60
+
+  # --- cloud-proxied through the local runtime -----------------------
+  # Served by the same Ollama host but answered by the vendor's cloud,
+  # so the prompt leaves the machine: reach `cloud`, jurisdiction US.
+  # The tunnel is an implementation detail of how they are reached, not
+  # a claim about where they run.
+
+  ollama_cloud_flash:
+    model: ollama_chat/deepseek-v4-flash:cloud
+    api_base: http://127.0.0.1:11500
+    tags: [cloud, "jur:us", fast, general, tools, long_context]
+    quality: 76
+
+  ollama_cloud_pro:
+    model: ollama_chat/deepseek-v4-pro:cloud
+    api_base: http://127.0.0.1:11500
+    tags: [cloud, "jur:us", slow, general, tools, long_context]
+    quality: 88
+
+  ollama_cloud_kimi:
+    model: ollama_chat/kimi-k2.5:cloud
+    api_base: http://127.0.0.1:11500
+    tags: [cloud, "jur:us", slow, writer, tools, long_context]
+    quality: 86
+
+  # --- the router's own embedding endpoint ---------------------------
+  # `mf` and `sw_ranking` embed each prompt before scoring it, and this
+  # endpoint supplies only the base URL and the credential for those
+  # calls: each router keeps its own `embedding_model`, so the `model`
+  # written here is never sent. It cannot move to another provider: the
+  # shipped `mf` checkpoint was trained against
+  # `text-embedding-3-small`'s vectors, so another embedding model puts
+  # the prompt in a space the checkpoint's factors were never fitted to
+  # and the win rates it scores become meaningless. Changing it means
+  # retraining the checkpoint.
+  embedding:
+    model: text-embedding-3-small
+    api_key_env: OPENAI_API_KEY
+
+tiers:
+
+  # --- areas of expertise --------------------------------------------
+  # One root per area. Each runs `jev` on the prompt and hands it to a
+  # quality tier or a fast tier; those two in turn choose the endpoint
+  # by policy, so adding a model to `endpoints:` re-decides the pick at
+  # the next start without a tier being touched.
+
+  coding:
+    router: jev
+    threshold: 0.4
+    strong: coding_quality
+    weak: coding_fast
+
+  # The quality side is restricted to reach `cloud` -- swap the term for
+  # `tag:vpn` to keep an area's strong side on the private network.
+  coding_quality:
+    strong: {select: "tag:cloud tag:coder tag:slow tool_call:true", order: quality_desc}
+    weak: {select: "tag:coder tag:vpn", order: quality_desc}
+
+  coding_fast:
+    strong: {select: "tag:fast tag:coder", order: cost_asc}
+    weak: {select: "tag:fast tag:general tag:local", order: cost_asc}
+
+  copywriting:
+    router: jev
+    threshold: 0.4
+    strong: copywriting_quality
+    weak: copywriting_fast
+
+  copywriting_quality:
+    strong: {select: "tag:cloud tag:writer tag:slow tool_call:true", order: quality_desc}
+    weak: {select: "tag:writer tag:vpn", order: quality_desc}
+
+  copywriting_fast:
+    strong: {select: "tag:fast tag:writer", order: cost_asc}
+    weak: {select: "tag:fast tag:general tag:local", order: cost_asc}
+
+  design:
+    router: jev
+    threshold: 0.4
+    strong: design_quality
+    weak: design_fast
+
+  design_quality:
+    strong: {select: "tag:cloud tag:designer tag:slow tool_call:true", order: quality_desc}
+    weak: {select: "tag:designer tag:fast", order: cost_asc}
+
+  design_fast:
+    strong: {select: "tag:fast tag:designer", order: cost_asc}
+    weak: {select: "tag:fast tag:general tag:local", order: cost_asc}
+
+  # --- governance ----------------------------------------------------
+  # `private` never leaves our hardware: both sides take `tag:local`, so
+  # no cloud endpoint can win either of them however good it is.
+
+  private:
+    router: jev
+    threshold: 0.4
+    strong: {select: "tag:local", order: quality_desc}
+    weak: {select: "tag:local tag:fast", order: cost_asc}
+
+  # `vpn` widens that to anything on the private network, which takes in
+  # the private cloud endpoints above once they are enabled.
+  vpn:
+    router: jev
+    threshold: 0.4
+    strong: {select: "tag:vpn", order: quality_desc}
+    weak: {select: "tag:vpn tag:fast", order: cost_asc}
+
+  # --- performance ---------------------------------------------------
+  # Everything `fast`, cheapest first, with the second-cheapest as the
+  # strong side so the tier still has two distinct endpoints to choose
+  # between.
+
+  fast:
+    router: jev
+    threshold: 0.4
+    strong: {select: "tag:fast", order: quality_desc}
+    weak: {select: "tag:fast", order: cost_asc}
+
+  # --- default -------------------------------------------------------
+  # What a client that names no tier reaches, and the only tier intent
+  # routing may move a request out of: every other root here is a tier
+  # an app chose on purpose, and `intent_routing` is off for those by
+  # default so a classifier never overrules that choice.
+  #
+  # `mf` scores cheaply on an embedding, so it carries the every-request
+  # decision; the area roots run `jev`, which reads the prompt.
+
+  default:
+    router: mf
+    threshold: 0.12
+    strong: general_quality
+    weak: general_fast
+
+  general_quality:
+    strong: {select: "tool_call:true", order: quality_desc}
+    weak: {select: "tag:vpn tag:tools", order: quality_desc}
+
+  general_fast:
+    strong: {select: "tag:fast", order: quality_desc}
+    weak: {select: "tag:fast", order: cost_asc}
+
+# An app that already knows what it wants names its tier in the `model`
+# field. An app that does not sends `default` and lets the classifier
+# pick, which is what this section turns on. Every mapped tier must
+# exist, which is checked at startup.
+intents:
+  detector: jev
+  confidence_floor: 0.5
+  descriptions:
+    coding: writing, reviewing, or debugging software
+    copywriting: marketing copy, articles, and other prose written to be read
+    design: visual design, layout, and user-interface work
+  tiers:
+    coding: coding
+    copywriting: copywriting
+    design: design
