@@ -3,16 +3,15 @@
 Asks Jev a single Noul (yes/no) question about the incoming prompt and
 uses the returned probability directly as the strong-model win rate.
 
-Import this module through `routellm.routers.routers`, which registers
-`JevRouter` in `ROUTER_CLS` and binds the `Router` base it subclasses.
-Importing it first, before `routers.py` has executed, is a circular
-import.
+The `Router` base comes from `routellm.routers.base`, not from
+`routers.py`, so importing this module does not pull in torch and does
+not form a cycle with the module that registers it in `ROUTER_CLS`.
 """
 from __future__ import annotations
 
 import logging
 
-from routellm.routers.routers import Router
+from routellm.routers.base import Router
 from routellm.routers.typesafe import require_typesafe_sdk
 
 logger = logging.getLogger(__name__)
