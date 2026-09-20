@@ -9,7 +9,7 @@ import os
 import yaml
 from typing import Dict, List, Optional, Any
 
-from routellm.controller import ModelPair
+from routellm.types import ModelPair
 from routellm.middleware.intent_model_selector import IntentModelMapping, IntentModelSelector
 
 

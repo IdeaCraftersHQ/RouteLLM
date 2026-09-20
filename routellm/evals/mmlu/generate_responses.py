@@ -16,7 +16,7 @@ import tiktoken
 import tqdm
 from openai import OpenAI
 
-from routellm.controller import ModelPair
+from routellm.types import ModelPair
 from routellm.evals.mmlu.domains import ALL_MMLU_DOMAINS
 
 ROUTED_PAIR = ModelPair(

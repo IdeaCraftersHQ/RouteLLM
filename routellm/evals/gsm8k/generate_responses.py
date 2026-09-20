@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 from openai import OpenAI
 
-from routellm.controller import ModelPair
+from routellm.types import ModelPair
 
 # Core code adapted from SGLang:
 # https://github.com/sgl-project/sglang/blob/main/benchmark/gsm8k/bench_sglang.py
