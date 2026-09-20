@@ -11,6 +11,11 @@ from typing import Any, Dict, List, Optional
 
 from routellm.middleware.intent_model_selector import IntentModelMapping
 from routellm.routers.typesafe import require_typesafe_sdk
+from routellm.routers.typesafe.prompts import (
+    DetectorPrompt,
+    _resolve,
+    load_prompt_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +28,12 @@ GENERAL_DESCRIPTION = "none of the listed intents fit"
 
 #: Key under which the single classification question is submitted.
 _QUESTION_NAME = "intent"
+
+#: Default Choice instructions, replaced wholesale by `instructions`.
+DEFAULT_INSTRUCTIONS = (
+    "Classify the user prompt into exactly one intent. "
+    "Pick 'general' when none of the other intents fit."
+)
 
 
 class JevIntentDetector:
@@ -45,6 +56,8 @@ class JevIntentDetector:
         timeout: Optional[float] = None,
         confidence_floor: float = 0.5,
         descriptions: Optional[Dict[str, str]] = None,
+        instructions: Optional[str] = None,
+        prompt_file: Optional[Any] = None,
         transport: Optional[Any] = None,
     ):
         """Initialize the Jev-backed intent detector.
@@ -66,6 +79,14 @@ class JevIntentDetector:
             Per-intent description overrides, keyed by intent label
             (default None). Takes precedence over
             `IntentModelMapping.description`.
+        instructions : str, optional
+            Replacement for the whole default Choice instruction text
+            (default None, the built-in text).
+        prompt_file : str or os.PathLike, optional
+            YAML prompt file supplying `intent_detector.instructions`
+            and `intent_detector.general_description` (default None).
+            Most specific wins: explicit kwarg, then file value, then
+            built-in default.
         transport : httpx2.BaseTransport, optional
             Transport handed to the SDK client (default None). Useful
             for tests.
@@ -83,12 +104,26 @@ class JevIntentDetector:
         self.confidence_floor = confidence_floor
         self.descriptions = descriptions or {}
 
+        file_prompt = (
+            DetectorPrompt()
+            if prompt_file is None
+            else load_prompt_file(prompt_file)[1]
+        )
+        self.instructions, instructions_source = _resolve(
+            instructions, file_prompt.instructions, DEFAULT_INSTRUCTIONS
+        )
+        self._general_description, general_source = _resolve(
+            None, file_prompt.general_description, GENERAL_DESCRIPTION
+        )
+        logger.debug(
+            "jev detector prompt sources instructions=%s general_description=%s",
+            instructions_source,
+            general_source,
+        )
+
         self.criteria = self._build_criteria()
         self._question = typesafe_sdk.Choice(
-            instructions=(
-                "Classify the user prompt into exactly one intent. "
-                "Pick 'general' when none of the other intents fit."
-            ),
+            instructions=self.instructions,
             criteria=self.criteria,
         )
         self._client = typesafe_sdk.TypeSafeClient(
@@ -113,7 +148,7 @@ class JevIntentDetector:
             description = self.descriptions.get(mapping.intent, mapping.description)
             criteria[mapping.intent] = description or None
         criteria[GENERAL_INTENT] = self.descriptions.get(
-            GENERAL_INTENT, GENERAL_DESCRIPTION
+            GENERAL_INTENT, self._general_description
         )
         return criteria
 
