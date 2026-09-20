@@ -5,6 +5,7 @@ This module must not import `.router`: routellm/routers/ has no
 pull in `routers.py` (and therefore torch) as a side effect.
 """
 
+
 def require_typesafe_sdk():
     """Import and return the typesafe_sdk module, or raise if unavailable.
 

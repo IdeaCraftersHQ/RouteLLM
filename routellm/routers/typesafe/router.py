@@ -92,7 +92,7 @@ class JevRouter(Router):
         self.instructions = (
             DEFAULT_INSTRUCTIONS if instructions is None else instructions
         )
-        self.criteria = DEFAULT_CRITERIA if criteria is None else criteria
+        self.criteria = dict(DEFAULT_CRITERIA) if criteria is None else criteria
         self._noul = typesafe_sdk.Noul(
             instructions=self.instructions,
             criteria=self.criteria,

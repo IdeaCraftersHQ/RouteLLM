@@ -6,13 +6,14 @@ mock transport, since the key check happens before any request is sent.
 """
 import importlib.util
 import json
+import logging
 import sys
 
 import httpx2
 import pytest
 import typesafe_sdk
 
-from routellm.routers.typesafe.router import JevRouter
+from routellm.routers.typesafe.router import DEFAULT_CRITERIA, JevRouter
 from routellm.types import ModelPair
 
 RESPONSE_BODY = {
@@ -89,6 +90,36 @@ def test_custom_criteria_in_request(captured):
     router.close()
 
     assert captured["body"]["questions"]["strong"]["criteria"] == criteria
+
+
+def test_default_criteria_not_shared_between_routers():
+    def handler(request):
+        return httpx2.Response(200, json=RESPONSE_BODY)
+
+    router_a = JevRouter(transport=httpx2.MockTransport(handler))
+    router_b = JevRouter(transport=httpx2.MockTransport(handler))
+    try:
+        assert router_a.criteria is not router_b.criteria
+
+        router_a.criteria["true"] = "mutated"
+
+        assert DEFAULT_CRITERIA["true"] != "mutated"
+        assert router_b.criteria["true"] != "mutated"
+    finally:
+        router_a.close()
+        router_b.close()
+
+
+def test_debug_log_records_response_model_id(router, caplog):
+    caplog.set_level(logging.DEBUG, logger="routellm.routers.typesafe.router")
+
+    router.calculate_strong_win_rate("hello world")
+
+    assert any(
+        RESPONSE_BODY["model"] in record.message
+        and str(RESPONSE_BODY["usage"]["input_tokens"]) in record.message
+        for record in caplog.records
+    )
 
 
 def test_api_error_propagates():

@@ -24,7 +24,7 @@ from routellm.traffic import TrafficManager
 from routellm.types import Middleware, ModelPair
 
 # Default config for routers augmented using golden label data from GPT-4.
-# This is exactly the same as config.example.yaml.
+# Kept broadly in sync with config.example.yaml.
 GPT_4_AUGMENTED_CONFIG = {
     "sw_ranking": {
         "checkpoint_path": "routellm/sw_ranking_gpt4_augmented",
@@ -38,7 +38,7 @@ GPT_4_AUGMENTED_CONFIG = {
     "causal_llm": {
         "checkpoint_path": "routellm/causal_llm_gpt4_augmented",
     },
-    "jev": {},
+    "jev": {"max_prompt_chars": 100000},
 }
 
 
