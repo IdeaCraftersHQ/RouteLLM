@@ -7,7 +7,7 @@ embeddings to predict win rates for model pairs.
 import torch
 from huggingface_hub import PyTorchModelHubMixin
 
-from routellm.routers.similarity_weighted.utils import OPENAI_CLIENT
+from routellm.routers.embeddings import get_embedding_client
 
 # Mapping from model names to unique IDs for factorization
 MODEL_IDS = {
@@ -174,7 +174,8 @@ class MFModel(torch.nn.Module, PyTorchModelHubMixin):
         model_embed = torch.nn.functional.normalize(model_embed, p=2, dim=1)
 
         prompt_embed = (
-            OPENAI_CLIENT.embeddings.create(input=[prompt], model=self.embedding_model)
+            get_embedding_client()
+            .embeddings.create(input=[prompt], model=self.embedding_model)
             .data[0]
             .embedding
         )
