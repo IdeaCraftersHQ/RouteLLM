@@ -19,5 +19,6 @@
 | `test_jev_router.py` | JevRouter (mock transport) | test_win_rate_is_noul_probability, test_route_threshold, test_prompt_truncated (+ 6 more) |
 | `test_prompt_file.py` | Generic Prompt File Loader | test_load_full_file, test_unrequested_section_ignored, test_section_wrong_type_raises (+ 13 more) |
 | `test_jev_prompts.py` | Jev Prompt File Wiring (router + detector) | test_router_file_values_reach_request, test_router_kwarg_beats_file, test_detector_instructions_kwarg_beats_file (+ 9 more) |
+| `test_router_registry.py` | Router Registry (register + entry-point discovery) | test_register_get_names_round_trip, test_duplicate_name_raises, test_decorator_form_registers (+ 11 more) |
 
 ⚠️ IMPORTANT: Keep this index up to date as tests are added/removed/modified. This document helps future maintainers understand test coverage at a glance.
