@@ -12,7 +12,7 @@ import json
 import os
 import uuid
 from typing import List, Dict, Any, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, model_validator
 from routellm.types import ModelPair
 
 logger = logging.getLogger(__name__)
@@ -52,18 +52,30 @@ class FineTuneConfig(BaseModel):
     max_files : int, optional
         Keep at most this many trace files; 0 is unbounded
         (default 10000).
-    min_confidence : float, optional
-        Minimum router confidence to record trace (default 0.5).
     max_bytes : int, optional
         Keep at most this many bytes of traces; 0 is unbounded
         (default 512 MiB).
     """
 
+    model_config = ConfigDict(extra="ignore")
+
     enabled: bool = False
     trace_dir: str = ".routellm_traces"
-    min_confidence: float = 0.5
     max_files: int = 10000
     max_bytes: int = 512 * 1024 * 1024
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_removed_fields(cls, data: Any) -> Any:
+        """Pop fields this config no longer reads, warning once each."""
+        if isinstance(data, dict) and "min_confidence" in data:
+            data = dict(data)
+            data.pop("min_confidence")
+            logger.warning(
+                "FineTuneConfig.min_confidence is removed and ignored; "
+                "drop min_confidence from your config"
+            )
+        return data
 
 class QualityManager:
     """Handles canary testing and data collection for fine-tuning."""
@@ -232,7 +244,10 @@ class QualityManager:
                 json.dump(trace, handle)
             os.replace(temporary, final)
             if self._listing is not None:
-                self._listing.append((trace_id, os.path.getsize(final)))
+                stat = os.stat(final)
+                self._listing.append(
+                    (trace_id, stat.st_size, stat.st_mtime_ns)
+                )
         except Exception as exc:
             logger.warning("failed to record trace: %s", exc)
 
@@ -264,7 +279,7 @@ class QualityManager:
             (
                 config.max_bytes,
                 "max_bytes",
-                lambda: sum(size for _, size in listing) >= config.max_bytes,
+                lambda: sum(entry[1] for entry in listing) >= config.max_bytes,
             ),
         ):
             if not cap or not over():
@@ -276,10 +291,10 @@ class QualityManager:
                     "deleting oldest first",
                     name,
                     len(listing),
-                    sum(size for _, size in listing),
+                    sum(entry[1] for entry in listing),
                 )
             while listing and over():
-                oldest, _ = listing.pop(0)
+                oldest = listing.pop(0)[0]
                 try:
                     os.remove(os.path.join(config.trace_dir, f"{oldest}.json"))
                 except OSError:
@@ -288,7 +303,10 @@ class QualityManager:
             self._listing_at = time.monotonic()
 
     def _directory_listing(self) -> List[tuple]:
-        """Return `(stem, size)` per trace, oldest first, cached 60s."""
+        """Return `(stem, size, mtime_ns)` per trace, oldest first.
+
+        Cached for `_LISTING_TTL_SECONDS` and refreshed after a delete.
+        """
         now = time.monotonic()
         if (
             self._listing is not None
@@ -304,9 +322,12 @@ class QualityManager:
                     continue
                 full = os.path.join(self.fine_tune_config.trace_dir, name)
                 try:
-                    entries.append((name[: -len(".json")], os.path.getsize(full)))
+                    stat = os.stat(full)
                 except OSError:
                     continue
+                entries.append(
+                    (name[: -len(".json")], stat.st_size, stat.st_mtime_ns)
+                )
         except OSError:
             entries = []
 
@@ -315,36 +336,23 @@ class QualityManager:
         self._listing_at = now
         return entries
 
-    def trigger_fit(self, target_model: str):
-        """Trigger a fine-tuning job using Fit CLI."""
-        if not self.fine_tune_config.enabled:
-            return
-
-        import subprocess
-        try:
-            logger.info(f"Triggering Fit fine-tuning for {target_model}...")
-            subprocess.run([
-                "fit", "train",
-                "--model", target_model,
-                "--data", self.fine_tune_config.trace_dir
-            ], check=True)
-        except Exception as e:
-            logger.error(f"Failed to trigger Fit fine-tuning: {str(e)}")
-
 
 def _age_key(entry: tuple) -> tuple:
-    """Return the oldest-first sort key of a `(stem, size)` entry.
+    """Return the oldest-first sort key of a `(stem, size, mtime)` entry.
 
-    A trace stem is `trace-<epoch_ms>-<hex>`; the millisecond is what
-    orders it, and the hex suffix only breaks a tie. Sorting the whole
-    string would order two traces from the same millisecond by a random
-    number, which is not wrong but is not chronological either.
+    A trace stem is `trace-<epoch_ms>-<hex>`, so the millisecond orders
+    it. The hex suffix is random and exists only to keep two traces
+    from the same millisecond apart, which makes it useless as a
+    tiebreak: a busy server writes several per millisecond and sorting
+    on the whole name would order them at random. The write time breaks
+    the tie instead, and the name only settles the rest.
     """
     parts = entry[0].split("-")
     try:
-        return (int(parts[1]), entry[0])
+        stamp = int(parts[1])
     except (IndexError, ValueError):
-        return (0, entry[0])
+        stamp = 0
+    return (stamp, entry[2], entry[0])
 
 
 def _extract_output(response: Any) -> str:

@@ -2,7 +2,7 @@
 
 Covers the trace body written by `QualityManager.record_trace`, the
 `routellm` block that names the decision that produced it, rotation
-against the file and byte caps.
+against the file and byte caps, and the removal of `trigger_fit`.
 """
 
 import json
@@ -200,3 +200,17 @@ def test_controller_passes_the_path_into_the_trace(tmp_path, monkeypatch):
     trace = _traces(controller.quality_manager)[0]
     assert trace["routellm"]["path"] == res._hidden_params["routellm_path"]
     assert trace["routellm"]["latency_ms"] is not None
+
+
+def test_trigger_fit_is_gone():
+    """`fit train` never existed; the hook must not come back."""
+    assert not hasattr(QualityManager, "trigger_fit")
+
+
+def test_min_confidence_is_accepted_and_warned(caplog):
+    with caplog.at_level(logging.WARNING, logger="routellm.quality"):
+        config = FineTuneConfig(enabled=True, min_confidence=0.7)
+
+    assert not hasattr(config, "min_confidence")
+    named = [r for r in caplog.records if "min_confidence" in r.message]
+    assert len(named) == 1
