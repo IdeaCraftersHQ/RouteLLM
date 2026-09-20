@@ -53,6 +53,8 @@ from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator
 
+from routellm.capabilities import Capabilities
+
 logger = logging.getLogger(__name__)
 
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
@@ -66,6 +68,7 @@ SelectorOrder = Literal[
     "quality_asc",
     "quality_desc",
     "context_desc",
+    "max_output_desc",
 ]
 
 
@@ -123,6 +126,14 @@ class Endpoint(BaseModel):
         Manual quality score in [0, 100].
     extra : dict
         Extra keyword arguments passed to litellm. Request kwargs win.
+    capabilities : Capabilities, optional
+        What this endpoint can do, stated explicitly. Highest
+        precedence source; what it leaves None is filled from the
+        deprecated tags, then from the models.dev catalog.
+    strict : bool
+        Whether an unknown capability refuses a request that needs it.
+        Default False: an unknown capability serves by default, so a
+        config that declares nothing keeps routing as it always did.
     """
 
     name: str
@@ -132,6 +143,8 @@ class Endpoint(BaseModel):
     tags: list[str] = Field(default_factory=list)
     quality: Optional[int] = Field(default=None, ge=0, le=100)
     extra: dict[str, Any] = Field(default_factory=dict)
+    capabilities: Optional[Capabilities] = None
+    strict: bool = False
 
     @field_validator("name")
     @classmethod
@@ -550,4 +563,6 @@ class EndpointRegistry:
             tags=[],
             quality=None,
             extra={},
+            capabilities=None,
+            strict=False,
         )
