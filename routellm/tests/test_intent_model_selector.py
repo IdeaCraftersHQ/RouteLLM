@@ -108,6 +108,63 @@ class TestIntentModelSelector(unittest.TestCase):
             if os.path.exists(temp_path):
                 os.remove(temp_path)
 
+
+class _StubIntentDetector:
+    """Stub detector exposing detect_intent(prompt) -> str for delegation tests."""
+
+    def __init__(self, intent: str):
+        self.intent = intent
+
+    def detect_intent(self, prompt: str) -> str:
+        return self.intent
+
+
+class TestIntentModelSelectorPluggableDetector(unittest.TestCase):
+    def setUp(self):
+        self.marketing_pair = ModelPair(strong="gpt-4", weak="gpt-3.5-turbo")
+        self.technical_pair = ModelPair(strong="claude-3-opus", weak="mistral-medium")
+        self.default_pair = ModelPair(strong="default-strong", weak="default-weak")
+
+        self.intent_mappings = [
+            IntentModelMapping(
+                intent="marketing",
+                model_pair=self.marketing_pair,
+                description="Marketing content"
+            ),
+            IntentModelMapping(
+                intent="technical",
+                model_pair=self.technical_pair,
+                description="Technical content"
+            )
+        ]
+
+    @patch("litellm.completion")
+    def test_pluggable_detector_known_intent_routes_to_pair(self, mock_completion):
+        selector = IntentModelSelector(
+            intent_mappings=self.intent_mappings,
+            default_model_pair=self.default_pair,
+            intent_detector=_StubIntentDetector("technical"),
+        )
+
+        model_pair = selector.get_model_pair("Explain how to implement a binary search tree")
+
+        self.assertEqual(model_pair, self.technical_pair)
+        mock_completion.assert_not_called()
+
+    @patch("litellm.completion")
+    def test_pluggable_detector_unknown_intent_falls_back_to_default(self, mock_completion):
+        selector = IntentModelSelector(
+            intent_mappings=self.intent_mappings,
+            default_model_pair=self.default_pair,
+            intent_detector=_StubIntentDetector("bogus"),
+        )
+
+        model_pair = selector.get_model_pair("Something completely different")
+
+        self.assertEqual(model_pair, self.default_pair)
+        mock_completion.assert_not_called()
+
+
 # Import sys and os at the top of the file to ensure they're available
 import sys
 import os
