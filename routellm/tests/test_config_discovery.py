@@ -8,6 +8,7 @@ temp file so nothing ever reads the real `/etc`.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -21,7 +22,7 @@ def env(tmp_path, monkeypatch):
 
     Returns
     -------
-    SimpleNamespace-like object
+    SimpleNamespace
         Attributes `home`, `xdg`, `system`, `project` (a nested dir that
         is the default CWD), plus `write(path, mapping)`.
     """
@@ -38,10 +39,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "SYSTEM_PATH", str(system))
     monkeypatch.chdir(project)
 
-    class Env:
-        pass
-
-    e = Env()
+    e = SimpleNamespace()
     e.home = home
     e.xdg = xdg
     e.system = system
@@ -133,6 +131,27 @@ def test_walk_up_stops_at_home(env):
     assert "project" not in sources(cfg.config_paths())
 
 
+def test_walk_up_stops_at_a_symlinked_home(env):
+    """A symlinked `$HOME` is still the boundary, resolved on both sides.
+
+    macOS ships `/tmp` as a symlink to `/private/tmp`, so an unresolved
+    comparison silently reads `$HOME/.routellm.yaml` as a project file.
+    """
+    import os
+
+    link = env.home.parent / "home-link"
+    link.symlink_to(env.home)
+    env.write(env.home / ".routellm.yaml", {"a": "home"})
+    marker = env.write(env.project / ".routellm.yaml", {"a": "project"})
+
+    os.environ["HOME"] = str(link)
+
+    found = cfg._project_file(env.project.resolve())
+
+    assert found == marker
+    assert cfg._project_file(env.home.resolve()) is None
+
+
 def test_env_overrides_project(env, monkeypatch):
     env.write(env.project / ".routellm.yaml", {"a": "project"})
     env_file = env.write(env.project / "from-env.yaml", {"a": "env"})
@@ -214,6 +233,28 @@ def test_null_deletes_a_key_from_a_lower_layer(env):
     loaded = cfg.load_config()
 
     assert loaded.data["endpoints"] == {"keep": {"model": "a"}}
+
+
+def test_null_deletes_under_a_parent_no_lower_layer_set(env):
+    """A null leaf is dropped even when its parent is new in this layer."""
+    env.write(env.user, {"endpoints": {"keep": {"model": "a"}}})
+    env.write(env.project / ".routellm.yaml", {"tiers": {"gone": None}})
+
+    loaded = cfg.load_config()
+
+    assert loaded.data.get("tiers", {}) == {}
+    assert cfg.deep_merge({}, {"tiers": {"t": None}}) == {"tiers": {}}
+
+
+def test_missing_env_file_errors_even_with_a_valid_flag(env, monkeypatch):
+    """An explicitly named file must exist; a good `--config` excuses nothing."""
+    good = env.write(env.project / "good.yaml", {"a": "flag"})
+    monkeypatch.setenv("ROUTELLM_CONFIG", str(env.project / "gone.yaml"))
+
+    with pytest.raises(FileNotFoundError) as excinfo:
+        cfg.load_config(explicit=str(good))
+
+    assert "ROUTELLM_CONFIG" in str(excinfo.value)
 
 
 def test_lists_replace_not_concatenate(env):

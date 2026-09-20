@@ -143,8 +143,11 @@ def _project_file(cwd: Path) -> Optional[Path]:
     Both markers are probed per directory, in `PROJECT_MARKERS` order.
     The walk stops at the filesystem root and at `$HOME`, which is never
     itself read as a project directory — the user layer covers it.
+    `$HOME` is resolved before comparing: on macOS it commonly points
+    through a symlink, and an unresolved boundary never matches, which
+    would read the user's own `$HOME/.routellm.yaml` as a project file.
     """
-    home = Path.home()
+    home = Path.home().resolve()
     directory = cwd
     while True:
         if directory == home:
@@ -184,7 +187,7 @@ def config_paths(
     start = Path(cwd).resolve() if cwd is not None else Path.cwd().resolve()
 
     chain = [
-        ResolvedPath(Path(SYSTEM_PATH), "system", Path(SYSTEM_PATH).is_file()),
+        _entry(Path(SYSTEM_PATH), "system"),
         _entry(_user_config_dir() / TOOL / "config.yaml", "user"),
     ]
 
@@ -228,8 +231,12 @@ def deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> Dict[str
             merged.pop(key, None)
             continue
         current = merged.get(key)
-        if isinstance(current, Mapping) and isinstance(value, Mapping):
-            merged[key] = deep_merge(current, value)
+        if isinstance(value, Mapping):
+            # Recurse even when no lower layer set this parent, so a
+            # null leaf under a brand-new parent is dropped on the way
+            # in rather than surviving as an explicit None.
+            base_side = current if isinstance(current, Mapping) else {}
+            merged[key] = deep_merge(base_side, value)
         else:
             merged[key] = value
     return merged
