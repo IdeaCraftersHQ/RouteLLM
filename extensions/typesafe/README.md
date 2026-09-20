@@ -15,8 +15,11 @@ local checkpoints:
 ## Install
 
 ```bash
-pip install -e extensions/routellm_typesafe
+pip install -e extensions/typesafe
 ```
+
+Naming convention: directory `extensions/typesafe`, import
+`routellm_typesafe`, distribution `routellm-typesafe`.
 
 Installing is the whole wiring. The package declares a
 `routellm.routers` entry point, so routellm discovers the `jev` name at
@@ -90,5 +93,5 @@ and an `intent_detector` section (`instructions`,
 From the repository root:
 
 ```bash
-PYTHONPATH=extensions/routellm_typesafe:. python -m pytest extensions/routellm_typesafe/tests -q
+PYTHONPATH=extensions/typesafe:. python -m pytest extensions/typesafe/tests -q
 ```

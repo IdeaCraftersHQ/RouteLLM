@@ -251,7 +251,7 @@ The full list of routers:
 3. `bert`: Uses a BERT classifier trained on the preference data.
 4. `causal_llm`: Uses a LLM-based classifier tuned on the preference data.
 5. `random`: Randomly routes to either model.
-6. `jev`: Uses TypeSafe's Jev System One model (hosted API, no local weights), shipped as a separate extension; install with `pip install -e extensions/routellm_typesafe` and see [extensions/routellm_typesafe/README.md](extensions/routellm_typesafe/README.md).
+6. `jev`: Uses TypeSafe's Jev System One model (hosted API, no local weights), shipped as a separate extension; install with `pip install -e extensions/typesafe` and see [extensions/typesafe/README.md](extensions/typesafe/README.md).
 
 While these routers have been trained on the `gpt-4-1106-preview` and `mixtral-8x7b-instruct-v0.1` model pair, we have found that these routers generalize well to other strong and weak model pairs as well. Therefore, you can replace the model pair used for routing without having to retrain these models!
 
@@ -349,7 +349,7 @@ intent_selector = IntentModelSelector(intent_mappings, default_pair, intent_dete
 
 TypeSafe's Jev-backed detector, `JevIntentDetector`, fits this same
 `intent_detector` slot; see the `jev` entry in [Routers](#routers)
-and [extensions/routellm_typesafe/README.md](extensions/routellm_typesafe/README.md).
+and [extensions/typesafe/README.md](extensions/typesafe/README.md).
 
 ## Configuration
 
@@ -357,7 +357,7 @@ The configuration for routers is specified in either the `config` argument for `
 
 An example configuration is provided in the `config.example.yaml` file - it provides the configurations for routers that have trained on Arena data augmented using GPT-4 as a judge. The models and datasets used are all hosted on Hugging Face under the [RouteLLM](https://huggingface.co/routellm) and [LMSYS](https://huggingface.co/lmsys) organizations.
 
-`routellm/prompts.py` is a core facility: any router or middleware can read a named section from a shared YAML prompt file so its model-facing wording is editable without code changes, without pulling in that adapter's own dependencies. The TypeSafe extension documents its own environment variables in [extensions/routellm_typesafe/README.md](extensions/routellm_typesafe/README.md).
+`routellm/prompts.py` is a core facility: any router or middleware can read a named section from a shared YAML prompt file so its model-facing wording is editable without code changes, without pulling in that adapter's own dependencies. The TypeSafe extension documents its own environment variables in [extensions/typesafe/README.md](extensions/typesafe/README.md).
 
 ## Contribution
 
