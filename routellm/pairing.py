@@ -47,7 +47,7 @@ import logging
 import os
 import sys
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
@@ -135,6 +135,18 @@ class ModelRecord:
         Context window in tokens.
     release_date : str, optional
         ISO date string, compared lexically as a quality tiebreak.
+    structured_output : bool
+        Whether the model honours a response schema.
+    open_weights : bool
+        Whether the model's weights are published.
+    modalities_in : list[str]
+        Input modalities the model accepts, e.g. `["text", "image"]`.
+    max_output : int, optional
+        Maximum output tokens in one response.
+
+    Every field added after the first release carries a default, so a
+    snapshot written before it existed still reads: `ModelRecord(**entry)`
+    over an older dict fills the missing keys from these defaults.
     """
 
     provider: str
@@ -145,6 +157,10 @@ class ModelRecord:
     reasoning: bool = False
     context: Optional[int] = None
     release_date: Optional[str] = None
+    structured_output: bool = False
+    open_weights: bool = False
+    modalities_in: list[str] = field(default_factory=list)
+    max_output: Optional[int] = None
 
 
 @dataclass
@@ -250,6 +266,12 @@ def _fetch_catalog() -> list[ModelRecord]:
             reasoning=bool(model.reasoning),
             context=model.limit.context if model.limit else None,
             release_date=model.release_date,
+            structured_output=bool(getattr(model, "structured_output", False)),
+            open_weights=bool(getattr(model, "open_weights", False)),
+            modalities_in=list(getattr(model.modalities, "input", []) or [])
+            if getattr(model, "modalities", None)
+            else [],
+            max_output=model.limit.output if model.limit else None,
         )
         for model in models
     ]
