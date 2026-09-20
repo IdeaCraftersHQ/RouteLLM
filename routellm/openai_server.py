@@ -284,6 +284,33 @@ def build_intents(
     )
 
 
+
+def build_router_config(file_config: Optional[dict]) -> Optional[dict]:
+    """Return the router config, with the keys other owners claim removed.
+
+    `endpoints:` and `tiers:` belong to the registry, `intents:` to the
+    intent middleware, and `quality_from:` / `quality_from_override:`
+    to the sidecar merge. Everything else stays router config. Leaving
+    any of them in hands an unknown key to every configured router.
+
+    Parameters
+    ----------
+    file_config : dict, optional
+        The loaded YAML config, or None when `--config` was not given.
+
+    Returns
+    -------
+    dict or None
+        The remaining config, or None when nothing is left, which keeps
+        the router defaults.
+    """
+    router_config = dict(file_config or {})
+    for key in ("endpoints", "tiers", "intents", "quality_from",
+                "quality_from_override"):
+        router_config.pop(key, None)
+    return router_config or None
+
+
 @asynccontextmanager
 async def lifespan(app):
     global CONTROLLER
@@ -313,15 +340,17 @@ async def lifespan(app):
     # router config, so all three are popped out before the handoff.
     # The winning layer's path resolves a relative `quality_from:`
     # against the file that set it, never against the CWD.
+    #
+    # The sidecar merge happens inside EndpointRegistry.from_config, so
+    # every consumer that builds a registry -- this server and both
+    # pairing CLIs -- sees the same measured numbers. Applying it here
+    # instead would leave the CLIs explaining a different ordering than
+    # the one the server actually routes on.
     file_config = loaded.data
     config_origin = str(loaded.layers[-1].path) if loaded.layers else None
     endpoints = build_registry(file_config, config_origin)
     intents = build_intents(file_config, endpoints)
-    router_config = dict(file_config)
-    router_config.pop("endpoints", None)
-    router_config.pop("tiers", None)
-    router_config.pop("intents", None)
-    router_config = router_config or None
+    router_config = build_router_config(file_config)
 
     # Neither flag and no tier to route into leaves the legacy flat form
     # with nothing to pair; fall back to the pair this server has always
