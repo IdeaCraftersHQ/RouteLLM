@@ -14,5 +14,6 @@
 | `test_resilience_caching_traffic.py` | Resilience Caching Traffic | test_resilience_retry, test_resilience_fallback, test_traffic_manager_conditional_routing (+ 1 more) |
 | `test_x402_integration.py` | X402 Integration | test_full_402_flow |
 | `test_xrr_integration.py` | Xrr Integration | test_controller_with_xrr |
+| `test_typesafe_guard.py` | TypeSafe SDK Guard | test_require_typesafe_sdk_returns_module_when_importable, test_require_typesafe_sdk_raises_with_extra_hint_when_missing |
 
 ⚠️ IMPORTANT: Keep this index up to date as tests are added/removed/modified. This document helps future maintainers understand test coverage at a glance.
