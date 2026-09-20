@@ -109,6 +109,63 @@ class TestIntentModelSelector(unittest.TestCase):
                 os.remove(temp_path)
 
 
+class TestTierOnlySelectorSerialization(unittest.TestCase):
+    """A selector that picks tiers carries no pairs; serializers must cope."""
+
+    def setUp(self):
+        self.selector = IntentModelSelector(
+            intent_mappings=[
+                IntentModelMapping(intent="legal", description="contracts"),
+                IntentModelMapping(intent="code", description="software"),
+            ],
+            default_model_pair=None,
+            intent_tiers={"legal": "legal_tier", "code": "premium"},
+        )
+
+    def test_save_load_mappings_round_trips_a_pair_less_selector(self):
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as temp:
+            temp_path = temp.name
+
+        try:
+            self.selector.save_mappings(temp_path)
+            loaded = IntentModelSelector.load_mappings(temp_path)
+
+            self.assertEqual(
+                [m.intent for m in loaded.intent_mappings], ["legal", "code"]
+            )
+            self.assertIsNone(loaded.default_model_pair)
+            for mapping in loaded.intent_mappings:
+                self.assertIsNone(mapping.model_pair)
+            self.assertEqual(loaded.intent_tiers, self.selector.intent_tiers)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    def test_intent_config_round_trips_a_pair_less_selector(self):
+        from routellm.middleware.intent_config import (
+            load_intent_config,
+            save_intent_config,
+        )
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.yaml') as temp:
+            temp_path = temp.name
+
+        try:
+            save_intent_config(self.selector, temp_path)
+            loaded = load_intent_config(temp_path)
+
+            self.assertEqual(
+                sorted(m.intent for m in loaded.intent_mappings), ["code", "legal"]
+            )
+            self.assertIsNone(loaded.default_model_pair)
+            for mapping in loaded.intent_mappings:
+                self.assertIsNone(mapping.model_pair)
+            self.assertEqual(loaded.intent_tiers, self.selector.intent_tiers)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+
 class _StubIntentDetector:
     """Stub detector exposing detect_intent(prompt) -> str for delegation tests."""
 

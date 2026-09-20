@@ -16,6 +16,10 @@ from routellm.middleware.intent_model_selector import IntentModelMapping, Intent
 def load_intent_config(config_path: str) -> IntentModelSelector:
     """Load intent configuration from a YAML file.
 
+    A file written for a tier-only selector carries no `default_models`
+    and no per-intent `models`; both load as None, and `intent_tiers`
+    is restored when the file names it.
+
     Parameters
     ----------
     config_path : str
@@ -35,22 +39,39 @@ def load_intent_config(config_path: str) -> IntentModelSelector:
         raise FileNotFoundError(f"Config file not found: {config_path}")
     
     with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    # Parse default model pair
-    default_model_pair = ModelPair(
-        strong=config.get("default_models", {}).get("strong", "gpt-4"),
-        weak=config.get("default_models", {}).get("weak", "gpt-3.5-turbo")
+        config = yaml.safe_load(f) or {}
+
+    # A file naming no default pair belongs to a tier-only selector;
+    # inventing one here would let it bypass the tier tree.
+    raw_default = config.get("default_models")
+    default_model_pair = (
+        ModelPair(
+            strong=raw_default.get("strong", "gpt-4"),
+            weak=raw_default.get("weak", "gpt-3.5-turbo"),
+        )
+        if raw_default
+        else None
     )
-    
+
     # Parse intent mappings
     intent_mappings = []
-    for intent_name, intent_config in config.get("intents", {}).items():
-        model_pair = ModelPair(
-            strong=intent_config.get("models", {}).get("strong", default_model_pair.strong),
-            weak=intent_config.get("models", {}).get("weak", default_model_pair.weak)
-        )
-        
+    for intent_name, intent_config in (config.get("intents") or {}).items():
+        intent_config = intent_config or {}
+        raw_models = intent_config.get("models")
+        if raw_models:
+            model_pair = ModelPair(
+                strong=raw_models.get(
+                    "strong",
+                    default_model_pair.strong if default_model_pair else None,
+                ),
+                weak=raw_models.get(
+                    "weak",
+                    default_model_pair.weak if default_model_pair else None,
+                ),
+            )
+        else:
+            model_pair = None
+
         mapping = IntentModelMapping(
             intent=intent_name,
             model_pair=model_pair,
@@ -63,6 +84,7 @@ def load_intent_config(config_path: str) -> IntentModelSelector:
     return IntentModelSelector(
         intent_mappings=intent_mappings,
         default_model_pair=default_model_pair,
+        intent_tiers=config.get("intent_tiers"),
         intent_detection_model=config.get("intent_detection_model", "gpt-3.5-turbo")
     )
 
@@ -77,25 +99,29 @@ def save_intent_config(selector: IntentModelSelector, config_path: str) -> None:
     config_path : str
         Path to save the YAML configuration file to.
     """
-    # Create config dictionary
+    # A pair that is None is left out rather than written as null, so a
+    # tier-only selector round-trips through `load_intent_config`.
     config = {
         "intent_detection_model": selector.intent_detection_model,
-        "default_models": {
-            "strong": selector.default_model_pair.strong,
-            "weak": selector.default_model_pair.weak
-        },
         "intents": {}
     }
-    
+    if selector.default_model_pair is not None:
+        config["default_models"] = {
+            "strong": selector.default_model_pair.strong,
+            "weak": selector.default_model_pair.weak
+        }
+    if selector.intent_tiers:
+        config["intent_tiers"] = dict(selector.intent_tiers)
+
     # Add intent mappings
     for mapping in selector.intent_mappings:
-        config["intents"][mapping.intent] = {
-            "description": mapping.description,
-            "models": {
+        entry = {"description": mapping.description}
+        if mapping.model_pair is not None:
+            entry["models"] = {
                 "strong": mapping.model_pair.strong,
                 "weak": mapping.model_pair.weak
             }
-        }
+        config["intents"][mapping.intent] = entry
     
     # Save to file
     os.makedirs(os.path.dirname(config_path), exist_ok=True)

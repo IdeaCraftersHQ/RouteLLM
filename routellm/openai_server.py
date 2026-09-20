@@ -197,8 +197,8 @@ def build_intents(
     Raises
     ------
     ValueError
-        If the detector is unknown, or an intent maps to a tier the
-        registry does not carry.
+        If the detector is unknown, the `tiers` mapping is missing or
+        empty, or an intent maps to a tier the registry does not carry.
     ImportError
         If `detector: jev` is asked for and the typesafe extension is
         not installed. The message names the install command.
@@ -215,6 +215,12 @@ def build_intents(
         )
 
     intent_tiers = dict(spec.get("tiers") or {})
+    if not intent_tiers:
+        raise ValueError(
+            "intents: needs a non-empty `tiers` mapping. Without one the "
+            "classifier would run on every request and choose nothing."
+        )
+
     for intent, tier in intent_tiers.items():
         if not registry.has_tier(tier):
             known = ", ".join(registry.tier_names()) or "<none>"
