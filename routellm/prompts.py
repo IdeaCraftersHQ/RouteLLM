@@ -135,7 +135,11 @@ class PromptFile:
                 raise ValueError(
                     f"{self.path}: unknown key {key!r} in section {name!r}"
                 )
-            if not isinstance(value, expected):
+            wrong_type = not isinstance(value, expected)
+            # bool subclasses int, so isinstance(True, int) is True; an
+            # int field must still reject a bool value.
+            is_bool_for_int = expected is int and isinstance(value, bool)
+            if wrong_type or is_bool_for_int:
                 raise ValueError(
                     f"{self.path}: {name}.{key} must be {expected.__name__}, "
                     f"got {type(value).__name__}"

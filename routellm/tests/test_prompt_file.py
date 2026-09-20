@@ -164,6 +164,25 @@ def test_wrong_dict_value_type_raises(tmp_path):
     assert "dict" in str(excinfo.value)
 
 
+def test_bool_rejected_for_int_field(tmp_path):
+    """bool is a subclass of int; isinstance(True, int) is True.
+
+    A plain isinstance check would silently accept a boolean where an
+    int field is declared. Schemas with an int field must reject it.
+    """
+    schema = {"max_retries": int}
+    path = _write(tmp_path, "router:\n  max_retries: true\n")
+    prompt_file = PromptFile.load(path)
+
+    with pytest.raises(ValueError) as excinfo:
+        prompt_file.section("router", schema)
+
+    assert "max_retries" in str(excinfo.value)
+    assert "router" in str(excinfo.value)
+    assert "int" in str(excinfo.value)
+    assert str(path) in str(excinfo.value)
+
+
 def test_schema_is_per_call(tmp_path):
     """The same file serves different adapters with different schemas."""
     prompt_file = PromptFile.load(_write(tmp_path, FULL_FILE))
