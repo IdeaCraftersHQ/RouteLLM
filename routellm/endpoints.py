@@ -282,6 +282,48 @@ class Tier(BaseModel):
         return value
 
 
+def _invert_areas(
+    raw: dict[str, Any], tiers: dict[str, "Tier"]
+) -> dict[str, str]:
+    """Invert `{area: [tier, ...]}` into `{tier: area}`.
+
+    Parameters
+    ----------
+    raw : dict
+        The config's `areas:` section.
+    tiers : dict[str, Tier]
+        The configured tiers, checked against so a typo in an area is
+        caught at load rather than silently grouping nothing.
+
+    Returns
+    -------
+    dict[str, str]
+        Tier name to area name.
+
+    Raises
+    ------
+    ValueError
+        If an area names a tier that does not exist, or a tier appears
+        in two areas.
+    """
+    inverted: dict[str, str] = {}
+    for area, names in raw.items():
+        for tier in names or []:
+            if tier not in tiers:
+                raise ValueError(
+                    f"Area {area!r} names tier {tier!r}, which is not "
+                    f"configured. Known tiers: "
+                    f"{', '.join(sorted(tiers)) or '<none>'}."
+                )
+            if tier in inverted:
+                raise ValueError(
+                    f"Tier {tier!r} is in two areas, {inverted[tier]!r} "
+                    f"and {area!r}; a tier belongs to at most one."
+                )
+            inverted[tier] = area
+    return inverted
+
+
 class EndpointRegistry:
     """Lookup of endpoints by name, with raw-model passthrough.
 
@@ -323,6 +365,11 @@ class EndpointRegistry:
         # and pairing then orders on the overall number as it always
         # has.
         self.area_quality: dict[str, dict[str, int]] = {}
+
+        # Tier name to area name, inverted from the config's
+        # `areas: {area: [tier, ...]}`. Empty means no tier has an
+        # area, and pairing then orders on overall quality as always.
+        self.areas: dict[str, str] = {}
 
         self._validate_tiers()
 
@@ -401,7 +448,29 @@ class EndpointRegistry:
                 override=bool(override),
             )
 
+        registry.areas = _invert_areas(config.get("areas") or {}, tiers)
         return registry
+
+    def area_of(self, tier: Optional[str]) -> Optional[str]:
+        """Return the area a tier belongs to, or None.
+
+        A null tier is tolerated: a flat pair has no tier at all
+        (`routing.py` writes `tier: None` for one), and asking for its
+        area must answer None rather than raise.
+
+        Parameters
+        ----------
+        tier : str or None
+            Tier name.
+
+        Returns
+        -------
+        str or None
+            The area name, or None when the tier has none.
+        """
+        if tier is None:
+            return None
+        return self.areas.get(tier)
 
     def revalidate(self) -> None:
         """Re-run tier validation after the tiers were rewritten in place.

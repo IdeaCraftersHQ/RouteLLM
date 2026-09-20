@@ -686,6 +686,29 @@ class Controller:
 
         return res
 
+    def _area_of(self, path: List[dict]) -> Optional[str]:
+        """Return the area of the deepest tier on a decision path.
+
+        A flat pair has no tier at all, so the lookup must tolerate a
+        null one; a registry with no `areas:` answers None for every
+        tier. This is what closes the loop: the recorded trace carries
+        its area, so the next aggregation has areas without being
+        handed the config.
+
+        Parameters
+        ----------
+        path : list[dict]
+            The decision path `_route` produced.
+
+        Returns
+        -------
+        str or None
+            The area name, or None when there is none.
+        """
+        if not path:
+            return None
+        return self.endpoints.area_of(path[-1].get("tier"))
+
     def _endpoint_call_params(
         self, model_name: str
     ) -> tuple[str, Optional[str], Optional[str], dict[str, Any]]:
@@ -819,6 +842,7 @@ class Controller:
         routed_model, path, effective_pair = self._route(
             prompt, kwargs, tier, router, threshold, reqs
         )
+        area = self._area_of(path)
 
         # 2. Apply canary testing and build the fallback chain, which
         #    stays inside the pair this request was routed against.
@@ -846,6 +870,7 @@ class Controller:
                 endpoint=model_to_use,
                 session_id=session_id,
                 latency_ms=0,
+                area=area,
             )
             return self._attach_path(
                 res, path, model_to_use, sibling, sibling_reference
@@ -894,6 +919,7 @@ class Controller:
                     endpoint=model_name,
                     session_id=session_id,
                     latency_ms=latency_ms,
+                    area=area,
                 )
 
                 return self._attach_path(
@@ -936,6 +962,7 @@ class Controller:
         routed_model, path, effective_pair = self._route(
             prompt, kwargs, tier, router, threshold, reqs
         )
+        area = self._area_of(path)
 
         # 2. Apply canary testing and build the fallback chain, which
         #    stays inside the pair this request was routed against.
@@ -963,6 +990,7 @@ class Controller:
                 endpoint=model_to_use,
                 session_id=session_id,
                 latency_ms=0,
+                area=area,
             )
             return self._attach_path(
                 res, path, model_to_use, sibling, sibling_reference
@@ -1022,6 +1050,7 @@ class Controller:
                     endpoint=model_name,
                     session_id=session_id,
                     latency_ms=latency_ms,
+                    area=area,
                 )
 
                 return self._attach_path(
