@@ -366,6 +366,11 @@ Every selector is resolved to an endpoint name before the tier graph is validate
 There are two ways to pick the area of expertise a request is answered from. An app that already knows names the tier itself, in the `model` field. An app that does not sends `default` and lets an intent classifier pick, which is what an `intents:` section turns on:
 
 ```yaml
+tiers:
+  default: {router: mf, threshold: 0.12, strong: premium, weak: local_fast}
+  legal:   {strong: cloud_strong, weak: frontier_local}
+  coding:  {strong: cloud_strong, weak: local_fast}
+
 intents:
   detector: jev          # or litellm
   model: jev-1           # the model the detector classifies with
@@ -374,11 +379,13 @@ intents:
     legal: contracts, statutes, and case law
     code: writing or debugging software
   tiers:
-    legal: legal_tier
-    code: premium
+    legal: legal
+    code: coding
 ```
 
-Each intent maps to a tier. A classified prompt enters that tier; an intent mapped to none, or a prompt the classifier declines to label, leaves the request in the tier it addressed. Every mapped tier must exist, which is checked at startup.
+Each intent maps to a tier, and `tiers:` must be present and non-empty — an `intents:` section that maps nothing would classify every prompt and act on none. A classified prompt enters its tier; an intent mapped to none, or a prompt the classifier declines to label, leaves the request in the tier it addressed. Every mapped tier must exist, which is checked at startup.
+
+The targets above need no `intent_routing` of their own: a request arriving as `default` is the case the gate below allows, and `legal` and `coding` are where it is sent, not where it came from. A tier needs `intent_routing: true` only when apps address *it* directly and you still want the classifier to move them on.
 
 A classifier never overrules an app that chose a tier by name: an intent-selected tier is honoured only for a request addressed to `default`, or to a tier that opts in with `intent_routing: true`. A tier that is passed over this way says so on the decision path, as `intent_ignored`, and a tier entered by intent carries `tier_from: intent`. `default` can opt out with `intent_routing: false`.
 

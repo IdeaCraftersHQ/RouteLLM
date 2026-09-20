@@ -334,6 +334,8 @@ Respond in JSON format like this:
         """Save intent mappings to a JSON file.
 
         Serializes all intent mappings and configuration to JSON format.
+        A pair that is None is left out rather than written as null, so
+        a tier-only selector round-trips through `load_mappings`.
 
         Parameters
         ----------
@@ -346,23 +348,26 @@ Respond in JSON format like this:
             mapping_dict = {
                 "intent": mapping.intent,
                 "description": mapping.description,
-                "model_pair": {
+            }
+            if mapping.model_pair is not None:
+                mapping_dict["model_pair"] = {
                     "strong": mapping.model_pair.strong,
                     "weak": mapping.model_pair.weak
                 }
-            }
             serializable_mappings.append(mapping_dict)
-            
-        # Add default model pair
+
         config = {
             "intent_mappings": serializable_mappings,
-            "default_model_pair": {
-                "strong": self.default_model_pair.strong,
-                "weak": self.default_model_pair.weak
-            },
             "intent_detection_model": self.intent_detection_model
         }
-        
+        if self.default_model_pair is not None:
+            config["default_model_pair"] = {
+                "strong": self.default_model_pair.strong,
+                "weak": self.default_model_pair.weak
+            }
+        if self.intent_tiers:
+            config["intent_tiers"] = dict(self.intent_tiers)
+
         # Save to file
         with open(filepath, 'w') as f:
             json.dump(config, f, indent=2)
@@ -370,6 +375,10 @@ Respond in JSON format like this:
     @classmethod
     def load_mappings(cls, filepath: str) -> 'IntentModelSelector':
         """Load intent mappings from a JSON file.
+
+        Accepts the pair-less shape a tier-only selector writes: a
+        mapping or a default carrying no `model_pair` key loads as
+        None, and `intent_tiers` is restored when present.
 
         Does not round-trip a configured intent_detector; pass
         intent_detector again to the returned instance if needed.
@@ -395,29 +404,34 @@ Respond in JSON format like this:
         with open(filepath, 'r') as f:
             config = json.load(f)
             
-        # Convert to IntentModelMapping objects
+        # Convert to IntentModelMapping objects. An absent model_pair
+        # is a tier-only mapping, which carries none.
         intent_mappings = []
         for mapping_dict in config.get("intent_mappings", []):
-            model_pair = ModelPair(
-                strong=mapping_dict["model_pair"]["strong"],
-                weak=mapping_dict["model_pair"]["weak"]
+            raw_pair = mapping_dict.get("model_pair")
+            model_pair = (
+                ModelPair(strong=raw_pair["strong"], weak=raw_pair["weak"])
+                if raw_pair is not None
+                else None
             )
             mapping = IntentModelMapping(
                 intent=mapping_dict["intent"],
-                description=mapping_dict["description"],
+                description=mapping_dict.get("description", ""),
                 model_pair=model_pair
             )
             intent_mappings.append(mapping)
-            
-        # Create default model pair
-        default_model_pair = ModelPair(
-            strong=config["default_model_pair"]["strong"],
-            weak=config["default_model_pair"]["weak"]
+
+        raw_default = config.get("default_model_pair")
+        default_model_pair = (
+            ModelPair(strong=raw_default["strong"], weak=raw_default["weak"])
+            if raw_default is not None
+            else None
         )
-        
+
         # Create and return the selector
         return cls(
             intent_mappings=intent_mappings,
             default_model_pair=default_model_pair,
+            intent_tiers=config.get("intent_tiers"),
             intent_detection_model=config.get("intent_detection_model", "gpt-3.5-turbo")
         )
