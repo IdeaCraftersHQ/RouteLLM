@@ -15,6 +15,7 @@ from aps story 004.
 - [US-0001](US-0001-strong-weak-routing.md) — strong/weak routing via cost threshold
 - [US-0009](US-0009-intent-based-routing.md) — intent-based routing middleware
 - [US-0103](US-0103-typesafe-jev-routing.md) — TypeSafe Jev routing
+- [US-0104](US-0104-router-registry.md) — router registry and entry-point contract
 
 ### Caching
 - [US-0002](US-0002-exact-match-cache.md) — exact-match SQLite cache

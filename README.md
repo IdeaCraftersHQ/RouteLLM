@@ -391,9 +391,26 @@ We welcome contributions! Please feel free to open an issue or a pull request if
 
 ### Adding a new router
 
-To add a new router to RouteLLM, implement the abstract `Router` class from `routellm/routers/base.py` and register the new router in the `ROUTER_CLS` dictionary in `routers.py`. Then, you can use immediately the new router in the server or evaluation framework.
-
 There is only a single method to implement: `calculate_strong_win_rate`, which takes in the user prompt and returns the win rate for the strong model conditioned on that given prompt - if this win rate is great than user-specified cost threshold, then the request is routed to the strong model. Otherwise, it is routed to the weak model.
+
+Two paths to register a router, both backed by the same registry (`routellm/routers/registry.py`):
+
+**In-tree**: subclass `Router` from `routellm/routers/base.py` and call `register_router` in `routers.py`.
+
+**As a package**: subclass `Router` in your own package, publish it as an entry point in your package's `pyproject.toml`, and `pip install` it — the name then appears in `--routers` for the server, calibration, and evals with no core change:
+
+```toml
+[project.entry-points."routellm.routers"]
+myrouter = "pkg.mod:Cls"
+```
+
+```python
+from routellm.routers.registry import register_router
+
+register_router("myrouter", MyRouterClass)
+```
+
+A plugin that fails to import is skipped with a warning and shown in the error when its name is requested.
 
 ### Adding a new benchmark
 
