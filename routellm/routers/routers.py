@@ -433,14 +433,11 @@ class RandomRouter(Router):
         return res
 
 
-from routellm.routers.typesafe.router import JevRouter  # noqa: E402  # isort: skip
-
 register_router("random", RandomRouter)
 register_router("mf", MatrixFactorizationRouter)
 register_router("causal_llm", CausalLLMRouter)
 register_router("bert", BERTRouter)
 register_router("sw_ranking", SWRankingRouter)
-register_router("jev", JevRouter)
 
 # Entry points come from installed packages: a broken one must never
 # keep this module from importing.

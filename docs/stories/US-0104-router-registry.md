@@ -38,9 +38,9 @@ or the CLI, and its name still resolves to a useful error.
   `get_router_class`, `router_names`, `name_for`,
   `discover_routers`, `discovery_failures`, `reset_registry`,
   `ROUTER_CLS`
-- `routellm/routers/routers.py` registers the six built-ins
-  (`random`, `mf`, `causal_llm`, `bert`, `sw_ranking`, `jev`) and
-  runs `discover_routers()` at import
+- `routellm/routers/routers.py` registers the five built-ins
+  (`random`, `mf`, `causal_llm`, `bert`, `sw_ranking`) and runs
+  `discover_routers()` at import
 
 ## E2E tests
 

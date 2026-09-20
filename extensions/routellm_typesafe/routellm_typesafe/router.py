@@ -4,16 +4,18 @@ Asks Jev a single Noul (yes/no) question about the incoming prompt and
 uses the returned probability directly as the strong-model win rate.
 
 The `Router` base comes from `routellm.routers.base`, not from
-`routers.py`, so importing this module does not pull in torch and does
-not form a cycle with the module that registers it in `ROUTER_CLS`.
+`routers.py`, so importing this module does not pull in torch. The
+class is not registered here: the `routellm.routers` entry point
+declared in this package's pyproject does that at discovery time.
 """
 from __future__ import annotations
 
 import logging
 
+import typesafe_sdk
+
 from routellm.prompts import PromptFile, resolve
 from routellm.routers.base import Router
-from routellm.routers.typesafe import require_typesafe_sdk
 
 logger = logging.getLogger(__name__)
 
@@ -128,8 +130,6 @@ class JevRouter(Router):
         base_url=None,
         transport=None,
     ):
-        typesafe_sdk = require_typesafe_sdk()
-
         section = (
             PromptFile.load(prompt_file).section(PROMPT_SECTION, PROMPT_SCHEMA)
             if prompt_file is not None
