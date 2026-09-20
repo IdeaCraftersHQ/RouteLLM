@@ -183,6 +183,43 @@ def _endpoint_for(registry, name):
     return name
 
 
+def _reachable_endpoints(registry, name):
+    """Return every endpoint reachable from a tier, by either side.
+
+    Taking only `strong` proves one path; a governance restriction has
+    to hold on all of them, because a failed level falls back to its
+    sibling and a nested tier is descended by `weak`.
+
+    Parameters
+    ----------
+    registry : EndpointRegistry
+        A registry whose selectors are already resolved.
+    name : str
+        Tier or endpoint name to start from.
+
+    Returns
+    -------
+    set[str]
+        Every endpoint name reachable through any strong/weak descent.
+    """
+    found: set[str] = set()
+    seen: set[str] = set()
+    pending = [name]
+
+    while pending:
+        current = pending.pop()
+        if not registry.has_tier(current):
+            found.add(current)
+            continue
+        if current in seen:
+            continue
+        seen.add(current)
+        tier = registry.get_tier(current)
+        pending.extend([tier.strong, tier.weak])
+
+    return found
+
+
 # ---------------------------------------------------------------------------
 # Loading
 # ---------------------------------------------------------------------------
@@ -254,22 +291,38 @@ def test_each_entry_tier_reaches_an_endpoint(resolved, tier):
 
 
 def test_private_never_leaves_our_own_hardware(resolved):
-    """Both sides of `private` are tagged `local`, cloud or not."""
-    tier = resolved.get_tier("private")
+    """Nothing reachable from `private` is anything but our own hardware.
 
-    for side in ("strong", "weak"):
-        endpoint = resolved.get(getattr(tier, side))
-        assert "local" in endpoint.tags, f"private.{side} is {endpoint.name}"
-        assert "cloud" not in endpoint.tags
+    Stronger than `vpn`: every reachable endpoint must be tagged
+    `local` AND must not be tagged `cloud`, so no descent can reach a
+    model that runs somewhere else.
+    """
+    reachable = _reachable_endpoints(resolved, "private")
+
+    assert reachable, "private reaches no endpoint at all"
+    for name in sorted(reachable):
+        tags = resolved.get(name).tags
+        assert "local" in tags, f"private reaches {name}, which is not local"
+        assert "cloud" not in tags, f"private reaches {name}, which is cloud"
 
 
 def test_vpn_only_reaches_the_private_network(resolved):
-    """Both sides of `vpn` are tagged `vpn`."""
-    tier = resolved.get_tier("vpn")
+    """Nothing reachable from `vpn`, by any descent, lacks the tag.
 
-    for side in ("strong", "weak"):
-        endpoint = resolved.get(getattr(tier, side))
-        assert "vpn" in endpoint.tags, f"vpn.{side} is {endpoint.name}"
+    `vpn` constrains the path, not the hardware: a vendor whose public
+    API is also exposed privately carries `cloud` and `vpn` both, so a
+    vendor-hosted endpoint winning here is correct. What would not be
+    correct is reaching an endpoint carrying no `vpn` tag at all, and
+    checking only the two immediate sides would miss one that a nested
+    tier or a fallback descent brings into range.
+    """
+    reachable = _reachable_endpoints(resolved, "vpn")
+
+    assert reachable, "vpn reaches no endpoint at all"
+    for name in sorted(reachable):
+        assert "vpn" in resolved.get(name).tags, (
+            f"vpn reaches {name}, which is not on the private network"
+        )
 
 
 # ---------------------------------------------------------------------------
