@@ -460,11 +460,15 @@ class Controller:
             "default_threshold": self.default_threshold,
         }
 
-        tier, tier_from, ignored_tier = self._apply_intent_tier(prompt, tier)
-
+        # A traffic rule bypasses the tree outright, so it is consulted
+        # first: classifying a prompt whose tier is about to be thrown
+        # away would be paid for and never used.
         overridden = self.traffic_manager.get_model_pair(prompt, kwargs)
         pair_from = "traffic_rule"
+
+        tier_from = ignored_tier = None
         if overridden is None:
+            tier, tier_from, ignored_tier = self._apply_intent_tier(prompt, tier)
             overridden = self._get_model_pair_for_prompt(prompt)
             pair_from = "middleware"
 
