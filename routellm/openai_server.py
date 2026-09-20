@@ -343,21 +343,25 @@ class ChatCompletionRequest(BaseModel):
         List[Dict[str, str]],
         List[Dict[str, Union[str, List[Dict[str, Union[str, Dict[str, str]]]]]]],
     ]
-    frequency_penalty: Optional[float] = 0.0
+    # Every optional field defaults to None so an unset one stays unset.
+    # A default value here would be manufactured into the litellm call,
+    # and a provider that does not accept the parameter rejects the whole
+    # request over a value the client never sent.
+    frequency_penalty: Optional[float] = None
     logit_bias: Optional[Dict[int, float]] = None
     logprobs: Optional[bool] = None
     top_logprobs: Optional[int] = None
     max_tokens: Optional[int] = None
-    n: Optional[int] = 1
-    presence_penalty: Optional[float] = 0.0
+    n: Optional[int] = None
+    presence_penalty: Optional[float] = None
     response_format: Optional[Dict[str, str]] = (
         None  # { "type": "json_object" } for json mode
     )
     seed: Optional[int] = None
     stop: Optional[Union[str, List[str]]] = None
-    stream: Optional[bool] = False
-    temperature: Optional[float] = 1.0
-    top_p: Optional[float] = 1.0
+    stream: Optional[bool] = None
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
     tools: Optional[List[Dict[str, Union[str, int, float]]]] = None
     tool_choice: Optional[str] = None
     user: Optional[str] = None
@@ -404,9 +408,22 @@ async def create_chat_completion(request: ChatCompletionRequest):
     shape the client parses.
     """
     logging.info(f"Received request: {request}")
+
+    # Only what the client actually sent is forwarded. `exclude_unset`
+    # drops the fields the body never named, `exclude_none` drops the
+    # ones it named as null, and `model` and `messages` are passed
+    # explicitly because routing rewrites the first and reads the second.
+    # `stream` stays in: the server reads it to pick the response shape,
+    # but litellm is what has to produce the chunks.
+    forwarded = request.model_dump(exclude_unset=True, exclude_none=True)
+    for handled in ("model", "messages"):
+        forwarded.pop(handled, None)
+
     try:
         res = await CONTROLLER.acompletion(
-            **request.model_dump(exclude_none=True),
+            model=request.model,
+            messages=request.messages,
+            **forwarded,
         )
     except RoutingError as e:
         return JSONResponse(
