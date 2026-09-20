@@ -502,11 +502,14 @@ class RandomRouter(Router):
         return res
 
 
+from routellm.routers.typesafe.router import JevRouter  # noqa: E402  # isort: skip
+
 ROUTER_CLS = {
     "random": RandomRouter,
     "mf": MatrixFactorizationRouter,
     "causal_llm": CausalLLMRouter,
     "bert": BERTRouter,
     "sw_ranking": SWRankingRouter,
+    "jev": JevRouter,
 }
 NAME_TO_CLS = {v: k for k, v in ROUTER_CLS.items()}
