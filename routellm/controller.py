@@ -258,6 +258,88 @@ class Controller:
                 return pair
         return None
 
+    def _get_tier_for_prompt(self, prompt: str) -> Optional[str]:
+        """Get the tier a middleware asks the request to enter, or None.
+
+        `get_tier` is optional on the middleware protocol, so it is
+        looked up with `getattr`: middleware written before the hook
+        carries only `get_model_pair` and is skipped here.
+
+        Parameters
+        ----------
+        prompt : str
+            The request's prompt.
+
+        Returns
+        -------
+        str or None
+            The first tier name a middleware names, or None when none
+            does.
+        """
+        for m in self.middleware:
+            hook = getattr(m, "get_tier", None)
+            if hook is None:
+                continue
+            tier = hook(prompt)
+            if tier:
+                return tier
+        return None
+
+    def _apply_intent_tier(
+        self, prompt: str, tier: Optional[str]
+    ) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        """Let a middleware choose the tier this request enters.
+
+        A tier named by a middleware replaces the addressed one only
+        when the addressed tier accepts intent routing, which the tier
+        named `default` does unless it says otherwise and every other
+        tier does only by declaring `intent_routing: true`. A request
+        that chose its tier by name is therefore never re-routed; the
+        tier that was passed over is reported so the path can carry it.
+
+        Parameters
+        ----------
+        prompt : str
+            The request's prompt.
+        tier : str, optional
+            Tier addressed by the model name, if any.
+
+        Returns
+        -------
+        tuple[str or None, str or None, str or None]
+            The tier to enter, where it came from (`"intent"`, or None
+            when the addressed tier stands), and the tier a middleware
+            named that was not honoured.
+
+        Raises
+        ------
+        RoutingError
+            If a middleware names a tier the registry does not carry.
+        """
+        if tier is None or not self.middleware:
+            return tier, None, None
+
+        chosen = self._get_tier_for_prompt(prompt)
+        if chosen is None:
+            return tier, None, None
+
+        if not self.endpoints.has_tier(chosen):
+            known = ", ".join(self.endpoints.tier_names()) or "<none>"
+            raise RoutingError(
+                f"Middleware selected unknown tier: {chosen}. "
+                f"Configured tiers: {known}"
+            )
+
+        if not self.endpoints.get_tier(tier).accepts_intent_routing():
+            logger.debug(
+                "tier %s does not accept intent routing; ignoring %s",
+                tier,
+                chosen,
+            )
+            return tier, None, chosen
+
+        return chosen, "intent", None
+
     def _parse_model_name(
         self, model_name: str
     ) -> tuple[Optional[str], Optional[str], Optional[float]]:
@@ -336,10 +418,12 @@ class Controller:
     ) -> tuple[str, list[dict[str, Any]], Optional[ModelPair]]:
         """Choose one endpoint for a prompt and record how it was chosen.
 
-        A traffic rule or a middleware that returns a pair bypasses the
-        tree: that pair is routed flat with the root level's resolved
-        router and threshold, and the path carries a single entry naming
-        where the pair came from.
+        A middleware may first name the tier to enter, which replaces
+        the addressed one when that one accepts intent routing. A
+        traffic rule or a middleware that returns a pair then bypasses
+        the tree entirely: that pair is routed flat with the root
+        level's resolved router and threshold, and the path carries a
+        single entry naming where the pair came from.
 
         Parameters
         ----------
@@ -376,6 +460,8 @@ class Controller:
             "default_threshold": self.default_threshold,
         }
 
+        tier, tier_from, ignored_tier = self._apply_intent_tier(prompt, tier)
+
         overridden = self.traffic_manager.get_model_pair(prompt, kwargs)
         pair_from = "traffic_rule"
         if overridden is None:
@@ -386,6 +472,10 @@ class Controller:
             picked, path = resolve_tier(
                 tier, prompt, inherited, self.endpoints, self._run_router
             )
+            if ignored_tier is not None:
+                path[0]["intent_ignored"] = ignored_tier
+            elif tier_from is not None:
+                path[0]["tier_from"] = tier_from
             return picked, path, None
 
         # A bypassed pair, or a controller with no tiers at all, routes

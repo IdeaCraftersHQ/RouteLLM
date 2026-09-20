@@ -209,6 +209,11 @@ class Tier(BaseModel):
         Router to run at this level. Inherited when None.
     threshold : float, optional
         Decision threshold in [0, 1] for this level. Inherited when None.
+    intent_routing : bool, optional
+        Whether a request addressed to this tier may be re-routed to
+        the tier an intent classifier picks. Unset means True for the
+        tier named `default` and False for every other, so an app that
+        chose a tier by name is never overruled by a classifier.
     strong : str or Selector
         Endpoint or tier taken when the win rate clears the threshold,
         or a `Selector` resolved to one at controller construction.
@@ -219,8 +224,23 @@ class Tier(BaseModel):
     name: str
     router: Optional[str] = None
     threshold: Optional[float] = Field(default=None, ge=0, le=1)
+    intent_routing: Optional[bool] = None
     strong: Union[str, Selector]
     weak: Union[str, Selector]
+
+    def accepts_intent_routing(self) -> bool:
+        """Return whether an intent may choose a tier in place of this one.
+
+        Returns
+        -------
+        bool
+            The declared `intent_routing` when this tier sets one,
+            otherwise True for the tier named `default` and False for
+            any other.
+        """
+        if self.intent_routing is not None:
+            return self.intent_routing
+        return self.name == "default"
 
     @field_validator("name")
     @classmethod
