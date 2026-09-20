@@ -73,6 +73,7 @@ __all__ = [
     "Selector",
     "catalog_provider_for",
     "rank_candidates",
+    "records_for_registry",
     "resolve_pairing",
     "resolve_registry_pairings",
 ]
@@ -768,6 +769,43 @@ def _blocks_answer(
 # ---------------------------------------------------------------------------
 # Resolution
 # ---------------------------------------------------------------------------
+
+
+def records_for_registry(
+    registry: EndpointRegistry,
+) -> dict[str, ModelRecord]:
+    """Return the catalog record for each endpoint that has one.
+
+    Never raises: the capability index is an optimisation, and an
+    endpoint with no record simply answers from its own block. A failed
+    fetch yields an empty mapping and one DEBUG line.
+
+    Parameters
+    ----------
+    registry : EndpointRegistry
+        Registry whose endpoints are looked up.
+
+    Returns
+    -------
+    dict[str, ModelRecord]
+        Endpoint name to its models.dev record.
+    """
+    try:
+        by_key = _index_catalog(load_catalog())
+    except CatalogUnavailable as exc:
+        logger.debug("no models.dev catalog for the capability index: %s", exc)
+        return {}
+
+    found: dict[str, ModelRecord] = {}
+    for name in registry.names():
+        key = catalog_provider_for(registry.get(name).model)
+        if key is None:
+            continue
+        record = by_key.get(key)
+        if record is not None:
+            found[name] = record
+
+    return found
 
 
 def resolve_pairing(registry: EndpointRegistry, selector: Selector) -> str:

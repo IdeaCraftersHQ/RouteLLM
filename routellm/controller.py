@@ -15,7 +15,15 @@ import pandas as pd
 from litellm import acompletion, completion
 from tqdm import tqdm
 
+from routellm import requirements as requirements_module
 from routellm.caching import Cache, CacheConfig
+from routellm.capabilities import (
+    build_tier_index,
+    catalog_records,
+    satisfies,
+    side_capabilities,
+    usable_sibling,
+)
 from routellm.endpoints import EndpointRegistry, Selector
 from routellm.hints import TYPESAFE_INSTALL_HINT
 from routellm.payment.gateway import PaymentGateway
@@ -24,7 +32,13 @@ from routellm.quality import QualityManager
 from routellm.resilience import Resilience, ResilienceConfig
 from routellm.routers.embeddings import configure_embeddings
 from routellm.routers.routers import ROUTER_CLS
-from routellm.routing import parse_model_name, resolve_level, resolve_tier, sibling_of
+from routellm.routing import (
+    forced_side,
+    parse_model_name,
+    resolve_level,
+    resolve_tier,
+    sibling_of,
+)
 from routellm.traffic import TrafficManager
 from routellm.types import Middleware, ModelPair
 
@@ -155,6 +169,11 @@ class Controller:
 
             resolve_registry_pairings(self.endpoints)
             self.endpoints.revalidate()
+
+        # Every tier side is a name now, so the capability fold sees
+        # only leaves. Built once: a config change means a restart.
+        self._catalog_records = catalog_records(self.endpoints)
+        self._tier_caps = build_tier_index(self.endpoints, self._catalog_records)
 
         for label, name in (("strong_model", strong_model), ("weak_model", weak_model)):
             if name is not None and self.endpoints.has_tier(name):
@@ -412,6 +431,21 @@ class Controller:
 
         return scored(prompt, threshold, pair)
 
+    def _can_serve(self, name: str, reqs) -> Optional[str]:
+        """Return the first requirement `name` cannot serve, or None.
+
+        A tier reads its cached union and is never strict: a tier is
+        not an endpoint, and its union already assumes the best of
+        every reachable leaf. See `capabilities.satisfies`.
+        """
+        caps = side_capabilities(
+            name, self.endpoints, self._tier_caps, self._catalog_records
+        )
+        strict = not self.endpoints.has_tier(name) and bool(
+            getattr(self.endpoints.resolve(name), "strict", False)
+        )
+        return satisfies(caps, reqs, strict, name)
+
     def _route(
         self,
         prompt: str,
@@ -419,6 +453,7 @@ class Controller:
         tier: Optional[str],
         router: Optional[str],
         threshold: Optional[float],
+        reqs=None,
     ) -> tuple[str, list[dict[str, Any]], Optional[ModelPair]]:
         """Choose one endpoint for a prompt and record how it was chosen.
 
@@ -441,6 +476,9 @@ class Controller:
             Request-level router from the model name, if any.
         threshold : float, optional
             Request-level threshold from the model name, if any.
+        reqs : Requirements, optional
+            What the request needs. None, or an empty one, leaves every
+            level's router call where it was.
 
         Returns
         -------
@@ -478,7 +516,14 @@ class Controller:
 
         if overridden is None and tier is not None:
             picked, path = resolve_tier(
-                tier, prompt, inherited, self.endpoints, self._run_router
+                tier,
+                prompt,
+                inherited,
+                self.endpoints,
+                self._run_router,
+                requirements=reqs,
+                check=self._can_serve,
+                error_cls=RoutingError,
             )
             if ignored_tier is not None:
                 path[0]["intent_ignored"] = ignored_tier
@@ -502,9 +547,21 @@ class Controller:
                 "no strong_model/weak_model pair."
             )
 
-        picked, win_rate = self._run_router(
-            level["router"], level["threshold"], prompt, pair
+        forced = forced_side(
+            pair_from if overridden is not None else "the configured pair",
+            str(pair.strong),
+            str(pair.weak),
+            reqs,
+            self._can_serve,
+            RoutingError,
         )
+
+        if forced is None:
+            picked, win_rate = self._run_router(
+                level["router"], level["threshold"], prompt, pair
+            )
+        else:
+            picked, win_rate = forced[0], None
 
         entry = {
             "tier": None,
@@ -515,6 +572,9 @@ class Controller:
             "win_rate": win_rate,
             "picked": picked,
         }
+        if forced is not None:
+            entry["capability_forced"] = forced[1]
+            entry["capability_requirement"] = forced[2]
         if overridden is not None:
             entry["pair_from"] = pair_from
 
@@ -525,6 +585,7 @@ class Controller:
         picked: str,
         path: list[dict[str, Any]],
         pair: Optional[ModelPair],
+        reqs=None,
     ) -> tuple[str, list[str], Optional[str], Optional[str]]:
         """Build the fallback chain for one request.
 
@@ -542,6 +603,9 @@ class Controller:
             The pair the final level chose between when that level is a
             flat one, so the fallback stays inside the pair the request
             was routed against rather than the controller's default.
+        reqs : Requirements, optional
+            What the request needs; a sibling that cannot serve it is
+            dropped. See `capabilities.usable_sibling`.
 
         Returns
         -------
@@ -561,6 +625,9 @@ class Controller:
 
         found = sibling_of(path, self.endpoints, pair)
         sibling, reference = found if found is not None else (None, None)
+
+        if not usable_sibling(sibling, reqs, self._can_serve):
+            sibling, reference = None, None
 
         if sibling is not None and sibling not in models_to_try:
             models_to_try.append(sibling)
@@ -739,18 +806,21 @@ class Controller:
         else:
             request_name = router
 
-        prompt = kwargs["messages"][-1]["content"]
+        # A vision request's content is a list; routers want a string.
+        prompt = requirements_module._prompt_text(kwargs["messages"])
+        reqs = requirements_module.derive(kwargs["messages"], kwargs, request_name)
 
         # 1. Route: traffic rules and middleware bypass the tree, a tier
-        #    walks it, and a bare pair routes flat.
+        #    walks it, and a bare pair routes flat. Each side is checked
+        #    for fitness before its router runs.
         routed_model, path, effective_pair = self._route(
-            prompt, kwargs, tier, router, threshold
+            prompt, kwargs, tier, router, threshold, reqs
         )
 
         # 2. Apply canary testing and build the fallback chain, which
         #    stays inside the pair this request was routed against.
         model_to_use, models_to_try, sibling, sibling_reference = self._models_to_try(
-            routed_model, path, effective_pair
+            routed_model, path, effective_pair, reqs
         )
         is_canary = model_to_use != routed_model
 
@@ -830,18 +900,21 @@ class Controller:
         else:
             request_name = router
 
-        prompt = kwargs["messages"][-1]["content"]
+        # A vision request's content is a list; routers want a string.
+        prompt = requirements_module._prompt_text(kwargs["messages"])
+        reqs = requirements_module.derive(kwargs["messages"], kwargs, request_name)
 
         # 1. Route: traffic rules and middleware bypass the tree, a tier
-        #    walks it, and a bare pair routes flat.
+        #    walks it, and a bare pair routes flat. Each side is checked
+        #    for fitness before its router runs.
         routed_model, path, effective_pair = self._route(
-            prompt, kwargs, tier, router, threshold
+            prompt, kwargs, tier, router, threshold, reqs
         )
 
         # 2. Apply canary testing and build the fallback chain, which
         #    stays inside the pair this request was routed against.
         model_to_use, models_to_try, sibling, sibling_reference = self._models_to_try(
-            routed_model, path, effective_pair
+            routed_model, path, effective_pair, reqs
         )
         is_canary = model_to_use != routed_model
 
