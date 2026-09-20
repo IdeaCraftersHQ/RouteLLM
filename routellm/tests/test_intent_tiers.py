@@ -24,6 +24,7 @@ from routellm.middleware.intent_model_selector import (
     IntentModelMapping,
 )
 from routellm.routers.base import Router
+from routellm.traffic import TrafficManager, TrafficRule
 from routellm.types import ModelPair
 
 CONFIG = {
@@ -94,6 +95,18 @@ class _TierMiddleware:
 
     def get_model_pair(self, prompt):
         return None
+
+
+class _CountingTierMiddleware(_TierMiddleware):
+    """Tier middleware counting how often it was asked."""
+
+    def __init__(self, tier):
+        super().__init__(tier)
+        self.calls = 0
+
+    def get_tier(self, prompt):
+        self.calls += 1
+        return self.tier
 
 
 def _controller(middleware, hi_router):
@@ -182,6 +195,33 @@ def test_an_unknown_tier_from_the_middleware_is_an_error(hi_router):
 
     with pytest.raises(routellm.controller.RoutingError, match="nope"):
         controller._route("hi", {}, "default", None, None)
+
+
+def test_a_traffic_rule_skips_the_classifier_entirely(hi_router):
+    """A fully bypassed request must not pay for a classification."""
+    middleware = _CountingTierMiddleware("premium")
+    controller = Controller(
+        routers=["hi"],
+        endpoints=EndpointRegistry.from_config(CONFIG),
+        middleware=[middleware],
+        traffic_manager=TrafficManager(
+            rules=[
+                TrafficRule(
+                    pattern="special",
+                    strong_model="cloud_strong",
+                    weak_model="local_fast",
+                )
+            ]
+        ),
+        default_router="hi",
+        default_threshold=0.5,
+        progress_bar=False,
+    )
+
+    picked, path, pair = controller._route("this is special", {}, "default", None, None)
+
+    assert path[0]["pair_from"] == "traffic_rule"
+    assert middleware.calls == 0
 
 
 def test_a_middleware_pair_still_bypasses_the_tree(hi_router):
@@ -339,6 +379,13 @@ def test_a_mapping_to_a_missing_tier_is_rejected(registry, server_config):
     config = {"intents": {"detector": "litellm", "tiers": {"legal": "ghost"}}}
 
     with pytest.raises(ValueError, match="legal.*ghost"):
+        server_config.build_intents(config, registry)
+
+
+def test_an_intents_section_without_tiers_is_rejected(registry, server_config):
+    config = {"intents": {"detector": "litellm", "descriptions": {"legal": "x"}}}
+
+    with pytest.raises(ValueError, match="non-empty `tiers` mapping"):
         server_config.build_intents(config, registry)
 
 
