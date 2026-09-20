@@ -93,6 +93,15 @@ PROVIDER_ALIASES: dict[str, Optional[str]] = {
     "xai": "xai",
     "together_ai": "togetherai",
     "fireworks_ai": "fireworks-ai",
+    # models.dev namespaces every openrouter id by its vendor, and
+    # litellm strips only its own `openrouter/` prefix, so what is left
+    # of `openrouter/deepseek/deepseek-chat` is already the catalog id
+    # `deepseek/deepseek-chat`. No extra splitting is needed.
+    "openrouter": "openrouter",
+    # litellm routes chat completions as `cohere_chat` and embeddings as
+    # bare `cohere`; models.dev lists both under `cohere`, with bare ids.
+    "cohere": "cohere",
+    "cohere_chat": "cohere",
     "ollama": None,
     "ollama_chat": None,
 }
