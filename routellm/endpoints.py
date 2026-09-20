@@ -21,6 +21,17 @@ Credentials are never stored: `api_key_env` names an environment
 variable that is read at call time, so a config loads on a machine
 that holds none of the keys.
 
+A tier names a strong/weak pair whose sides may themselves be tiers, so
+a request addressed to a tier walks a tree, one router call per level::
+
+    tiers:
+      premium: {router: jev, threshold: 0.33, strong: cloud_strong, weak: frontier_local}
+      default: {router: mf,  threshold: 0.12, strong: premium,      weak: local_fast}
+
+Tier and endpoint names share one namespace and are validated together
+at load: every side must name a known endpoint or tier, the graph must
+be acyclic, and it may not nest deeper than `MAX_TIER_DEPTH` levels.
+
 Names are restricted to `[A-Za-z0-9_]+`; hyphens are reserved for the
 model-name grammar that splits on '-'.
 """
@@ -35,6 +46,8 @@ from pydantic import BaseModel, Field, field_validator
 logger = logging.getLogger(__name__)
 
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
+
+MAX_TIER_DEPTH = 4
 
 
 class Endpoint(BaseModel):
@@ -128,6 +141,51 @@ class Endpoint(BaseModel):
         return api_base, api_key
 
 
+class Tier(BaseModel):
+    """A named strong/weak pair whose sides may be tiers themselves.
+
+    Router and threshold are optional: a tier that names neither takes
+    them from the level above it, then from the request, then from the
+    controller defaults.
+
+    Attributes
+    ----------
+    name : str
+        Tier name, matching `[A-Za-z0-9_]+`.
+    router : str, optional
+        Router to run at this level. Inherited when None.
+    threshold : float, optional
+        Decision threshold in [0, 1] for this level. Inherited when None.
+    strong : str
+        Endpoint or tier taken when the win rate clears the threshold.
+    weak : str
+        Endpoint or tier taken otherwise.
+    """
+
+    name: str
+    router: Optional[str] = None
+    threshold: Optional[float] = Field(default=None, ge=0, le=1)
+    strong: str
+    weak: str
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, value: str) -> str:
+        if not NAME_PATTERN.match(value):
+            raise ValueError(
+                f"Invalid tier name: {value!r}. "
+                "Names must match [A-Za-z0-9_]+ (no hyphens)."
+            )
+        return value
+
+    @field_validator("strong", "weak")
+    @classmethod
+    def _validate_reference(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Tier strong and weak must be non-empty strings")
+        return value
+
+
 class EndpointRegistry:
     """Lookup of endpoints by name, with raw-model passthrough.
 
@@ -136,44 +194,175 @@ class EndpointRegistry:
     no credential, so calls written against model names keep working.
     """
 
-    def __init__(self, endpoints: Optional[dict[str, Endpoint]] = None):
+    def __init__(
+        self,
+        endpoints: Optional[dict[str, Endpoint]] = None,
+        tiers: Optional[dict[str, Tier]] = None,
+    ):
         """Initialize the registry.
 
         Parameters
         ----------
         endpoints : dict[str, Endpoint], optional
             Endpoints keyed by name. Empty when None.
+        tiers : dict[str, Tier], optional
+            Tiers keyed by name. Empty when None. Validated here, so a
+            registry built directly is held to the same rules as one
+            built from a config.
+
+        Raises
+        ------
+        ValueError
+            If a name is both an endpoint and a tier, a tier side names
+            neither, the tier graph has a cycle, or it nests deeper than
+            `MAX_TIER_DEPTH`.
         """
         self._endpoints: dict[str, Endpoint] = dict(endpoints or {})
+        self._tiers: dict[str, Tier] = dict(tiers or {})
         self._warned: set[str] = set()
+
+        self._validate_tiers()
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> "EndpointRegistry":
         """Build a registry from a loaded config dict.
 
-        Reads only the `endpoints:` key; every other top-level key is
-        left to its own owner.
+        Reads the `endpoints:` and `tiers:` keys; every other top-level
+        key is left to its own owner.
 
         Parameters
         ----------
         config : dict
-            Loaded YAML config. An absent `endpoints:` key yields an
-            empty registry.
+            Loaded YAML config. Absent keys yield empty collections.
 
         Returns
         -------
         EndpointRegistry
-            Registry holding one `Endpoint` per configured name.
+            Registry holding one `Endpoint` and one `Tier` per
+            configured name.
+
+        Raises
+        ------
+        ValueError
+            If any endpoint or tier is malformed, or the tier graph
+            fails validation.
         """
-        raw = (config or {}).get("endpoints") or {}
+        config = config or {}
+
+        raw_endpoints = config.get("endpoints") or {}
         endpoints = {
-            name: Endpoint(name=name, **(spec or {})) for name, spec in raw.items()
+            name: Endpoint(name=name, **(spec or {}))
+            for name, spec in raw_endpoints.items()
         }
-        return cls(endpoints)
+
+        raw_tiers = config.get("tiers") or {}
+        tiers = {
+            name: Tier(name=name, **(spec or {})) for name, spec in raw_tiers.items()
+        }
+
+        return cls(endpoints, tiers)
+
+    def _validate_tiers(self) -> None:
+        """Check the tier namespace, its references, cycles, and depth."""
+        if not self._tiers:
+            return
+
+        collisions = sorted(set(self._tiers) & set(self._endpoints))
+        if collisions:
+            raise ValueError(
+                "Names are both a tier and an endpoint: "
+                f"{', '.join(collisions)}. Tier and endpoint names must "
+                "be distinct."
+            )
+
+        for tier in self._tiers.values():
+            for side, reference in (("strong", tier.strong), ("weak", tier.weak)):
+                if reference in self._tiers or reference in self._endpoints:
+                    continue
+                known = ", ".join(sorted(self._tiers) + self.names()) or "<none>"
+                raise ValueError(
+                    f"Tier {tier.name!r} names unknown {side} {reference!r}. "
+                    f"Known tiers and endpoints: {known}"
+                )
+
+        for name in sorted(self._tiers):
+            self._walk(name, [])
+
+    def _walk(self, name: str, ancestors: list[str]) -> None:
+        """Depth-first check of one tier for cycles and excess depth.
+
+        Parameters
+        ----------
+        name : str
+            Tier being entered.
+        ancestors : list[str]
+            Tiers already on this path, outermost first.
+
+        Raises
+        ------
+        ValueError
+            If `name` is already on the path, or entering it would
+            exceed `MAX_TIER_DEPTH` tier levels.
+        """
+        if name in ancestors:
+            cycle = ancestors[ancestors.index(name):] + [name]
+            raise ValueError(f"Tier cycle: {' -> '.join(cycle)}")
+
+        path = ancestors + [name]
+        if len(path) > MAX_TIER_DEPTH:
+            raise ValueError(
+                f"Tier nesting exceeds the maximum depth of {MAX_TIER_DEPTH}: "
+                f"{' -> '.join(path)}"
+            )
+
+        tier = self._tiers[name]
+        for reference in (tier.strong, tier.weak):
+            if reference in self._tiers:
+                self._walk(reference, path)
+
+    @property
+    def tiers(self) -> dict[str, Tier]:
+        """Return a copy of the configured tiers, keyed by name."""
+        return dict(self._tiers)
 
     def names(self) -> list[str]:
         """Return the configured endpoint names, sorted."""
         return sorted(self._endpoints)
+
+    def tier_names(self) -> list[str]:
+        """Return the configured tier names, sorted."""
+        return sorted(self._tiers)
+
+    def has_tier(self, name: str) -> bool:
+        """Return whether `name` is a configured tier."""
+        return name in self._tiers
+
+    def get_tier(self, name: str) -> Tier:
+        """Return the tier registered under `name`.
+
+        Parameters
+        ----------
+        name : str
+            Tier name.
+
+        Returns
+        -------
+        Tier
+            The registered tier.
+
+        Raises
+        ------
+        KeyError
+            If no tier carries that name. The message lists the known
+            names.
+        """
+        try:
+            return self._tiers[name]
+        except KeyError:
+            known = ", ".join(self.tier_names()) or "<none>"
+            raise KeyError(
+                f"Unknown tier: {name}. Configured tiers: {known}"
+            ) from None
 
     def get(self, name: str) -> Endpoint:
         """Return the endpoint registered under `name`.
