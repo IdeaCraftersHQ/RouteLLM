@@ -85,6 +85,39 @@ FAKE_CATALOG = [
         context=200000,
         release_date="2025-05-22",
     ),
+    # models.dev namespaces every openrouter id by its vendor.
+    _record(
+        "openrouter",
+        "deepseek/deepseek-chat",
+        cost_input=0.32,
+        cost_output=0.89,
+        tool_call=True,
+        reasoning=False,
+        context=64000,
+        release_date="2025-03-24",
+    ),
+    # cohere ids are bare, and litellm's `cohere_chat` maps onto them.
+    _record(
+        "cohere",
+        "command-a-03-2025",
+        cost_input=2.5,
+        cost_output=10.0,
+        tool_call=True,
+        reasoning=False,
+        context=256000,
+        release_date="2025-03-13",
+    ),
+    # A foil for the alias tests: listed, but no tool calls.
+    _record(
+        "openai",
+        "gpt-4o-mini-no-tools",
+        cost_input=0.15,
+        cost_output=0.6,
+        tool_call=False,
+        reasoning=False,
+        context=128000,
+        release_date="2024-07-18",
+    ),
 ]
 
 CONFIG = {
@@ -523,6 +556,76 @@ def test_provider_mapping_aliases_gemini_to_google():
         "google",
         "gemini-2.0-flash",
     )
+
+
+def test_provider_mapping_keeps_the_openrouter_namespace():
+    """openrouter catalog ids carry the vendor, and so must the mapping.
+
+    Every models.dev id under the `openrouter` provider is namespaced
+    `<vendor>/<model>`, and litellm strips only its own `openrouter/`
+    prefix, so the remainder is already the catalog id.
+    """
+    assert catalog_provider_for("openrouter/deepseek/deepseek-chat") == (
+        "openrouter",
+        "deepseek/deepseek-chat",
+    )
+
+
+def test_provider_mapping_aliases_cohere_chat_to_cohere():
+    """litellm's `cohere_chat` is models.dev's `cohere`, id unchanged."""
+    assert catalog_provider_for("cohere_chat/command-a-03-2025") == (
+        "cohere",
+        "command-a-03-2025",
+    )
+
+
+def test_provider_mapping_aliases_the_bare_cohere_route():
+    """litellm also emits a bare `cohere` provider; it is the same catalog."""
+    assert catalog_provider_for("cohere/embed-english-v3.0") == (
+        "cohere",
+        "embed-english-v3.0",
+    )
+
+
+def test_an_openrouter_endpoint_satisfies_a_catalog_term(catalog, cache_dir):
+    """An openrouter model reaches the catalog, so it can match on facts.
+
+    Before openrouter was aliased it was a tag-only candidate: it
+    failed every catalog term, and a config had to carry a hand-written
+    capability tag to keep it selectable. Its record now answers for it.
+    """
+    registry = EndpointRegistry.from_config(
+        {
+            "endpoints": {
+                "via_openrouter": {
+                    "model": "openrouter/deepseek/deepseek-chat",
+                    "tags": ["cloud"],
+                },
+                "no_tools": {"model": "gpt-4o-mini-no-tools", "tags": ["cloud"]},
+            }
+        }
+    )
+
+    assert resolve_pairing(registry, Selector(select="tool_call:true")) == (
+        "via_openrouter"
+    )
+
+
+def test_a_cohere_endpoint_satisfies_a_catalog_term(catalog, cache_dir):
+    """The same for cohere, which models.dev lists under bare ids."""
+    registry = EndpointRegistry.from_config(
+        {
+            "endpoints": {
+                "via_cohere": {
+                    "model": "cohere_chat/command-a-03-2025",
+                    "tags": ["cloud"],
+                },
+                "no_tools": {"model": "gpt-4o-mini-no-tools", "tags": ["cloud"]},
+            }
+        }
+    )
+
+    assert resolve_pairing(registry, Selector(select="tool_call:true")) == "via_cohere"
 
 
 def test_provider_mapping_logged_at_debug(caplog):
