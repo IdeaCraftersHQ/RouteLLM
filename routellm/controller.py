@@ -323,8 +323,11 @@ class Controller:
 
         Returns
         -------
-        tuple[str, list[dict]]
-            The endpoint name to call, and the decision path.
+        tuple[str, list[dict], ModelPair or None]
+            The endpoint name to call, the decision path, and the pair
+            the final level chose between when that level is a flat one.
+            None when the walk ended inside the tier tree, whose sides
+            the path already names.
 
         Raises
         ------
@@ -347,9 +350,10 @@ class Controller:
             pair_from = "middleware"
 
         if overridden is None and tier is not None:
-            return resolve_tier(
+            picked, path = resolve_tier(
                 tier, prompt, inherited, self.endpoints, self._run_router
             )
+            return picked, path, None
 
         # A bypassed pair, or a controller with no tiers at all, routes
         # flat at the root level's resolved values.
@@ -383,14 +387,14 @@ class Controller:
         if overridden is not None:
             entry["pair_from"] = pair_from
 
-        return picked, [entry]
+        return picked, [entry], pair
 
     def _models_to_try(
         self,
         picked: str,
         path: list[dict[str, Any]],
         pair: Optional[ModelPair],
-    ) -> tuple[str, list[str], Optional[str]]:
+    ) -> tuple[str, list[str], Optional[str], Optional[str]]:
         """Build the fallback chain for one request.
 
         Order: the canary when one fires, the picked leaf, then the
@@ -404,13 +408,16 @@ class Controller:
         path : list[dict]
             The decision path, whose last tier entry names the sibling.
         pair : ModelPair or None
-            The flat pair, when the tree was bypassed or absent.
+            The pair the final level chose between when that level is a
+            flat one, so the fallback stays inside the pair the request
+            was routed against rather than the controller's default.
 
         Returns
         -------
-        tuple[str, list[str], str or None]
+        tuple[str, list[str], str or None, str or None]
             The endpoint the request is attributed to, the ordered names
-            to try, and the name the sibling was written under.
+            to try, the sibling endpoint itself, and the name it was
+            written under.
         """
         if self.quality_manager.should_canary():
             model_to_use = self.quality_manager.canary_config.canary_model
@@ -421,32 +428,31 @@ class Controller:
         if picked not in models_to_try:
             models_to_try.append(picked)
 
-        found = sibling_of(path, self.endpoints)
-        if found is not None:
-            sibling, reference = found
-        elif pair is not None:
-            sibling = pair.weak if picked == pair.strong else pair.strong
-            reference = sibling
-        else:
-            sibling, reference = None, None
+        found = sibling_of(path, self.endpoints, pair)
+        sibling, reference = found if found is not None else (None, None)
 
         if sibling is not None and sibling not in models_to_try:
             models_to_try.append(sibling)
 
-        return model_to_use, models_to_try, reference
+        return model_to_use, models_to_try, sibling, reference
 
     def _attach_path(
         self,
         res,
         path: list[dict[str, Any]],
         used: str,
-        picked: str,
+        sibling: Optional[str],
         sibling_reference: Optional[str],
     ):
         """Log the decision path and attach it to a response.
 
         Recorded in `_hidden_params` only: an extra attribute would leak
         into the cached `model_dump()`.
+
+        `fallback_from` is written only when the sibling is what
+        answered. A canary also differs from the pick, but it is the
+        intended target of its request rather than a fallback, so it
+        leaves the path unlabelled.
 
         Parameters
         ----------
@@ -455,11 +461,11 @@ class Controller:
         path : list[dict]
             The decision path.
         used : str
-            Endpoint that answered, which may be a fallback.
-        picked : str
-            Endpoint the routing decision landed on.
+            Endpoint that answered.
+        sibling : str or None
+            The fallback endpoint for this request, if it has one.
         sibling_reference : str or None
-            Name the sibling was written under on its tier, recorded as
+            Name that sibling was written under on its tier, recorded as
             `fallback_from` when the sibling is what answered.
 
         Returns
@@ -468,8 +474,8 @@ class Controller:
             The same response.
         """
         final = [dict(entry) for entry in path]
-        if final and used != picked:
-            final[-1]["fallback_from"] = sibling_reference or used
+        if final and sibling is not None and used == sibling:
+            final[-1]["fallback_from"] = sibling_reference or sibling
 
         logger.info("routing path: %s -> %s", final, used)
 
@@ -606,11 +612,14 @@ class Controller:
 
         # 1. Route: traffic rules and middleware bypass the tree, a tier
         #    walks it, and a bare pair routes flat.
-        routed_model, path = self._route(prompt, kwargs, tier, router, threshold)
+        routed_model, path, effective_pair = self._route(
+            prompt, kwargs, tier, router, threshold
+        )
 
-        # 2. Apply canary testing and build the fallback chain.
-        model_to_use, models_to_try, sibling_reference = self._models_to_try(
-            routed_model, path, self.default_model_pair
+        # 2. Apply canary testing and build the fallback chain, which
+        #    stays inside the pair this request was routed against.
+        model_to_use, models_to_try, sibling, sibling_reference = self._models_to_try(
+            routed_model, path, effective_pair
         )
         is_canary = model_to_use != routed_model
 
@@ -625,7 +634,7 @@ class Controller:
             # Record trace for cached response too
             self.quality_manager.record_trace(prompt, model_to_use, res.model_dump(), {"cached": True, "is_canary": is_canary})
             return self._attach_path(
-                res, path, model_to_use, routed_model, sibling_reference
+                res, path, model_to_use, sibling, sibling_reference
             )
 
         last_err = None
@@ -662,7 +671,7 @@ class Controller:
                 self.quality_manager.record_trace(prompt, model_name, res.model_dump(), {"is_canary": is_canary and model_name == model_to_use})
 
                 return self._attach_path(
-                    res, path, model_name, routed_model, sibling_reference
+                    res, path, model_name, sibling, sibling_reference
                 )
             except Exception as e:
                 import logging
@@ -694,11 +703,14 @@ class Controller:
 
         # 1. Route: traffic rules and middleware bypass the tree, a tier
         #    walks it, and a bare pair routes flat.
-        routed_model, path = self._route(prompt, kwargs, tier, router, threshold)
+        routed_model, path, effective_pair = self._route(
+            prompt, kwargs, tier, router, threshold
+        )
 
-        # 2. Apply canary testing and build the fallback chain.
-        model_to_use, models_to_try, sibling_reference = self._models_to_try(
-            routed_model, path, self.default_model_pair
+        # 2. Apply canary testing and build the fallback chain, which
+        #    stays inside the pair this request was routed against.
+        model_to_use, models_to_try, sibling, sibling_reference = self._models_to_try(
+            routed_model, path, effective_pair
         )
         is_canary = model_to_use != routed_model
 
@@ -713,7 +725,7 @@ class Controller:
             # Record trace for cached response too
             self.quality_manager.record_trace(prompt, model_to_use, res.model_dump(), {"cached": True, "is_canary": is_canary})
             return self._attach_path(
-                res, path, model_to_use, routed_model, sibling_reference
+                res, path, model_to_use, sibling, sibling_reference
             )
 
         last_err = None
@@ -761,7 +773,7 @@ class Controller:
                 self.quality_manager.record_trace(prompt, model_name, res.model_dump(), {"is_canary": is_canary and model_name == model_to_use})
 
                 return self._attach_path(
-                    res, path, model_name, routed_model, sibling_reference
+                    res, path, model_name, sibling, sibling_reference
                 )
             except Exception as e:
                 import logging
