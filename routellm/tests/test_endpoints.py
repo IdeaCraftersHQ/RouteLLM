@@ -66,7 +66,7 @@ def test_from_config_without_endpoints_key_is_empty():
 
 
 def test_from_config_ignores_unknown_top_level_keys():
-    config = {"tiers": {"fast": {}}, "mf": {"checkpoint_path": "x"}, **CONFIG}
+    config = {"routers": ["mf"], "mf": {"checkpoint_path": "x"}, **CONFIG}
 
     assert EndpointRegistry.from_config(config).names() == [
         "cloud_strong",
