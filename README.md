@@ -384,7 +384,7 @@ We welcome contributions! Please feel free to open an issue or a pull request if
 
 ### Adding a new router
 
-To add a new router to RouteLLM, implement the abstract `Router` class in `routers.py` and add the new router to the `ROUTER_CLS` dictionary. Then, you can use immediately the new router in the server or evaluation framework.
+To add a new router to RouteLLM, implement the abstract `Router` class from `routellm/routers/base.py` and register the new router in the `ROUTER_CLS` dictionary in `routers.py`. Then, you can use immediately the new router in the server or evaluation framework.
 
 There is only a single method to implement: `calculate_strong_win_rate`, which takes in the user prompt and returns the win rate for the strong model conditioned on that given prompt - if this win rate is great than user-specified cost threshold, then the request is routed to the strong model. Otherwise, it is routed to the weak model.
 
