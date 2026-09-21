@@ -347,3 +347,74 @@ def test_every_intent_carries_a_description(config):
 
     for intent in intents["tiers"]:
         assert descriptions.get(intent), f"intent {intent!r} has no description"
+
+
+# ---------------------------------------------------------------------------
+# Capabilities
+# ---------------------------------------------------------------------------
+
+#: The tags that used to carry capability meaning. They still work for
+#: one release, with a warning, but the example must not rely on them.
+DEPRECATED_CAPABILITY_TAGS = ("tools", "vision", "long_context")
+
+
+def test_no_endpoint_uses_a_deprecated_capability_tag(config):
+    """Capability is the typed block now; tags carry the other axes."""
+    for name, endpoint in config["endpoints"].items():
+        tags = endpoint.get("tags") or []
+        for tag in DEPRECATED_CAPABILITY_TAGS:
+            assert tag not in tags, (
+                f"endpoint {name!r} still carries the deprecated "
+                f"capability tag {tag!r}; write a capabilities: block"
+            )
+
+
+def test_every_local_endpoint_declares_its_capabilities(config):
+    """models.dev knows no local runtime, so each states its own facts."""
+    for name, endpoint in config["endpoints"].items():
+        model = endpoint["model"]
+        if not model.startswith(("ollama_chat/", "ollama/", "openai/<")):
+            continue
+
+        capabilities = endpoint.get("capabilities")
+        assert capabilities, (
+            f"local endpoint {name!r} declares no capabilities: block, so "
+            "every capability term drops it silently"
+        )
+        for field in ("vision", "tools", "context"):
+            assert field in capabilities, (
+                f"local endpoint {name!r} leaves {field!r} unknown"
+            )
+
+
+def test_the_capability_selector_resolves_against_the_fake_catalog(resolved):
+    """The `vision` tier exercises the capability grammar end to end."""
+    assert resolved.has_tier("vision")
+
+    tier = resolved.get_tier("vision")
+    for side in ("strong", "weak"):
+        name = getattr(tier, side)
+        assert isinstance(name, str)
+        assert name in resolved.names()
+
+    # Both sides must be known to take images: an unknown capability
+    # fails the term, so anything the selector kept declares vision.
+    from routellm.capabilities import capabilities_for
+
+    for side in ("strong", "weak"):
+        endpoint = resolved.get(getattr(tier, side))
+        record = _record_for(endpoint.model)
+        assert capabilities_for(endpoint, record).vision is True
+
+
+def _record_for(model):
+    """Return the fake catalog record for a litellm model name, if any."""
+    from routellm.pairing import catalog_provider_for
+
+    key = catalog_provider_for(model)
+    if key is None:
+        return None
+    for record in FAKE_CATALOG:
+        if (record.provider, record.id) == key:
+            return record
+    return None
