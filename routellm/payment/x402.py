@@ -101,7 +101,7 @@ class X402Adapter(PaymentGateway):
 
         return x402HTTPClient(client)
 
-    def build_session(self, transport=None):
+    def build_session(self, transport=None, scope=None):
         """Build an httpx client that settles 402s before returning.
 
         The payment cycle needs the response headers, the response body
@@ -121,17 +121,33 @@ class X402Adapter(PaymentGateway):
             Transport that actually reaches the provider. Defaults to
             httpx's own, which is what a live run uses; a test passes a
             stand-in so no socket is opened.
+        scope : PaymentScope, optional
+            Base URLs a payment may be signed for. When given, a
+            request outside it never reaches the payment cycle and a
+            402 from it is returned unpaid. None leaves the session
+            unscoped, which is only ever right for a caller that has
+            already narrowed the client to one upstream.
 
         Returns
         -------
         httpx.AsyncClient
-            Client whose requests pay and retry on a 402.
+            Client whose requests pay and retry on a 402, within the
+            scope when one was given.
         """
         import httpx
         from x402.http.clients.httpx import x402AsyncTransport
 
+        client = self._build_client()
+
+        if scope is None:
+            return httpx.AsyncClient(
+                transport=x402AsyncTransport(client, transport)
+            )
+
+        from routellm.payment.scope import scoped_payment_transport
+
         return httpx.AsyncClient(
-            transport=x402AsyncTransport(self._build_client(), transport)
+            transport=scoped_payment_transport(scope, client, transport)
         )
 
     async def pay(self, challenge: PaymentChallenge) -> PaymentReceipt:
