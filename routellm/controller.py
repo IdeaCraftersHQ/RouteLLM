@@ -662,13 +662,52 @@ class Controller:
         if not (0 <= threshold <= 1):
             raise RoutingError(f"Threshold {threshold} must be between 0 and 1.")
 
+    @staticmethod
+    def _is_402(exc) -> bool:
+        """Report whether `exc` carries an HTTP 402 Payment Required.
+
+        The status code is authoritative wherever the exception exposes
+        one, either directly or on an attached response. Matching the
+        message text alone is unsound in both directions: it misses a
+        real 402 whose message never spells the digits, and it fires on
+        an unrelated error that merely happens to contain "402" -- a
+        token count, a model name, a request id -- which would pay a
+        blockchain charge for a failure that never asked for one.
+
+        The substring remains the fallback, and only the fallback, for
+        an exception that exposes no status code at all; litellm raises
+        such errors with the code in the message.
+
+        Parameters
+        ----------
+        exc : BaseException
+            The exception raised by the downstream call.
+
+        Returns
+        -------
+        bool
+            True when the error is a 402 challenge.
+        """
+        status = getattr(exc, "status_code", None)
+        if status is None:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+
+        if status is not None:
+            try:
+                return int(status) == 402
+            except (TypeError, ValueError):
+                pass
+
+        return "402" in str(exc)
+
     async def _request_with_payment(self, call_fn):
         """Wrapper to handle 402 Payment Required challenges."""
         try:
             return await call_fn({})
         except Exception as e:
-            # Check if it's a 402 challenge (LiteLLM usually surfaces this as a generic Exception with text)
-            if "402" in str(e) and self.payment_gateway:
+            # Check if it's a 402 challenge; the status code decides
+            # where the error carries one, the message text otherwise.
+            if self._is_402(e) and self.payment_gateway:
                 import logging
                 logging.getLogger(__name__).info("Received 402 challenge, attempting to pay...")
                 
