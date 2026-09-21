@@ -101,6 +101,39 @@ class X402Adapter(PaymentGateway):
 
         return x402HTTPClient(client)
 
+    def build_session(self, transport=None):
+        """Build an httpx client that settles 402s before returning.
+
+        The payment cycle needs the response headers, the response body
+        and a way to replay the request. All three exist only below the
+        HTTP client: litellm's exception mapper keeps a 402's status
+        code and drops the response it arrived on, so a challenge
+        cannot be recovered from the error it raises.
+
+        The SDK's own `x402AsyncTransport` wraps another transport and
+        does the whole cycle -- version detection, challenge decoding,
+        signing, the replay and the retry cap -- so this only supplies
+        the wallet and the transport underneath it.
+
+        Parameters
+        ----------
+        transport : httpx.AsyncBaseTransport, optional
+            Transport that actually reaches the provider. Defaults to
+            httpx's own, which is what a live run uses; a test passes a
+            stand-in so no socket is opened.
+
+        Returns
+        -------
+        httpx.AsyncClient
+            Client whose requests pay and retry on a 402.
+        """
+        import httpx
+        from x402.http.clients.httpx import x402AsyncTransport
+
+        return httpx.AsyncClient(
+            transport=x402AsyncTransport(self._build_client(), transport)
+        )
+
     async def pay(self, challenge: PaymentChallenge) -> PaymentReceipt:
         """Fulfill a 402 payment challenge using the x402 SDK.
 
