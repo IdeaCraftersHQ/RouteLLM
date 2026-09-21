@@ -188,3 +188,205 @@ def test_an_empty_scores_file_is_an_error(tmp_path):
     scores.write_text("")
 
     assert main(["aggregate", "--scores", str(scores), "--out", str(tmp_path / "q.yaml")]) == 1
+
+
+# ---------------------------------------------------------------------------
+# The command line itself
+#
+# `aggregate_scores` is pure and every test above calls it directly.
+# These drive `main(argv)` as a shell does, so a flag that parses but
+# never reaches the function cannot pass.
+# ---------------------------------------------------------------------------
+
+
+def _cli(*argv) -> int:
+    from routellm.quality_scores import main
+
+    return main(list(argv))
+
+
+def _scores_file(tmp_path, rows, name="scores.jsonl"):
+    path = tmp_path / name
+    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+    return path
+
+
+def _sidecar(path):
+    return yaml.safe_load(path.read_text())
+
+
+def test_cli_aggregate_writes_the_sidecar(tmp_path):
+    scores = _scores_file(tmp_path, _rows(30, score=0.8))
+    out = tmp_path / "quality.yaml"
+
+    assert _cli("aggregate", "--scores", str(scores), "--out", str(out)) == 0
+
+    sidecar = _sidecar(out)
+    assert sidecar["version"] == 1
+    assert sidecar["endpoints"]["local_fast"]["quality"] == 80
+
+
+def test_cli_min_samples_flag_reaches_the_aggregation(tmp_path):
+    """With and without, on data that straddles the threshold."""
+    scores = _scores_file(tmp_path, _rows(30, score=0.8))
+    lenient, strict = tmp_path / "a.yaml", tmp_path / "b.yaml"
+
+    assert _cli(
+        "aggregate", "--scores", str(scores), "--out", str(lenient),
+        "--min-samples", "30",
+    ) == 0
+    assert _cli(
+        "aggregate", "--scores", str(scores), "--out", str(strict),
+        "--min-samples", "31",
+    ) == 0
+
+    assert "local_fast" in _sidecar(lenient)["endpoints"]
+    assert _sidecar(strict)["endpoints"] == {}
+    assert _sidecar(strict)["min_samples"] == 31
+
+
+def test_cli_transform_flag_reaches_the_aggregation(tmp_path):
+    rows = (
+        _rows(30, score=0.50, endpoint="a")
+        + _rows(30, score=0.52, endpoint="c")
+    )
+    scores = _scores_file(tmp_path, rows)
+    linear, spread = tmp_path / "lin.yaml", tmp_path / "pct.yaml"
+
+    assert _cli("aggregate", "--scores", str(scores), "--out", str(linear)) == 0
+    assert _cli(
+        "aggregate", "--scores", str(scores), "--out", str(spread),
+        "--transform", "percentile",
+    ) == 0
+
+    assert _sidecar(linear)["transform"] == "linear"
+    assert _sidecar(linear)["endpoints"]["a"]["quality"] == 50
+    assert _sidecar(spread)["transform"] == "percentile"
+    assert _sidecar(spread)["endpoints"]["a"]["quality"] == 0
+    assert _sidecar(spread)["endpoints"]["c"]["quality"] == 100
+
+
+def test_cli_config_flag_rekeys_by_area_from_tier_to_area(tmp_path):
+    """The flag's whole job: traces with no area of their own."""
+    rows = _rows(30, score=0.9, tier="coding_fast", area=None)
+    scores = _scores_file(tmp_path, rows)
+
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        yaml.safe_dump({"areas": {"coding": ["coding_fast"]}}, sort_keys=False)
+    )
+
+    without, with_ = tmp_path / "w0.yaml", tmp_path / "w1.yaml"
+    assert _cli("aggregate", "--scores", str(scores), "--out", str(without)) == 0
+    assert _cli(
+        "aggregate", "--scores", str(scores), "--out", str(with_),
+        "--config", str(config),
+    ) == 0
+
+    bare = _sidecar(without)
+    assert bare["area_source"] == "tier"
+    assert set(bare["endpoints"]["local_fast"]["by_area"]) == {"coding_fast"}
+
+    resolved = _sidecar(with_)
+    assert resolved["area_source"] == "config"
+    assert set(resolved["endpoints"]["local_fast"]["by_area"]) == {"coding"}
+
+
+def test_cli_missing_scores_file_exits_nonzero_naming_it(tmp_path, capsys):
+    missing = tmp_path / "nope.jsonl"
+
+    code = _cli("aggregate", "--scores", str(missing), "--out", str(tmp_path / "q.yaml"))
+
+    assert code == 1
+    assert str(missing) in capsys.readouterr().err
+
+
+def test_cli_missing_config_file_exits_nonzero_naming_it(tmp_path, capsys):
+    scores = _scores_file(tmp_path, _rows(30, score=0.8))
+    missing = tmp_path / "nope.yaml"
+
+    code = _cli(
+        "aggregate", "--scores", str(scores), "--out", str(tmp_path / "q.yaml"),
+        "--config", str(missing),
+    )
+
+    assert code == 1
+    assert str(missing) in capsys.readouterr().err
+
+
+def test_cli_a_bad_transform_value_exits_two(tmp_path):
+    scores = _scores_file(tmp_path, _rows(30, score=0.8))
+
+    with pytest.raises(SystemExit) as excinfo:
+        _cli(
+            "aggregate", "--scores", str(scores), "--out", str(tmp_path / "q.yaml"),
+            "--transform", "bogus",
+        )
+
+    assert excinfo.value.code == 2
+
+
+@pytest.mark.parametrize("missing", ["--scores", "--out"])
+def test_cli_a_missing_required_flag_exits_two(tmp_path, missing):
+    argv = [
+        "aggregate",
+        "--scores", str(_scores_file(tmp_path, _rows(30))),
+        "--out", str(tmp_path / "q.yaml"),
+    ]
+    index = argv.index(missing)
+    del argv[index : index + 2]
+
+    with pytest.raises(SystemExit) as excinfo:
+        _cli(*argv)
+
+    assert excinfo.value.code == 2
+
+
+def test_cli_missing_config_names_the_flag(tmp_path, capsys):
+    scores = _scores_file(tmp_path, _rows(30, score=0.8))
+    missing = tmp_path / "nope.yaml"
+
+    code = _cli(
+        "aggregate", "--scores", str(scores), "--out", str(tmp_path / "q.yaml"),
+        "--config", str(missing),
+    )
+
+    err = capsys.readouterr().err
+    assert code == 1
+    assert str(missing) in err
+    assert "--config" in err
+
+
+def test_cli_a_malformed_config_names_the_file(tmp_path, capsys):
+    scores = _scores_file(tmp_path, _rows(30, score=0.8))
+    config = tmp_path / "config.yaml"
+    config.write_text("not a mapping\n")
+
+    code = _cli(
+        "aggregate", "--scores", str(scores), "--out", str(tmp_path / "q.yaml"),
+        "--config", str(config),
+    )
+
+    assert code == 1
+    assert str(config) in capsys.readouterr().err
+
+
+def test_cli_a_config_putting_a_tier_in_two_areas_names_both(tmp_path, capsys):
+    scores = _scores_file(tmp_path, _rows(30, score=0.8))
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        yaml.safe_dump(
+            {"areas": {"coding": ["shared"], "writing": ["shared"]}},
+            sort_keys=False,
+        )
+    )
+
+    code = _cli(
+        "aggregate", "--scores", str(scores), "--out", str(tmp_path / "q.yaml"),
+        "--config", str(config),
+    )
+
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "shared" in err
+    assert "coding" in err and "writing" in err
