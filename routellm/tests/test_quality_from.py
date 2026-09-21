@@ -80,9 +80,7 @@ def test_no_quality_from_leaves_every_endpoint_untouched(tmp_path):
     path = tmp_path / "routellm.yaml"
     path.write_text(yaml.safe_dump(config, sort_keys=False))
 
-    registry = EndpointRegistry.from_config(
-        yaml.safe_load(path.read_text()), config_path=path
-    )
+    registry = EndpointRegistry.from_config(yaml.safe_load(path.read_text()), config_path=path)
 
     assert registry.get("local_fast").quality == 60
     assert registry.get("cloud_strong").quality == 88
@@ -247,9 +245,7 @@ def test_server_pops_quality_keys_out_of_router_config(tmp_path, monkeypatch):
         )
     )
 
-    router_config = openai_server.build_router_config(
-        yaml.safe_load(config.read_text())
-    )
+    router_config = openai_server.build_router_config(yaml.safe_load(config.read_text()))
 
     assert "quality_from" not in router_config
     assert "quality_from_override" not in router_config

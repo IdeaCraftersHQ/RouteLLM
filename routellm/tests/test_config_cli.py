@@ -5,6 +5,7 @@ Every location the chain searches lives under `tmp_path`: `HOME` and
 with `monkeypatch.chdir`, and `config.SYSTEM_PATH` is pointed at a temp
 file so nothing ever reads the real `/etc`.
 """
+
 from __future__ import annotations
 
 import json
@@ -133,16 +134,12 @@ def test_paths_json_carries_source_and_exists(env):
 def test_show_carries_origin_comments(env):
     """Merged YAML, each top-level key commented with the file that set it."""
     env.write(env.user, {"endpoints": {"big": {"model": "m_big"}}})
-    marker = env.write(
-        env.project / ".routellm.yaml", {"tiers": {"default": {"strong": "big"}}}
-    )
+    marker = env.write(env.project / ".routellm.yaml", {"tiers": {"default": {"strong": "big"}}})
 
     code, out, _ = env.run("show")
 
     assert code == 0
-    endpoints_line = next(
-        line for line in out.splitlines() if line.startswith("endpoints:")
-    )
+    endpoints_line = next(line for line in out.splitlines() if line.startswith("endpoints:"))
     tiers_line = next(line for line in out.splitlines() if line.startswith("tiers:"))
     assert str(env.user) in endpoints_line
     assert str(marker) in tiers_line
@@ -308,9 +305,7 @@ def test_paths_and_show_agree_when_no_project_marker_exists(env):
     _, paths_out, _ = env.run("paths")
     _, show_out, _ = env.run("show")
 
-    project_lines = [
-        line for line in paths_out.splitlines() if "project" in line
-    ]
+    project_lines = [line for line in paths_out.splitlines() if "project" in line]
     assert len(project_lines) == 1
     assert project_lines[0].startswith("[absent]")
     assert project_lines[0] in show_out

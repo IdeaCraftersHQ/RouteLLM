@@ -55,7 +55,7 @@ class LoadBalancer:
 
     Supports weighted random and round-robin strategies for endpoint selection.
     """
-    
+
     def __init__(self, config: LoadBalancerConfig):
         """Initialize load balancer.
 
@@ -82,7 +82,7 @@ class LoadBalancer:
         """
         if not self.config.endpoints:
             raise ValueError("No endpoints configured for load balancer")
-            
+
         if self.config.strategy == "weighted":
             total_weight = sum(e.weight for e in self.config.endpoints)
             r = random.uniform(0, total_weight)
@@ -97,24 +97,25 @@ class LoadBalancer:
             self._current_index = (self._current_index + 1) % len(self.config.endpoints)
             print(f"[LB] select result={e.model} next_index={self._current_index}")
             return e
-        
+
         return self.config.endpoints[0]
+
 
 class TrafficRule(BaseModel):
     """Rule for conditional routing based on request payload."""
-    pattern: Optional[str] = None # Regex pattern for prompt
+
+    pattern: Optional[str] = None  # Regex pattern for prompt
     min_tokens: Optional[int] = None
     max_tokens: Optional[int] = None
     strong_model: str
     weak_model: str
 
+
 class TrafficManager:
     """Handles conditional routing and load balancing logic."""
-    
+
     def __init__(
-        self, 
-        rules: List[TrafficRule] = None,
-        load_balancers: Dict[str, LoadBalancer] = None
+        self, rules: List[TrafficRule] = None, load_balancers: Dict[str, LoadBalancer] = None
     ):
         self.rules = rules or []
         self.load_balancers = load_balancers or {}
@@ -126,16 +127,18 @@ class TrafficManager:
             if rule.pattern:
                 if not re.search(rule.pattern, str(prompt), re.IGNORECASE):
                     continue
-            
+
             # Check tokens
             max_tokens = request_params.get("max_tokens")
             if rule.min_tokens is not None and (max_tokens is None or max_tokens < rule.min_tokens):
                 continue
-            if rule.max_tokens is not None and (max_tokens is not None and max_tokens > rule.max_tokens):
+            if rule.max_tokens is not None and (
+                max_tokens is not None and max_tokens > rule.max_tokens
+            ):
                 continue
-                
+
             return ModelPair(strong=rule.strong_model, weak=rule.weak_model)
-            
+
         return None
 
     def balance(self, model_name: str) -> tuple[str, Optional[str], Optional[str]]:

@@ -66,6 +66,7 @@ GPT_4_AUGMENTED_CONFIG = {
 
 class RoutingError(Exception):
     """Raised when routing configuration or parameters are invalid."""
+
     pass
 
 
@@ -89,6 +90,7 @@ class Controller:
     and payment handling. Matches OpenAI API while supporting advanced
     routing features.
     """
+
     def __init__(
         self,
         routers: list[str],
@@ -366,8 +368,7 @@ class Controller:
         if not self.endpoints.has_tier(chosen):
             known = ", ".join(self.endpoints.tier_names()) or "<none>"
             raise RoutingError(
-                f"Middleware selected unknown tier: {chosen}. "
-                f"Configured tiers: {known}"
+                f"Middleware selected unknown tier: {chosen}. Configured tiers: {known}"
             )
 
         if not self.endpoints.get_tier(tier).accepts_intent_routing():
@@ -455,9 +456,7 @@ class Controller:
         not an endpoint, and its union already assumes the best of
         every reachable leaf. See `capabilities.satisfies`.
         """
-        caps = side_capabilities(
-            name, self.endpoints, self._tier_caps, self._catalog_records
-        )
+        caps = side_capabilities(name, self.endpoints, self._tier_caps, self._catalog_records)
         strict = not self.endpoints.has_tier(name) and bool(
             getattr(self.endpoints.resolve(name), "strict", False)
         )
@@ -574,9 +573,7 @@ class Controller:
         )
 
         if forced is None:
-            picked, win_rate = self._run_router(
-                level["router"], level["threshold"], prompt, pair
-            )
+            picked, win_rate = self._run_router(level["router"], level["threshold"], prompt, pair)
         else:
             picked, win_rate = forced[0], None
 
@@ -754,9 +751,7 @@ class Controller:
         # argument when none is registered, which is indistinguishable
         # from a balancer whose target model equals the routed name.
         if model_name in self.traffic_manager.load_balancers:
-            model, balanced_key, balanced_base = self.traffic_manager.balance(
-                model_name
-            )
+            model, balanced_key, balanced_base = self.traffic_manager.balance(model_name)
         else:
             model, balanced_key, balanced_base = endpoint.model, None, None
 
@@ -942,9 +937,7 @@ class Controller:
             if not base:
                 return (
                     self.payment_limits.global_cap,
-                    None
-                    if self.payment_limits.global_cap is None
-                    else "global",
+                    None if self.payment_limits.global_cap is None else "global",
                 )
             return self.payment_limits.effective(base)
 
@@ -986,9 +979,7 @@ class Controller:
             if self._is_402(e) and self.payment_gateway and self._may_pay(endpoint):
                 import logging
 
-                logging.getLogger(__name__).info(
-                    "Received 402 challenge, attempting to pay..."
-                )
+                logging.getLogger(__name__).info("Received 402 challenge, attempting to pay...")
 
                 headers, body, stated, resource_url = self._extract_402_response(e)
                 # The cap belongs to this payment, not to the gateway:
@@ -1010,8 +1001,7 @@ class Controller:
 
                 challenge = PaymentChallenge(
                     scheme=stated.get("scheme") or self.payment_gateway.name,
-                    network=stated.get("network")
-                    or self.payment_gateway.networks[0],
+                    network=stated.get("network") or self.payment_gateway.networks[0],
                     amount=stated.get("amount", ""),
                     currency=stated.get("currency", ""),
                     payload=stated,
@@ -1128,6 +1118,7 @@ class Controller:
         cached_res = self.cache.get(prompt, model_to_use, cache_params)
         if cached_res:
             from litellm.utils import ModelResponse
+
             res = ModelResponse(**cached_res)
             # Record trace for cached response too
             self.quality_manager.record_trace(
@@ -1142,16 +1133,12 @@ class Controller:
                 latency_ms=0,
                 area=area,
             )
-            return self._attach_path(
-                res, path, model_to_use, sibling, sibling_reference
-            )
+            return self._attach_path(res, path, model_to_use, sibling, sibling_reference)
 
         last_err = None
         for model_name in models_to_try:
             # 3. Resolve the endpoint, then apply load balancing
-            model, curr_api_base, curr_api_key, extra = self._endpoint_call_params(
-                model_name
-            )
+            model, curr_api_base, curr_api_key, extra = self._endpoint_call_params(model_name)
 
             def _call():
                 kwargs_copy = {**extra, **kwargs}
@@ -1165,10 +1152,7 @@ class Controller:
             try:
                 # Wrap with resilience
                 started = time.monotonic()
-                res = self.resilience.wrap_completion(
-                    model_name,
-                    _call
-                )
+                res = self.resilience.wrap_completion(model_name, _call)
                 latency_ms = int((time.monotonic() - started) * 1000)
 
                 # Cache the response
@@ -1176,8 +1160,9 @@ class Controller:
                     self.cache.put(prompt, model_name, cache_params, res.model_dump())
                 except Exception as e:
                     import logging
+
                     logging.getLogger(__name__).error(f"Failed to cache response: {str(e)}")
-                
+
                 # Record trace
                 self.quality_manager.record_trace(
                     prompt,
@@ -1192,11 +1177,10 @@ class Controller:
                     area=area,
                 )
 
-                return self._attach_path(
-                    res, path, model_name, sibling, sibling_reference
-                )
+                return self._attach_path(res, path, model_name, sibling, sibling_reference)
             except Exception as e:
                 import logging
+
                 logging.getLogger(__name__).warning(
                     f"Model {model_name} failed, trying fallback if available. Error: {str(e)}"
                 )
@@ -1248,6 +1232,7 @@ class Controller:
         cached_res = await self.cache.aget(prompt, model_to_use, cache_params)
         if cached_res:
             from litellm.utils import ModelResponse
+
             res = ModelResponse(**cached_res)
             # Record trace for cached response too
             self.quality_manager.record_trace(
@@ -1262,16 +1247,12 @@ class Controller:
                 latency_ms=0,
                 area=area,
             )
-            return self._attach_path(
-                res, path, model_to_use, sibling, sibling_reference
-            )
+            return self._attach_path(res, path, model_to_use, sibling, sibling_reference)
 
         last_err = None
         for model_name in models_to_try:
             # 3. Resolve the endpoint, then apply load balancing
-            model, curr_api_base, curr_api_key, extra = self._endpoint_call_params(
-                model_name
-            )
+            model, curr_api_base, curr_api_key, extra = self._endpoint_call_params(model_name)
 
             async def _call(extra_headers={}):
                 kwargs_copy = {**extra, **kwargs}
@@ -1286,20 +1267,21 @@ class Controller:
             try:
                 started = time.monotonic()
                 res = await self.resilience.wrap_acompletion(
-                    model_name,
-                    lambda: self._request_with_payment(_call, endpoint=model_name)
+                    model_name, lambda: self._request_with_payment(_call, endpoint=model_name)
                 )
                 latency_ms = int((time.monotonic() - started) * 1000)
-                
+
                 # 4. Validate canary if needed
                 if is_canary and model_name == model_to_use:
                     passed = await self.quality_manager.validate_canary(
-                        res.choices[0].message.content, 
-                        prompt
+                        res.choices[0].message.content, prompt
                     )
                     if not passed:
                         import logging
-                        logging.getLogger(__name__).warning(f"Canary model {model_name} failed validation, trying fallback.")
+
+                        logging.getLogger(__name__).warning(
+                            f"Canary model {model_name} failed validation, trying fallback."
+                        )
                         raise Exception(f"Canary validation failed for {model_name}")
 
                 # Cache the response
@@ -1307,8 +1289,9 @@ class Controller:
                     await self.cache.aput(prompt, model_name, cache_params, res.model_dump())
                 except Exception as e:
                     import logging
+
                     logging.getLogger(__name__).error(f"Failed to cache response: {str(e)}")
-                
+
                 # Record trace
                 self.quality_manager.record_trace(
                     prompt,
@@ -1323,16 +1306,15 @@ class Controller:
                     area=area,
                 )
 
-                return self._attach_path(
-                    res, path, model_name, sibling, sibling_reference
-                )
+                return self._attach_path(res, path, model_name, sibling, sibling_reference)
             except Exception as e:
                 import logging
+
                 logging.getLogger(__name__).warning(
                     f"Model {model_name} failed, trying fallback if available. Error: {str(e)}"
                 )
                 last_err = e
                 continue
-        
+
         if last_err:
             raise last_err

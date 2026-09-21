@@ -107,9 +107,7 @@ def build_registry(
         Registry holding the configured endpoints and tiers, plus the
         implicit `default` tier when one was derived.
     """
-    registry = EndpointRegistry.from_config(
-        file_config or {}, config_path=config_path
-    )
+    registry = EndpointRegistry.from_config(file_config or {}, config_path=config_path)
 
     if registry.has_tier("default"):
         logging.info("default tier: from --config")
@@ -238,8 +236,7 @@ def build_intents(
         if not registry.has_tier(tier):
             known = ", ".join(registry.tier_names()) or "<none>"
             raise ValueError(
-                f"Intent {intent!r} maps to unknown tier {tier!r}. "
-                f"Configured tiers: {known}"
+                f"Intent {intent!r} maps to unknown tier {tier!r}. Configured tiers: {known}"
             )
 
     descriptions = dict(spec.get("descriptions") or {})
@@ -284,7 +281,6 @@ def build_intents(
     )
 
 
-
 def build_router_config(file_config: Optional[dict]) -> Optional[dict]:
     """Return the router config, with the keys other owners claim removed.
 
@@ -305,8 +301,7 @@ def build_router_config(file_config: Optional[dict]) -> Optional[dict]:
         the router defaults.
     """
     router_config = dict(file_config or {})
-    for key in ("endpoints", "tiers", "intents", "quality_from",
-                "quality_from_override"):
+    for key in ("endpoints", "tiers", "intents", "quality_from", "quality_from_override"):
         router_config.pop(key, None)
     return router_config or None
 
@@ -469,9 +464,7 @@ async def lifespan(app):
     # endpoint's own lower one -- and they go to both seams a 402 can
     # be paid at: the session's transport here, and the controller's
     # own retry below.
-    limits = payment_limits_for(
-        endpoints, max_payment=args.max_payment, default_base=args.base_url
-    )
+    limits = payment_limits_for(endpoints, max_payment=args.max_payment, default_base=args.base_url)
 
     # One ledger, built here and handed to both seams. Two would be
     # two budgets, and the process would spend twice what was allowed.
@@ -538,9 +531,7 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: Optional[int] = None
     n: Optional[int] = None
     presence_penalty: Optional[float] = None
-    response_format: Optional[Dict[str, str]] = (
-        None  # { "type": "json_object" } for json mode
-    )
+    response_format: Optional[Dict[str, str]] = None  # { "type": "json_object" } for json mode
     seed: Optional[int] = None
     stop: Optional[Union[str, List[str]]] = None
     stream: Optional[bool] = None
@@ -622,9 +613,7 @@ async def create_chat_completion(request: ChatCompletionRequest):
     logging.info(f"Routing path: {path}")
 
     if request.stream:
-        return StreamingResponse(
-            content=stream_response(res), media_type="text/event-stream"
-        )
+        return StreamingResponse(content=stream_response(res), media_type="text/event-stream")
 
     body = res.model_dump()
     if path is not None:
@@ -649,10 +638,7 @@ async def list_models():
     """
     tier_names = set(CONTROLLER.endpoints.tier_names())
     ids = set(tier_names)
-    ids.update(
-        f"router-{name}-{CONTROLLER.default_threshold}"
-        for name in CONTROLLER.routers
-    )
+    ids.update(f"router-{name}-{CONTROLLER.default_threshold}" for name in CONTROLLER.routers)
 
     return JSONResponse(
         content={
@@ -731,9 +717,7 @@ async def health_check():
     return JSONResponse(content={"status": "online"})
 
 
-parser = argparse.ArgumentParser(
-    description="An OpenAI-compatible API server for LLM routing."
-)
+parser = argparse.ArgumentParser(description="An OpenAI-compatible API server for LLM routing.")
 parser.add_argument(
     "--verbose",
     action="store_true",
@@ -815,18 +799,18 @@ parser.add_argument(
     default=None,
     help=(
         "Total this process may spend across every payment, as money "
-        "(e.g. \"$1.00\"). A per-payment limit bounds one payment; this "
+        '(e.g. "$1.00"). A per-payment limit bounds one payment; this '
         "bounds their sum. It counts the amount each payment is authorised "
         "to spend, which is conservative: a challenge that never settles "
         "still consumes budget. Held in memory, so a restart clears it. "
-        "Unset means no cumulative limit; \"$0\" means spend nothing."
+        'Unset means no cumulative limit; "$0" means spend nothing.'
     ),
 )
 parser.add_argument(
     "--max-payment",
     default=None,
     help=(
-        "Process-wide ceiling on a single payment, as money (e.g. \"$0.01\"). "
+        'Process-wide ceiling on a single payment, as money (e.g. "$0.01"). '
         "No endpoint may exceed it; an endpoint's own `max_payment:` may only "
         "lower it. Unset keeps the payment library's own default ceiling."
     ),

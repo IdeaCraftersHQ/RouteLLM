@@ -210,8 +210,7 @@ class Endpoint(BaseModel):
     def _validate_name(cls, value: str) -> str:
         if not NAME_PATTERN.match(value):
             raise ValueError(
-                f"Invalid endpoint name: {value!r}. "
-                "Names must match [A-Za-z0-9_]+ (no hyphens)."
+                f"Invalid endpoint name: {value!r}. Names must match [A-Za-z0-9_]+ (no hyphens)."
             )
         return value
 
@@ -348,16 +347,13 @@ class Tier(BaseModel):
     def _validate_name(cls, value: str) -> str:
         if not NAME_PATTERN.match(value):
             raise ValueError(
-                f"Invalid tier name: {value!r}. "
-                "Names must match [A-Za-z0-9_]+ (no hyphens)."
+                f"Invalid tier name: {value!r}. Names must match [A-Za-z0-9_]+ (no hyphens)."
             )
         return value
 
     @field_validator("strong", "weak")
     @classmethod
-    def _validate_reference(
-        cls, value: Union[str, Selector]
-    ) -> Union[str, Selector]:
+    def _validate_reference(cls, value: Union[str, Selector]) -> Union[str, Selector]:
         if isinstance(value, Selector):
             return value
         if not value.strip():
@@ -365,9 +361,7 @@ class Tier(BaseModel):
         return value
 
 
-def _invert_areas(
-    raw: dict[str, Any], tiers: dict[str, "Tier"]
-) -> dict[str, str]:
+def _invert_areas(raw: dict[str, Any], tiers: dict[str, "Tier"]) -> dict[str, str]:
     """Invert `{area: [tier, ...]}` into `{tier: area}`.
 
     Parameters
@@ -504,14 +498,11 @@ class EndpointRegistry:
 
         raw_endpoints = config.get("endpoints") or {}
         endpoints = {
-            name: Endpoint(name=name, **(spec or {}))
-            for name, spec in raw_endpoints.items()
+            name: Endpoint(name=name, **(spec or {})) for name, spec in raw_endpoints.items()
         }
 
         raw_tiers = config.get("tiers") or {}
-        tiers = {
-            name: Tier(name=name, **(spec or {})) for name, spec in raw_tiers.items()
-        }
+        tiers = {name: Tier(name=name, **(spec or {})) for name, spec in raw_tiers.items()}
 
         registry = cls(endpoints, tiers)
 
@@ -631,14 +622,13 @@ class EndpointRegistry:
             exceed `MAX_TIER_DEPTH` tier levels.
         """
         if name in ancestors:
-            cycle = ancestors[ancestors.index(name):] + [name]
+            cycle = ancestors[ancestors.index(name) :] + [name]
             raise ValueError(f"Tier cycle: {' -> '.join(cycle)}")
 
         path = ancestors + [name]
         if len(path) > MAX_TIER_DEPTH:
             raise ValueError(
-                f"Tier nesting exceeds the maximum depth of {MAX_TIER_DEPTH}: "
-                f"{' -> '.join(path)}"
+                f"Tier nesting exceeds the maximum depth of {MAX_TIER_DEPTH}: {' -> '.join(path)}"
             )
 
         tier = self._tiers[name]
@@ -713,9 +703,7 @@ class EndpointRegistry:
                 bases.append(base)
         return bases
 
-    def payment_caps(
-        self, default_base: Optional[str] = None
-    ) -> dict[str, str]:
+    def payment_caps(self, default_base: Optional[str] = None) -> dict[str, str]:
         """Return each payable endpoint's own cap, keyed on its base URL.
 
         The scope a payment is enforced against is keyed on base URLs,
@@ -758,9 +746,7 @@ class EndpointRegistry:
                 )
                 continue
             existing = caps.get(base)
-            if existing is None or parse_cap(endpoint.max_payment) < parse_cap(
-                existing
-            ):
+            if existing is None or parse_cap(endpoint.max_payment) < parse_cap(existing):
                 caps[base] = endpoint.max_payment
         return caps
 
@@ -787,9 +773,7 @@ class EndpointRegistry:
             return self._tiers[name]
         except KeyError:
             known = ", ".join(self.tier_names()) or "<none>"
-            raise KeyError(
-                f"Unknown tier: {name}. Configured tiers: {known}"
-            ) from None
+            raise KeyError(f"Unknown tier: {name}. Configured tiers: {known}") from None
 
     def get(self, name: str) -> Endpoint:
         """Return the endpoint registered under `name`.
@@ -814,9 +798,7 @@ class EndpointRegistry:
             return self._endpoints[name]
         except KeyError:
             known = ", ".join(self.names()) or "<none>"
-            raise KeyError(
-                f"Unknown endpoint: {name}. Configured endpoints: {known}"
-            ) from None
+            raise KeyError(f"Unknown endpoint: {name}. Configured endpoints: {known}") from None
 
     def resolve(self, name_or_model: str) -> Endpoint:
         """Return an endpoint for a name or a raw litellm model name.
@@ -845,9 +827,7 @@ class EndpointRegistry:
             If `name_or_model` is empty or only whitespace.
         """
         if not name_or_model or not name_or_model.strip():
-            raise ValueError(
-                "Endpoint name or model must be a non-empty string"
-            )
+            raise ValueError("Endpoint name or model must be a non-empty string")
 
         endpoint = self._endpoints.get(name_or_model)
         if endpoint is not None:
@@ -856,8 +836,7 @@ class EndpointRegistry:
         if name_or_model not in self._warned:
             self._warned.add(name_or_model)
             logger.warning(
-                "no endpoint named %s; using it as a raw model with the "
-                "controller defaults",
+                "no endpoint named %s; using it as a raw model with the controller defaults",
                 name_or_model,
             )
         return Endpoint.model_construct(

@@ -35,6 +35,7 @@ Relative paths inside a config file (`prompt_file`, `quality_from`)
 resolve against the file that set them, never the CWD; `origins` records
 which layer last set each leaf key so `resolve_path` can do that.
 """
+
 from __future__ import annotations
 
 import os
@@ -323,13 +324,9 @@ def load_config(
     for entry in chain:
         if not entry.exists:
             if entry.source == "env":
-                raise FileNotFoundError(
-                    f"{ENV_VAR}={entry.path}: no such config file"
-                )
+                raise FileNotFoundError(f"{ENV_VAR}={entry.path}: no such config file")
             if entry.source == "flag":
-                raise FileNotFoundError(
-                    f"{FLAG} {entry.path}: no such config file"
-                )
+                raise FileNotFoundError(f"{FLAG} {entry.path}: no such config file")
             continue
         parsed = _read(entry)
         data = deep_merge(data, parsed)
@@ -425,16 +422,13 @@ def _chain_lines(chain: List[ResolvedPath]) -> List[str]:
     layers whether or not a marker was found.
     """
     lines = [
-        f"{'[used]  ' if entry.exists else '[absent]'} "
-        f"{entry.source:<7} {entry.path}"
+        f"{'[used]  ' if entry.exists else '[absent]'} {entry.source:<7} {entry.path}"
         for entry in chain
     ]
     if not any(entry.source == "project" for entry in chain):
         # After user, before the explicit layers: its place in the
         # precedence order, not the end of the list.
-        after_user = sum(
-            1 for entry in chain if entry.source in ("system", "user")
-        )
+        after_user = sum(1 for entry in chain if entry.source in ("system", "user"))
         lines.insert(after_user, NO_PROJECT_LINE)
     return lines
 
@@ -529,8 +523,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             winner = winning_path(config_paths(explicit=explicit))
             if winner is None:
                 print(
-                    "no routellm config file on the chain; "
-                    "run `paths` to see where it looked",
+                    "no routellm config file on the chain; run `paths` to see where it looked",
                     file=sys.stderr,
                 )
                 return 1

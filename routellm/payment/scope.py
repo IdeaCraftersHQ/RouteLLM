@@ -124,17 +124,13 @@ class PaymentScope:
                 continue
             # A path prefix only counts on a segment boundary, so
             # `/v1` does not authorise `/v1beta`.
-            if base_path and not (
-                path == base_path or path.startswith(base_path + "/")
-            ):
+            if base_path and not (path == base_path or path.startswith(base_path + "/")):
                 continue
             return True
         return False
 
 
-def scoped_payment_transport(
-    scope: PaymentScope, client, transport=None, limits=None, budget=None
-):
+def scoped_payment_transport(scope: PaymentScope, client, transport=None, limits=None, budget=None):
     """Build an x402 transport that only pays inside `scope`, and only so much.
 
     The result is an `x402AsyncTransport`, so everything that already
@@ -253,9 +249,7 @@ def scoped_payment_transport(
                 return budget
             return None if budget is None else budget.remaining
 
-        async def handle_async_request(
-            self, request: httpx.Request
-        ) -> httpx.Response:
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
             """Send `request`, entering the payment cycle only if allowed.
 
             Parameters
@@ -293,9 +287,7 @@ def scoped_payment_transport(
                 # Chosen per request: the session is shared, so a cap
                 # installed once would bind whichever endpoint happened
                 # to be configured last.
-                _signing_client().set_spend_controls(
-                    {"max_amount_per_payment": cap}
-                )
+                _signing_client().set_spend_controls({"max_amount_per_payment": cap})
 
             debited = False
             if budget:

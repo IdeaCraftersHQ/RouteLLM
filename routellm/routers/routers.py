@@ -95,9 +95,7 @@ class CausalLLMRouter(Router):
             additional_fields=[],
             use_last_turn=True,
         )
-        system_message = hf_hub_download(
-            repo_id=checkpoint_path, filename="system_ft_v5.txt"
-        )
+        system_message = hf_hub_download(repo_id=checkpoint_path, filename="system_ft_v5.txt")
         classifier_message = hf_hub_download(
             repo_id=checkpoint_path, filename="classifier_ft_v5.txt"
         )
@@ -179,9 +177,7 @@ class BERTRouter(Router):
         float
             Strong model win rate in [0, 1].
         """
-        inputs = self.tokenizer(
-            prompt, return_tensors="pt", padding=True, truncation=True
-        )
+        inputs = self.tokenizer(prompt, return_tensors="pt", padding=True, truncation=True)
         with torch.no_grad():
             outputs = self.model(**inputs)
             logits = outputs.logits.numpy()[0]
@@ -245,19 +241,15 @@ class SWRankingRouter(Router):
         self.arena_conv_embedding = np.concatenate(embeddings)
         self.embedding_model = "text-embedding-3-small"
 
-        assert len(self.arena_df) == len(
-            self.arena_conv_embedding
-        ), "Number of battle embeddings is mismatched to data"
+        assert len(self.arena_df) == len(self.arena_conv_embedding), (
+            "Number of battle embeddings is mismatched to data"
+        )
 
         model_ratings = compute_elo_mle_with_tie(self.arena_df)
         self.model2tier = compute_tiers(model_ratings, num_tiers=num_tiers)
 
-        self.arena_df["model_a"] = self.arena_df["model_a"].apply(
-            lambda x: self.model2tier[x]
-        )
-        self.arena_df["model_b"] = self.arena_df["model_b"].apply(
-            lambda x: self.model2tier[x]
-        )
+        self.arena_df["model_a"] = self.arena_df["model_a"].apply(lambda x: self.model2tier[x])
+        self.arena_df["model_b"] = self.arena_df["model_b"].apply(lambda x: self.model2tier[x])
 
     def get_weightings(self, similarities):
         """Compute exponential weightings from similarity scores.
@@ -295,17 +287,12 @@ class SWRankingRouter(Router):
             Strong model expected win rate in [0, 1].
         """
         prompt_emb = (
-            (
-                get_embedding_client().embeddings.create(
-                    input=[prompt], model=self.embedding_model
-                )
-            )
+            (get_embedding_client().embeddings.create(input=[prompt], model=self.embedding_model))
             .data[0]
             .embedding
         )
         similarities = np.dot(self.arena_conv_embedding, prompt_emb) / (
-            np.linalg.norm(self.arena_conv_embedding, axis=1)
-            * np.linalg.norm(prompt_emb)
+            np.linalg.norm(self.arena_conv_embedding, axis=1) * np.linalg.norm(prompt_emb)
         )
 
         weightings = self.get_weightings(similarities)
@@ -395,9 +382,7 @@ class MatrixFactorizationRouter(Router):
         float
             Strong model win rate in [0, 1].
         """
-        winrate = self.model.pred_win_rate(
-            self.strong_model_id, self.weak_model_id, prompt
-        )
+        winrate = self.model.pred_win_rate(self.strong_model_id, self.weak_model_id, prompt)
         return winrate
 
 

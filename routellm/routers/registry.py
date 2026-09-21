@@ -63,6 +63,7 @@ def register_router(name, cls=None, *, replace=False):
         raise ValueError(f"router name must be a non-empty str, got {name!r}")
 
     if cls is None:
+
         def decorator(decorated):
             register_router(name, decorated, replace=replace)
             return decorated
@@ -187,9 +188,7 @@ def discover_routers(group=ENTRY_POINT_GROUP):
         except Exception as exc:  # noqa: BLE001 — a broken plugin must not break import
             reason = f"{type(exc).__name__}: {exc}"
             discovery_failures[entry_point.name] = reason
-            logger.warning(
-                "failed to load router entry point %r: %s", entry_point.name, reason
-            )
+            logger.warning("failed to load router entry point %r: %s", entry_point.name, reason)
             continue
 
         registered.append(entry_point.name)

@@ -199,9 +199,7 @@ def test_capabilities_flag_prints_the_matrix(matrix_config, capsys):
     assert "Unknown:" in out
 
 
-def test_capabilities_flag_marks_unknown_with_a_question_mark(
-    matrix_config, capsys
-):
+def test_capabilities_flag_marks_unknown_with_a_question_mark(matrix_config, capsys):
     main(["--config", str(matrix_config), "--capabilities"])
 
     out = capsys.readouterr().out
@@ -212,9 +210,7 @@ def test_capabilities_flag_marks_unknown_with_a_question_mark(
 
 
 def test_capabilities_and_explain_print_both(matrix_config, capsys):
-    assert (
-        main(["--config", str(matrix_config), "--capabilities", "--explain"]) == 0
-    )
+    assert main(["--config", str(matrix_config), "--capabilities", "--explain"]) == 0
 
     out = capsys.readouterr().out
 
@@ -227,9 +223,7 @@ def test_matrix_names_the_leaf_behind_a_tier_capability(matrix_config, capsys):
     main(["--config", str(matrix_config), "--capabilities"])
 
     out = capsys.readouterr().out
-    tier_row = next(
-        line for line in out.splitlines() if line.startswith("default (tier)")
-    )
+    tier_row = next(line for line in out.splitlines() if line.startswith("default (tier)"))
 
     assert "vision=seeing" in tier_row
 
@@ -257,9 +251,7 @@ def test_matrix_flags_terms_used_by_selectors_with_unknowns(tmp_path, capsys):
     assert "vision" in out.rsplit("dropped silently", 1)[-1]
 
 
-def test_explain_without_the_flag_is_byte_identical_to_today(
-    matrix_config, capsys
-):
+def test_explain_without_the_flag_is_byte_identical_to_today(matrix_config, capsys):
     assert main(["--config", str(matrix_config)]) == 0
     default_out = capsys.readouterr().out
 
@@ -274,9 +266,7 @@ def test_matrix_renders_a_known_false_as_no(tmp_path):
     registry = EndpointRegistry.from_config(MATRIX_CONFIG)
 
     rendered = _capability_matrix(registry, [])
-    seeing = next(
-        line for line in rendered.splitlines() if line.startswith("seeing")
-    )
+    seeing = next(line for line in rendered.splitlines() if line.startswith("seeing"))
 
     # `reasoning: false` is knowledge, not absence: it must not read `?`.
     assert " no " in f" {seeing} "

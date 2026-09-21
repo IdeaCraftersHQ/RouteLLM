@@ -80,11 +80,7 @@ class MMLU(Benchmark):
         )
 
     def evaluate(self, controller, router, num_results, overwrite_router_cache):
-        if (
-            router not in self.cache
-            or router in self.overwrite_cache
-            or overwrite_router_cache
-        ):
+        if router not in self.cache or router in self.overwrite_cache or overwrite_router_cache:
             strong_win_rates = controller.batch_calculate_win_rate(
                 prompts=self.all_data["prompt"], router=router
             )
@@ -114,9 +110,7 @@ class MMLU(Benchmark):
                 self.routed_pair.weak,
             )
             model_counts = Counter(models)
-            yield threshold, sum(results) / len(results) * 100, model_counts, len(
-                results
-            )
+            yield threshold, sum(results) / len(results) * 100, model_counts, len(results)
 
     def get_optimal_accuracy(self, strong_percent):
         df = self.all_data
@@ -143,12 +137,8 @@ class MTBench(Benchmark):
     def __init__(self, routed_pair, overwrite_cache):
         self.routed_pair = routed_pair
 
-        self.judgements = pd.read_json(
-            f"{CURRENT_DIR}/mt_bench/judgements.jsonl", lines=True
-        )
-        self.questions = pd.read_json(
-            f"{CURRENT_DIR}/mt_bench/question.jsonl", lines=True
-        )
+        self.judgements = pd.read_json(f"{CURRENT_DIR}/mt_bench/judgements.jsonl", lines=True)
+        self.questions = pd.read_json(f"{CURRENT_DIR}/mt_bench/question.jsonl", lines=True)
         contaminated_prompts = pd.read_json(
             f"{CURRENT_DIR}/mt_bench/contaminated_prompts.jsonl", lines=True
         )["eval_prompt"].tolist()
@@ -173,11 +163,7 @@ class MTBench(Benchmark):
             self.cache = {}
 
     def evaluate(self, controller, router, num_results, overwrite_router_cache):
-        if (
-            router not in self.cache
-            or router in self.overwrite_cache
-            or overwrite_router_cache
-        ):
+        if router not in self.cache or router in self.overwrite_cache or overwrite_router_cache:
             strong_win_rates = controller.batch_calculate_win_rate(
                 # Only use first turn for routing
                 prompts=self.questions["turns"].apply(lambda x: x[0]),
@@ -274,20 +260,18 @@ class MTBench(Benchmark):
         ).reset_index(drop=True)
 
         if len(combined_judgements[combined_judgements["diff"] > 0]) > max_strong_calls:
-            combined_judgements.loc[:max_strong_calls, "score_optimal"] = (
-                combined_judgements.loc[:max_strong_calls, "score_strong"]
-            )
-            combined_judgements.loc[max_strong_calls:, "score_optimal"] = (
-                combined_judgements.loc[max_strong_calls:, "score_weak"]
-            )
+            combined_judgements.loc[:max_strong_calls, "score_optimal"] = combined_judgements.loc[
+                :max_strong_calls, "score_strong"
+            ]
+            combined_judgements.loc[max_strong_calls:, "score_optimal"] = combined_judgements.loc[
+                max_strong_calls:, "score_weak"
+            ]
         else:
-            combined_judgements["score_optimal"] = combined_judgements[
-                "score_strong"
-            ].where(combined_judgements["diff"] > 0, combined_judgements["score_weak"])
+            combined_judgements["score_optimal"] = combined_judgements["score_strong"].where(
+                combined_judgements["diff"] > 0, combined_judgements["score_weak"]
+            )
 
-        assert (
-            len(strong_judgements) == len(weak_judgements) == len(combined_judgements)
-        )
+        assert len(strong_judgements) == len(weak_judgements) == len(combined_judgements)
 
         return combined_judgements["score_optimal"].mean()
 
@@ -310,16 +294,10 @@ class GSM8K(Benchmark):
             f"{CURRENT_DIR}/gsm8k/contaminated_prompts.jsonl", lines=True
         )["eval_prompt"].tolist()
         self.all_data = all_data[~all_data["prompt"].isin(contaminated_prompts)]
-        print(
-            f"{len(self.all_data)}/{original_len} questions for GSM8K after decontamination."
-        )
+        print(f"{len(self.all_data)}/{original_len} questions for GSM8K after decontamination.")
 
     def evaluate(self, controller, router, num_results, overwrite_router_cache):
-        if (
-            router not in self.cache
-            or router in self.overwrite_cache
-            or overwrite_router_cache
-        ):
+        if router not in self.cache or router in self.overwrite_cache or overwrite_router_cache:
             strong_win_rates = controller.batch_calculate_win_rate(
                 prompts=self.all_data["prompt"], router=router
             )
@@ -345,9 +323,7 @@ class GSM8K(Benchmark):
             )
             models = np.where(selection, self.routed_pair.strong, self.routed_pair.weak)
             model_counts = Counter(models)
-            yield threshold, sum(results) / len(results) * 100, model_counts, len(
-                results
-            )
+            yield threshold, sum(results) / len(results) * 100, model_counts, len(results)
 
     def get_model_accuracy(self, model):
         df = self.all_data

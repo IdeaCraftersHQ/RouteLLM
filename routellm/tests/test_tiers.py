@@ -10,6 +10,7 @@ controller imports: the root conftest replaces `routellm.routers.routers`
 with a stub, so `routellm.controller.ROUTER_CLS` and the registry's own
 dict are different objects under pytest.
 """
+
 import json
 import logging
 import subprocess
@@ -272,9 +273,7 @@ def test_tier_endpoint_name_collision_rejected():
     assert "shared" in str(excinfo.value)
 
 
-def test_tier_router_name_collision_rejected_at_construction(
-    registry, tmp_path, hi_router
-):
+def test_tier_router_name_collision_rejected_at_construction(registry, tmp_path, hi_router):
     config = {
         "endpoints": {"a": {"model": "m"}},
         "tiers": {"hi": {"strong": "a", "weak": "a"}},
@@ -318,9 +317,7 @@ def test_parse_tier_with_request_router_and_threshold(registry, tmp_path, hi_rou
     )
 
 
-def test_parse_legacy_form_uses_default_tier_when_one_exists(
-    registry, tmp_path, hi_router
-):
+def test_parse_legacy_form_uses_default_tier_when_one_exists(registry, tmp_path, hi_router):
     controller = _controller(registry, tmp_path)
 
     assert controller._parse_model_name("router-hi-0.5") == ("default", "hi", 0.5)
@@ -328,9 +325,7 @@ def test_parse_legacy_form_uses_default_tier_when_one_exists(
 
 def test_parse_legacy_form_is_flat_without_a_default_tier(tmp_path, hi_router):
     flat = EndpointRegistry.from_config({"endpoints": {"a": {"model": "m"}}})
-    controller = _controller(
-        flat, tmp_path, strong_model="a", weak_model="a", default_router=None
-    )
+    controller = _controller(flat, tmp_path, strong_model="a", weak_model="a", default_router=None)
 
     assert controller._parse_model_name("router-hi-0.5") == (None, "hi", 0.5)
 
@@ -382,9 +377,7 @@ def test_high_score_cascades_to_the_deepest_strong_leaf(
 ):
     controller = _controller(registry, tmp_path)
 
-    res = controller.completion(
-        model="default", messages=[{"role": "user", "content": "hard"}]
-    )
+    res = controller.completion(model="default", messages=[{"role": "user", "content": "hard"}])
 
     path = res._hidden_params["routellm_path"]
     assert [entry["tier"] for entry in path] == ["default", "premium"]
@@ -392,9 +385,7 @@ def test_high_score_cascades_to_the_deepest_strong_leaf(
     assert mock_completion.call_args[1]["model"] == "gpt-4o"
 
 
-def test_low_score_stops_at_the_root_weak_leaf(
-    registry, tmp_path, lo_router, mock_completion
-):
+def test_low_score_stops_at_the_root_weak_leaf(registry, tmp_path, lo_router, mock_completion):
     low_config = {
         "endpoints": CONFIG["endpoints"],
         "tiers": {
@@ -409,9 +400,7 @@ def test_low_score_stops_at_the_root_weak_leaf(
         default_router="lo",
     )
 
-    res = controller.completion(
-        model="default", messages=[{"role": "user", "content": "easy"}]
-    )
+    res = controller.completion(model="default", messages=[{"role": "user", "content": "easy"}])
 
     path = res._hidden_params["routellm_path"]
     assert [entry["tier"] for entry in path] == ["default"]
@@ -424,9 +413,7 @@ def test_path_records_one_entry_per_level_with_win_rate(
 ):
     controller = _controller(registry, tmp_path)
 
-    res = controller.completion(
-        model="default", messages=[{"role": "user", "content": "hard"}]
-    )
+    res = controller.completion(model="default", messages=[{"role": "user", "content": "hard"}])
 
     path = res._hidden_params["routellm_path"]
     assert len(path) == 2
@@ -440,9 +427,7 @@ def test_router_runs_on_the_original_prompt_once_per_level(
 ):
     controller = _controller(registry, tmp_path)
 
-    controller.completion(
-        model="default", messages=[{"role": "user", "content": "the prompt"}]
-    )
+    controller.completion(model="default", messages=[{"role": "user", "content": "the prompt"}])
 
     assert hi_router.calls == ["the prompt", "the prompt"]
 
@@ -451,9 +436,7 @@ def test_path_is_logged_at_info(registry, tmp_path, hi_router, mock_completion, 
     caplog.set_level(logging.INFO, logger="routellm.controller")
     controller = _controller(registry, tmp_path)
 
-    controller.completion(
-        model="default", messages=[{"role": "user", "content": "hard"}]
-    )
+    controller.completion(model="default", messages=[{"role": "user", "content": "hard"}])
 
     assert any("cloud_strong" in record.message for record in caplog.records)
 
@@ -463,9 +446,7 @@ def test_model_counts_key_is_the_request_string_and_final_endpoint(
 ):
     controller = _controller(registry, tmp_path)
 
-    controller.completion(
-        model="default", messages=[{"role": "user", "content": "hard"}]
-    )
+    controller.completion(model="default", messages=[{"role": "user", "content": "hard"}])
 
     assert controller.model_counts["default"]["cloud_strong"] == 1
 
@@ -500,17 +481,12 @@ def _inheritance_registry(child_spec):
     )
 
 
-def test_child_without_values_inherits_the_parent_level(
-    tmp_path, hi_router, mock_completion
-):
+def test_child_without_values_inherits_the_parent_level(tmp_path, hi_router, mock_completion):
     controller = _controller(
-        _inheritance_registry({}), tmp_path, strong_model="strong_leaf",
-        weak_model="weak_leaf"
+        _inheritance_registry({}), tmp_path, strong_model="strong_leaf", weak_model="weak_leaf"
     )
 
-    res = controller.completion(
-        model="root", messages=[{"role": "user", "content": "hard"}]
-    )
+    res = controller.completion(model="root", messages=[{"role": "user", "content": "hard"}])
 
     child = res._hidden_params["routellm_path"][1]
     assert child["router"] == "hi"
@@ -528,9 +504,7 @@ def test_child_own_values_beat_the_parent(tmp_path, hi_router, lo_router, mock_c
         weak_model="weak_leaf",
     )
 
-    res = controller.completion(
-        model="root", messages=[{"role": "user", "content": "hard"}]
-    )
+    res = controller.completion(model="root", messages=[{"role": "user", "content": "hard"}])
 
     child = res._hidden_params["routellm_path"][1]
     assert child["router"] == "lo"
@@ -540,9 +514,7 @@ def test_child_own_values_beat_the_parent(tmp_path, hi_router, lo_router, mock_c
     assert child["picked"] == "weak_leaf"
 
 
-def test_root_without_values_takes_the_request_values(
-    tmp_path, hi_router, mock_completion
-):
+def test_root_without_values_takes_the_request_values(tmp_path, hi_router, mock_completion):
     registry = EndpointRegistry.from_config(
         {
             "endpoints": {"a": {"model": "m_a"}, "b": {"model": "m_b"}},
@@ -580,9 +552,7 @@ def test_root_without_request_values_takes_the_controller_defaults(
         weak_model="b",
     )
 
-    res = controller.completion(
-        model="bare", messages=[{"role": "user", "content": "hard"}]
-    )
+    res = controller.completion(model="bare", messages=[{"role": "user", "content": "hard"}])
 
     root = res._hidden_params["routellm_path"][0]
     assert root["router"] == "hi"
@@ -604,9 +574,7 @@ def test_default_router_falls_back_to_the_first_configured_router(
         registry, tmp_path, default_router=None, strong_model="a", weak_model="b"
     )
 
-    res = controller.completion(
-        model="bare", messages=[{"role": "user", "content": "hard"}]
-    )
+    res = controller.completion(model="bare", messages=[{"role": "user", "content": "hard"}])
 
     assert res._hidden_params["routellm_path"][0]["router"] == "hi"
 
@@ -650,9 +618,7 @@ def test_middleware_bypasses_the_tree(registry, tmp_path, hi_router, mock_comple
 
     controller = _controller(registry, tmp_path, middleware=[_Middleware()])
 
-    res = controller.completion(
-        model="default", messages=[{"role": "user", "content": "hard"}]
-    )
+    res = controller.completion(model="default", messages=[{"role": "user", "content": "hard"}])
 
     path = res._hidden_params["routellm_path"]
     assert len(path) == 1
@@ -722,9 +688,7 @@ def test_fallback_descends_a_tier_sibling_by_weak_without_routers(
 
     monkeypatch.setattr(routellm.controller, "completion", _completion)
 
-    out = controller.completion(
-        model="default", messages=[{"role": "user", "content": "easy"}]
-    )
+    out = controller.completion(model="default", messages=[{"role": "user", "content": "easy"}])
 
     # Root scores 0.05 < 0.9, so it picks the weak leaf; the sibling is
     # the `premium` tier, descended by its weak side with no router run.
@@ -733,22 +697,16 @@ def test_fallback_descends_a_tier_sibling_by_weak_without_routers(
     assert out._hidden_params["routellm_path"][-1]["fallback_from"] == "premium"
 
 
-def test_canary_model_resolves_through_the_registry(
-    registry, tmp_path, hi_router, mock_completion
-):
+def test_canary_model_resolves_through_the_registry(registry, tmp_path, hi_router, mock_completion):
     controller = _controller(
         registry,
         tmp_path,
         quality_manager=QualityManager(
-            canary_config=CanaryConfig(
-                enabled=True, canary_model="local_fast", weight=1.0
-            )
+            canary_config=CanaryConfig(enabled=True, canary_model="local_fast", weight=1.0)
         ),
     )
 
-    controller.completion(
-        model="default", messages=[{"role": "user", "content": "hard"}]
-    )
+    controller.completion(model="default", messages=[{"role": "user", "content": "hard"}])
 
     assert mock_completion.call_args[1]["model"] == "ollama_chat/qwen3:8b"
 
@@ -809,9 +767,7 @@ async def test_acompletion_walks_the_tree_and_attaches_the_path(
     res = MagicMock()
     res._hidden_params = {}
     res.model_dump.return_value = {"choices": []}
-    monkeypatch.setattr(
-        routellm.controller, "acompletion", AsyncMock(return_value=res)
-    )
+    monkeypatch.setattr(routellm.controller, "acompletion", AsyncMock(return_value=res))
     controller = _controller(registry, tmp_path)
 
     out = await controller.acompletion(
@@ -891,9 +847,7 @@ def test_server_exposes_a_default_threshold_flag():
 # ---------------------------------------------------------------------------
 
 
-def test_route_only_router_reports_null_win_rate(
-    registry, tmp_path, monkeypatch, mock_completion
-):
+def test_route_only_router_reports_null_win_rate(registry, tmp_path, monkeypatch, mock_completion):
     """A router implementing only `route` still routes, scoring None."""
 
     class RouteOnly(Router):
@@ -903,14 +857,10 @@ def test_route_only_router_reports_null_win_rate(
         def route(self, prompt, threshold, routed_pair):
             return routed_pair.strong
 
-    monkeypatch.setitem(
-        routellm.controller.ROUTER_CLS, "hi", lambda **kw: RouteOnly()
-    )
+    monkeypatch.setitem(routellm.controller.ROUTER_CLS, "hi", lambda **kw: RouteOnly())
     controller = _controller(registry, tmp_path)
 
-    res = controller.completion(
-        model="default", messages=[{"role": "user", "content": "hard"}]
-    )
+    res = controller.completion(model="default", messages=[{"role": "user", "content": "hard"}])
 
     path = res._hidden_params["routellm_path"]
     assert [entry["picked"] for entry in path] == ["premium", "cloud_strong"]
@@ -926,9 +876,7 @@ def test_scorer_called_once_per_level(registry, tmp_path, monkeypatch, mock_comp
             calls.append(prompt)
             return 0.9
 
-    monkeypatch.setitem(
-        routellm.controller.ROUTER_CLS, "hi", lambda **kw: Counting()
-    )
+    monkeypatch.setitem(routellm.controller.ROUTER_CLS, "hi", lambda **kw: Counting())
     controller = _controller(registry, tmp_path)
 
     res = controller.completion(
@@ -953,9 +901,7 @@ def test_routing_leaves_the_router_instance_untouched(
     """
     controller = _controller(registry, tmp_path)
 
-    controller.completion(
-        model="default", messages=[{"role": "user", "content": "hard"}]
-    )
+    controller.completion(model="default", messages=[{"role": "user", "content": "hard"}])
 
     instance = controller.routers["hi"]
     assert "calculate_strong_win_rate" not in vars(instance)
@@ -1000,17 +946,13 @@ def test_middleware_pair_falls_back_to_its_own_other_side(
     )
     seen, _ = _failing_completion(monkeypatch, "gpt-4o")
 
-    controller.completion(
-        model="default", messages=[{"role": "user", "content": "hard"}]
-    )
+    controller.completion(model="default", messages=[{"role": "user", "content": "hard"}])
 
     # Strong side picked and failed, so the pair's weak side must serve.
     assert seen == ["gpt-4o", "ollama_chat/qwen3:8b"]
 
 
-def test_traffic_rule_pair_falls_back_within_that_pair(
-    tmp_path, hi_router, monkeypatch
-):
+def test_traffic_rule_pair_falls_back_within_that_pair(tmp_path, hi_router, monkeypatch):
     """A flat controller must not fall back into the default pair."""
     flat = EndpointRegistry.from_config(
         {
@@ -1058,15 +1000,11 @@ def test_successful_canary_is_not_labelled_a_fallback(
         registry,
         tmp_path,
         quality_manager=QualityManager(
-            canary_config=CanaryConfig(
-                enabled=True, canary_model="local_fast", weight=1.0
-            )
+            canary_config=CanaryConfig(enabled=True, canary_model="local_fast", weight=1.0)
         ),
     )
 
-    res = controller.completion(
-        model="default", messages=[{"role": "user", "content": "hard"}]
-    )
+    res = controller.completion(model="default", messages=[{"role": "user", "content": "hard"}])
 
     path = res._hidden_params["routellm_path"]
     assert all("fallback_from" not in entry for entry in path)
@@ -1095,8 +1033,6 @@ def test_real_fallback_is_still_labelled(registry, tmp_path, lo_router, monkeypa
     )
     _, res = _failing_completion(monkeypatch, "ollama_chat/qwen3:8b")
 
-    out = controller.completion(
-        model="default", messages=[{"role": "user", "content": "easy"}]
-    )
+    out = controller.completion(model="default", messages=[{"role": "user", "content": "easy"}])
 
     assert out._hidden_params["routellm_path"][-1]["fallback_from"] == "premium"

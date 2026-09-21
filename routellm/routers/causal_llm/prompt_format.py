@@ -30,6 +30,7 @@ class PromptFormat(BaseModel):
     is_generation : bool, optional
         Whether format is for generation (vs training/eval) (default False).
     """
+
     system: str
     assistant: str
     trailing_assistant: str
@@ -41,23 +42,23 @@ class PromptFormat(BaseModel):
 
     @validator("system")
     def check_system(cls, value):
-        assert value and (
-            "{instruction}" in value
-        ), "system must be a string containing '{instruction}'"
+        assert value and ("{instruction}" in value), (
+            "system must be a string containing '{instruction}'"
+        )
         return value
 
     @validator("assistant")
     def check_assistant(cls, value):
-        assert (
-            value and "{instruction}" in value
-        ), "assistant must be a string containing '{instruction}'"
+        assert value and "{instruction}" in value, (
+            "assistant must be a string containing '{instruction}'"
+        )
         return value
 
     @validator("user")
     def check_user(cls, value):
-        assert value and (
-            "{instruction}" in value
-        ), "user must be a string containing '{instruction}'"
+        assert value and ("{instruction}" in value), (
+            "user must be a string containing '{instruction}'"
+        )
         return value
 
     @validator("system_in_user")
@@ -122,15 +123,9 @@ class PromptFormat(BaseModel):
 
         # only applies at train/eval but not in generation
         if not self.is_generation and not messages[-1]["role"] == "assistant":
-            raise ValueError(
-                f"Last message must be from assistant, got {messages[-1]['role']}"
-            )
+            raise ValueError(f"Last message must be from assistant, got {messages[-1]['role']}")
 
-        if (
-            system_message is not None
-            and system_message["content"]
-            and not self.system_in_user
-        ):
+        if system_message is not None and system_message["content"] and not self.system_in_user:
             messages.insert(0, system_message)
 
         prompt = []
@@ -152,9 +147,7 @@ class PromptFormat(BaseModel):
                             "content": self.user.format(
                                 instruction=message_content,
                                 system=(
-                                    self.system.format(
-                                        instruction=system_message["content"]
-                                    )
+                                    self.system.format(instruction=system_message["content"])
                                     if system_message
                                     else ""
                                 ),

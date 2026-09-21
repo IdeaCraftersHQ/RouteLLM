@@ -256,9 +256,7 @@ def from_tags(tags: list[str]) -> Capabilities:
     return Capabilities(**values)
 
 
-def capabilities_for(
-    endpoint: "Endpoint", record: Optional["ModelRecord"]
-) -> Capabilities:
+def capabilities_for(endpoint: "Endpoint", record: Optional["ModelRecord"]) -> Capabilities:
     """Return one endpoint's merged capabilities.
 
     The composition of `from_tags` over the endpoint's tags and `merge`
@@ -383,9 +381,7 @@ def parse_capability_terms(terms: list[str]) -> CapabilityQuery:
         else:  # pragma: no cover - the splitter never routes anything else
             raise ValueError(f"Selector term {term!r} is not a capability term.")
 
-    return CapabilityQuery(
-        booleans=booleans, ranges=ranges, modalities_in=modalities
-    )
+    return CapabilityQuery(booleans=booleans, ranges=ranges, modalities_in=modalities)
 
 
 def _as_bool(key: str, value: str) -> bool:
@@ -396,8 +392,7 @@ def _as_bool(key: str, value: str) -> bool:
     if lowered in _FALSE:
         return False
     raise ValueError(
-        f"Selector term {key}:{value!r} needs a boolean value; write "
-        f"{key}:true or {key}:false."
+        f"Selector term {key}:{value!r} needs a boolean value; write {key}:true or {key}:false."
     )
 
 
@@ -411,7 +406,7 @@ def _as_range(key: str, value: str) -> tuple[str, int]:
     text = value.strip()
     for op in (">=", "<="):
         if text.startswith(op):
-            number = text[len(op):].strip()
+            number = text[len(op) :].strip()
             try:
                 return op, int(number)
             except ValueError:

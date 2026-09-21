@@ -21,9 +21,7 @@ from routellm.types import ModelPair
 # https://github.com/sgl-project/sglang/blob/main/benchmark/gsm8k/bench_sglang.py
 
 INVALID = -9999999
-ROUTED_PAIR = ModelPair(
-    strong="gpt-4-1106-preview", weak="mistralai/Mixtral-8x7B-Instruct-v0.1"
-)
+ROUTED_PAIR = ModelPair(strong="gpt-4-1106-preview", weak="mistralai/Mixtral-8x7B-Instruct-v0.1")
 
 
 def select_sglang_backend(args):

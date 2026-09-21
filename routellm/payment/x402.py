@@ -180,9 +180,7 @@ class X402Adapter(PaymentGateway):
         budget = self._budget
 
         if scope is None:
-            return httpx.AsyncClient(
-                transport=x402AsyncTransport(client, transport)
-            )
+            return httpx.AsyncClient(transport=x402AsyncTransport(client, transport))
 
         from routellm.payment.scope import scoped_payment_transport
 
@@ -243,9 +241,7 @@ class X402Adapter(PaymentGateway):
             # own default asset, which is the only place the asset's
             # decimals are known. Comparing it to the atomic amount
             # here would be that conversion hand-rolled.
-            http_client._client.set_spend_controls(
-                {"max_amount_per_payment": cap}
-            )
+            http_client._client.set_spend_controls({"max_amount_per_payment": cap})
 
         try:
             payment_headers, payload = await http_client.handle_402_response(

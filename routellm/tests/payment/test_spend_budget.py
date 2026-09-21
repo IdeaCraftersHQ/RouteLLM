@@ -22,6 +22,7 @@ under-spends rather than over-spends.
 The budget is process-wide and in memory, exactly as `--max-payment`
 is. A restart clears it.
 """
+
 import asyncio
 import base64
 import json
@@ -69,18 +70,12 @@ class ChargingProvider(httpx.AsyncBaseTransport):
         self.paid_urls: list[str] = []
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        proof = request.headers.get("PAYMENT-SIGNATURE") or request.headers.get(
-            "X-PAYMENT"
-        )
+        proof = request.headers.get("PAYMENT-SIGNATURE") or request.headers.get("X-PAYMENT")
         if not proof:
             body = challenge(str(request.url), self.amount)
             return httpx.Response(
                 402,
-                headers={
-                    "PAYMENT-REQUIRED": base64.b64encode(
-                        json.dumps(body).encode()
-                    ).decode()
-                },
+                headers={"PAYMENT-REQUIRED": base64.b64encode(json.dumps(body).encode()).decode()},
                 json=body,
                 request=request,
             )
@@ -448,9 +443,7 @@ async def test_a_sequence_of_payments_fits_inside_the_budget():
     )
     async with session:
         for _ in range(2):
-            response = await session.post(
-                f"{AUTHORISED}/chat/completions", json={"messages": []}
-            )
+            response = await session.post(f"{AUTHORISED}/chat/completions", json={"messages": []})
             assert response.status_code == 200
 
     assert len(provider.paid_urls) == 2
@@ -483,9 +476,7 @@ async def test_the_budget_exhausts_part_way_through_a_sequence():
         await session.post(f"{AUTHORISED}/chat/completions", json={"messages": []})
 
         with pytest.raises(Exception) as caught:
-            await session.post(
-                f"{AUTHORISED}/chat/completions", json={"messages": []}
-            )
+            await session.post(f"{AUTHORISED}/chat/completions", json={"messages": []})
 
     message = str(caught.value)
     assert "budget" in message.lower()
@@ -519,9 +510,7 @@ async def test_a_refused_payment_does_not_consume_the_budget():
     )
     async with session:
         with pytest.raises(Exception):
-            await session.post(
-                f"{AUTHORISED}/chat/completions", json={"messages": []}
-            )
+            await session.post(f"{AUTHORISED}/chat/completions", json={"messages": []})
 
     assert provider.paid_urls == []
     assert budget.remaining == "$0.01"
@@ -546,9 +535,7 @@ async def test_a_request_outside_the_scope_never_touches_the_budget():
         budget=budget,
     )
     async with session:
-        response = await session.post(
-            f"{OTHER}/chat/completions", json={"messages": []}
-        )
+        response = await session.post(f"{OTHER}/chat/completions", json={"messages": []})
 
     assert response.status_code == 402
     assert budget.remaining == "$0.01"
@@ -578,14 +565,10 @@ async def test_concurrent_requests_race_the_last_of_the_budget():
     )
 
     async def call():
-        return await session.post(
-            f"{AUTHORISED}/chat/completions", json={"messages": []}
-        )
+        return await session.post(f"{AUTHORISED}/chat/completions", json={"messages": []})
 
     async with session:
-        outcomes = await asyncio.gather(
-            call(), call(), return_exceptions=True
-        )
+        outcomes = await asyncio.gather(call(), call(), return_exceptions=True)
 
     paid = [o for o in outcomes if not isinstance(o, BaseException)]
     refused = [o for o in outcomes if isinstance(o, BaseException)]
@@ -767,9 +750,7 @@ async def test_the_controller_seam_refuses_once_the_budget_is_gone():
         return "paid answer"
 
     # First payment fits: $0.002 of $0.003.
-    assert await controller._request_with_payment(call_once, endpoint="cheap") == (
-        "paid answer"
-    )
+    assert await controller._request_with_payment(call_once, endpoint="cheap") == ("paid answer")
 
     with pytest.raises(Exception) as caught:
         await controller._request_with_payment(always_402, endpoint="cheap")
@@ -814,7 +795,10 @@ async def test_both_seams_draw_down_one_shared_remainder():
     # endpoint cap exactly finishes it.
     gateway = CapturingGateway()
     controller = controller_with(
-        gateway, CONFIG, weak="cheap", limits=PaymentLimits(global_cap="$0.01"),
+        gateway,
+        CONFIG,
+        weak="cheap",
+        limits=PaymentLimits(global_cap="$0.01"),
         budget=budget,
     )
 
@@ -848,9 +832,7 @@ async def test_no_budget_leaves_the_controller_seam_paying_as_before():
             raise refusal()
         return "paid answer"
 
-    assert await controller._request_with_payment(call, endpoint="cheap") == (
-        "paid answer"
-    )
+    assert await controller._request_with_payment(call, endpoint="cheap") == ("paid answer")
     assert gateway.caps == [("$0.002", "endpoint")]
 
 
@@ -879,11 +861,7 @@ async def test_a_402_that_was_never_paid_does_not_consume_the_budget():
             body = challenge(str(request.url), CHEAP)
             return httpx.Response(
                 402,
-                headers={
-                    "PAYMENT-REQUIRED": base64.b64encode(
-                        json.dumps(body).encode()
-                    ).decode()
-                },
+                headers={"PAYMENT-REQUIRED": base64.b64encode(json.dumps(body).encode()).decode()},
                 json=body,
                 request=request,
             )
@@ -900,9 +878,7 @@ async def test_a_402_that_was_never_paid_does_not_consume_the_budget():
         budget=budget,
     )
     async with session:
-        response = await session.post(
-            f"{AUTHORISED}/chat/completions", json={"messages": []}
-        )
+        response = await session.post(f"{AUTHORISED}/chat/completions", json={"messages": []})
 
     assert response.status_code == 402
     # The signature was never accepted, so the budget is untouched and

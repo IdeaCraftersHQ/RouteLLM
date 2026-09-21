@@ -37,6 +37,7 @@ class CacheConfig(BaseModel):
     embedding_model : str
         Model name for generating embeddings. Default: "text-embedding-3-small".
     """
+
     enabled: bool = True
     db_path: str = ".routellm_cache.db"
     ttl_seconds: int = 86400  # 24 hours
@@ -98,11 +99,7 @@ class Cache:
         str
             SHA256 hash as cache key.
         """
-        data = {
-            "prompt": prompt,
-            "model": model,
-            "params": params
-        }
+        data = {"prompt": prompt, "model": model, "params": params}
         return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
     def get(self, prompt: str, model: str, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -134,10 +131,7 @@ class Cache:
         cursor = conn.cursor()
 
         # 1. Try exact match
-        cursor.execute(
-            "SELECT response, created_at FROM completion_cache WHERE key = ?",
-            (key,)
-        )
+        cursor.execute("SELECT response, created_at FROM completion_cache WHERE key = ?", (key,))
         row = cursor.fetchone()
 
         if row:
@@ -155,7 +149,7 @@ class Cache:
             prompt_emb = self._get_embedding(prompt)
             cursor.execute(
                 "SELECT response, embedding, created_at FROM completion_cache WHERE model = ? AND embedding IS NOT NULL",
-                (model,)
+                (model,),
             )
             rows = cursor.fetchall()
             for r, emb_blob, c_at in rows:
@@ -182,7 +176,9 @@ class Cache:
         conn.close()
         return None
 
-    async def aget(self, prompt: str, model: str, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def aget(
+        self, prompt: str, model: str, params: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """Async wrapper for get().
 
         Parameters
@@ -199,9 +195,7 @@ class Cache:
         dict or None
             Cached response dict, or None if cache miss.
         """
-        return await asyncio.get_event_loop().run_in_executor(
-            None, self.get, prompt, model, params
-        )
+        return await asyncio.get_event_loop().run_in_executor(None, self.get, prompt, model, params)
 
     def put(self, prompt: str, model: str, params: Dict[str, Any], response: Dict[str, Any]):
         """Store completion in cache.
@@ -240,8 +234,8 @@ class Cache:
                 model,
                 json.dumps(response),
                 embedding.tobytes() if embedding is not None else None,
-                int(time.time())
-            )
+                int(time.time()),
+            ),
         )
         conn.commit()
         conn.close()
@@ -278,5 +272,6 @@ class Cache:
             Embedding vector (float32).
         """
         from litellm import embedding
+
         res = embedding(model=self.config.embedding_model, input=[text])
         return np.array(res.data[0]["embedding"], dtype=np.float32)

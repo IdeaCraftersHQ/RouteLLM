@@ -37,6 +37,7 @@ class Router(abc.ABC):
     to make the routing decision: if score >= threshold, route to strong;
     otherwise route to weak.
     """
+
     NO_PARALLEL = False
 
     @abc.abstractmethod

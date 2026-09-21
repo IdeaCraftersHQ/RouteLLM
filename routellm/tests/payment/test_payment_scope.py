@@ -11,6 +11,7 @@ the base URL the session sees. An endpoint that says nothing about
 payment does not pay, so turning payments on authorises nothing by
 itself.
 """
+
 import base64
 import json
 
@@ -58,18 +59,12 @@ class ChargingProvider(httpx.AsyncBaseTransport):
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         self.seen_urls.append(str(request.url))
-        proof = request.headers.get("PAYMENT-SIGNATURE") or request.headers.get(
-            "X-PAYMENT"
-        )
+        proof = request.headers.get("PAYMENT-SIGNATURE") or request.headers.get("X-PAYMENT")
         if not proof:
             body = challenge(str(request.url))
             return httpx.Response(
                 402,
-                headers={
-                    "PAYMENT-REQUIRED": base64.b64encode(
-                        json.dumps(body).encode()
-                    ).decode()
-                },
+                headers={"PAYMENT-REQUIRED": base64.b64encode(json.dumps(body).encode()).decode()},
                 json=body,
                 request=request,
             )
@@ -120,13 +115,9 @@ async def test_unauthorised_endpoint_is_never_signed_for():
     provider = ChargingProvider()
     adapter = X402Adapter(private_key=TEST_KEY, networks=["base-sepolia"])
 
-    session = install_payment_session(
-        adapter, transport=provider, payable_bases=[AUTHORISED]
-    )
+    session = install_payment_session(adapter, transport=provider, payable_bases=[AUTHORISED])
     async with session:
-        response = await session.post(
-            f"{UNAUTHORISED}/chat/completions", json={"messages": []}
-        )
+        response = await session.post(f"{UNAUTHORISED}/chat/completions", json={"messages": []})
 
     # The 402 comes back untouched, exactly as it would with payments
     # off: refused, not paid, and not turned into an exception either.
@@ -147,13 +138,9 @@ async def test_authorised_endpoint_still_pays():
     provider = ChargingProvider()
     adapter = X402Adapter(private_key=TEST_KEY, networks=["base-sepolia"])
 
-    session = install_payment_session(
-        adapter, transport=provider, payable_bases=[AUTHORISED]
-    )
+    session = install_payment_session(adapter, transport=provider, payable_bases=[AUTHORISED])
     async with session:
-        response = await session.post(
-            f"{AUTHORISED}/chat/completions", json={"messages": []}
-        )
+        response = await session.post(f"{AUTHORISED}/chat/completions", json={"messages": []})
 
     assert response.status_code == 200
     assert provider.paid_urls == [f"{AUTHORISED}/chat/completions"]
@@ -172,16 +159,10 @@ async def test_one_session_separates_authorised_from_unauthorised():
     provider = ChargingProvider()
     adapter = X402Adapter(private_key=TEST_KEY, networks=["base-sepolia"])
 
-    session = install_payment_session(
-        adapter, transport=provider, payable_bases=[AUTHORISED]
-    )
+    session = install_payment_session(adapter, transport=provider, payable_bases=[AUTHORISED])
     async with session:
-        paid = await session.post(
-            f"{AUTHORISED}/chat/completions", json={"messages": []}
-        )
-        refused = await session.post(
-            f"{UNAUTHORISED}/chat/completions", json={"messages": []}
-        )
+        paid = await session.post(f"{AUTHORISED}/chat/completions", json={"messages": []})
+        refused = await session.post(f"{UNAUTHORISED}/chat/completions", json={"messages": []})
 
     assert paid.status_code == 200
     assert refused.status_code == 402
@@ -203,9 +184,7 @@ async def test_no_authorised_endpoint_pays_nothing():
 
     session = install_payment_session(adapter, transport=provider, payable_bases=[])
     async with session:
-        response = await session.post(
-            f"{AUTHORISED}/chat/completions", json={"messages": []}
-        )
+        response = await session.post(f"{AUTHORISED}/chat/completions", json={"messages": []})
 
     assert response.status_code == 402
     assert provider.paid_urls == []
@@ -225,9 +204,7 @@ async def test_a_sibling_host_is_not_covered_by_a_prefix():
     provider = ChargingProvider()
     adapter = X402Adapter(private_key=TEST_KEY, networks=["base-sepolia"])
 
-    session = install_payment_session(
-        adapter, transport=provider, payable_bases=[AUTHORISED]
-    )
+    session = install_payment_session(adapter, transport=provider, payable_bases=[AUTHORISED])
     async with session:
         response = await session.post(
             "https://paid.example.com.evil.test/v1/chat/completions",
@@ -252,9 +229,7 @@ async def test_a_path_outside_the_authorised_base_does_not_pay():
     provider = ChargingProvider()
     adapter = X402Adapter(private_key=TEST_KEY, networks=["base-sepolia"])
 
-    session = install_payment_session(
-        adapter, transport=provider, payable_bases=[AUTHORISED]
-    )
+    session = install_payment_session(adapter, transport=provider, payable_bases=[AUTHORISED])
     async with session:
         response = await session.post(
             "https://paid.example.com/admin/chat/completions", json={"messages": []}
@@ -289,12 +264,8 @@ async def test_the_installed_session_carries_the_scope():
     session = litellm.aclient_session
     session._transport._transport = provider
 
-    refused = await session.post(
-        f"{UNAUTHORISED}/chat/completions", json={"messages": []}
-    )
-    paid = await session.post(
-        f"{AUTHORISED}/chat/completions", json={"messages": []}
-    )
+    refused = await session.post(f"{UNAUTHORISED}/chat/completions", json={"messages": []})
+    paid = await session.post(f"{AUTHORISED}/chat/completions", json={"messages": []})
 
     assert refused.status_code == 402
     assert paid.status_code == 200
@@ -312,16 +283,12 @@ async def test_payments_enabled_with_no_payable_endpoint_signs_nothing():
     from routellm.payment.transport import maybe_install_payment_session
 
     provider = ChargingProvider()
-    maybe_install_payment_session(
-        provider="x402", wallet_key=TEST_KEY, networks=["base-sepolia"]
-    )
+    maybe_install_payment_session(provider="x402", wallet_key=TEST_KEY, networks=["base-sepolia"])
 
     session = litellm.aclient_session
     session._transport._transport = provider
 
-    response = await session.post(
-        f"{AUTHORISED}/chat/completions", json={"messages": []}
-    )
+    response = await session.post(f"{AUTHORISED}/chat/completions", json={"messages": []})
 
     assert response.status_code == 402
     assert provider.paid_urls == []

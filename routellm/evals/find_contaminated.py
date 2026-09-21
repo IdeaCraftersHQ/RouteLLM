@@ -38,9 +38,7 @@ def check_data_contamination_similarity(train_embeddings, eval_prompts):
     batch_size = 2000
     for eval_idx in tqdm.tqdm(range(0, len(eval_prompts), batch_size)):
         prompts = eval_prompts[eval_idx : eval_idx + batch_size]
-        responses = client.embeddings.create(
-            input=prompts, model="text-embedding-3-small"
-        ).data
+        responses = client.embeddings.create(input=prompts, model="text-embedding-3-small").data
         eval_embeddings.extend([data.embedding for data in responses])
 
     eval_embeddings = torch.tensor(eval_embeddings)
@@ -62,7 +60,6 @@ def check_data_contamination_similarity(train_embeddings, eval_prompts):
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--benchmark",
@@ -93,29 +90,19 @@ if __name__ == "__main__":
         eval_prompts = []
         for domain in ALL_MMLU_DOMAINS:
             eval_prompts.extend(
-                pd.read_csv(f"{current_dir}/mmlu/responses/mmlu_{domain}.csv")[
-                    "prompt"
-                ].tolist()
+                pd.read_csv(f"{current_dir}/mmlu/responses/mmlu_{domain}.csv")["prompt"].tolist()
             )
     elif args.benchmark == "gsm8k":
-        eval_prompts = pd.read_csv(f"{current_dir}/gsm8k/gsm8k_responses.csv")[
-            "prompt"
-        ].tolist()
+        eval_prompts = pd.read_csv(f"{current_dir}/gsm8k/gsm8k_responses.csv")["prompt"].tolist()
 
-    print(
-        f"Checking data contamination for {len(eval_prompts)} prompts from {args.benchmark}"
-    )
+    print(f"Checking data contamination for {len(eval_prompts)} prompts from {args.benchmark}")
 
     train_prompts = (
-        pd.read_json(args.battles_path)["conversation_a"]
-        .apply(lambda x: x[0]["content"])
-        .tolist()
+        pd.read_json(args.battles_path)["conversation_a"].apply(lambda x: x[0]["content"]).tolist()
     )
     train_embeddings = np.load(args.embeddings_path)
 
-    contaminated_prompts = check_data_contamination_similarity(
-        train_embeddings, eval_prompts
-    )
+    contaminated_prompts = check_data_contamination_similarity(train_embeddings, eval_prompts)
 
     battles = pd.read_json(args.battles_path)
 

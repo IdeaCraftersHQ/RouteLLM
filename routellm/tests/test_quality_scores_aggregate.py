@@ -41,9 +41,7 @@ def _rows(count, **kwargs):
 
 
 def test_mean_maps_to_the_zero_hundred_scale():
-    rows = (
-        _rows(10, score=0.9) + _rows(10, score=0.7) + _rows(10, score=0.8)
-    )
+    rows = _rows(10, score=0.9) + _rows(10, score=0.7) + _rows(10, score=0.8)
     sidecar = aggregate_scores(rows, min_samples=30, transform="linear")
 
     assert sidecar["endpoints"]["local_fast"]["quality"] == 80
@@ -76,10 +74,7 @@ def test_null_scores_are_dropped_and_not_counted_in_n():
 
 
 def test_by_area_splits_the_same_endpoint():
-    rows = (
-        _rows(30, score=0.9, area="coding")
-        + _rows(30, score=0.5, area="copywriting")
-    )
+    rows = _rows(30, score=0.9, area="coding") + _rows(30, score=0.5, area="copywriting")
     sidecar = aggregate_scores(rows, min_samples=30, transform="linear")
 
     entry = sidecar["endpoints"]["local_fast"]
@@ -90,10 +85,7 @@ def test_by_area_splits_the_same_endpoint():
 
 
 def test_an_area_under_the_threshold_is_left_out_of_by_area_only():
-    rows = (
-        _rows(30, score=0.9, area="coding")
-        + _rows(5, score=0.1, area="copywriting")
-    )
+    rows = _rows(30, score=0.9, area="coding") + _rows(5, score=0.1, area="copywriting")
     sidecar = aggregate_scores(rows, min_samples=30, transform="linear")
 
     entry = sidecar["endpoints"]["local_fast"]
@@ -150,9 +142,7 @@ def test_sidecar_round_trips_through_yaml(tmp_path):
 def test_aggregate_needs_no_fit(tmp_path):
     """Aggregation is arithmetic; it must run where fit is absent."""
     scores = tmp_path / "scores.jsonl"
-    scores.write_text(
-        "\n".join(json.dumps(row) for row in _rows(30, score=0.8)) + "\n"
-    )
+    scores.write_text("\n".join(json.dumps(row) for row in _rows(30, score=0.8)) + "\n")
     out = tmp_path / "quality.yaml"
 
     script = textwrap.dedent(
@@ -173,9 +163,7 @@ def test_aggregate_needs_no_fit(tmp_path):
         sys.exit(code)
         """
     )
-    result = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True
-    )
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
 
     assert result.returncode == 0, result.stderr
     assert yaml.safe_load(out.read_text())["endpoints"]["local_fast"]["quality"] == 80
@@ -231,14 +219,30 @@ def test_cli_min_samples_flag_reaches_the_aggregation(tmp_path):
     scores = _scores_file(tmp_path, _rows(30, score=0.8))
     lenient, strict = tmp_path / "a.yaml", tmp_path / "b.yaml"
 
-    assert _cli(
-        "aggregate", "--scores", str(scores), "--out", str(lenient),
-        "--min-samples", "30",
-    ) == 0
-    assert _cli(
-        "aggregate", "--scores", str(scores), "--out", str(strict),
-        "--min-samples", "31",
-    ) == 0
+    assert (
+        _cli(
+            "aggregate",
+            "--scores",
+            str(scores),
+            "--out",
+            str(lenient),
+            "--min-samples",
+            "30",
+        )
+        == 0
+    )
+    assert (
+        _cli(
+            "aggregate",
+            "--scores",
+            str(scores),
+            "--out",
+            str(strict),
+            "--min-samples",
+            "31",
+        )
+        == 0
+    )
 
     assert "local_fast" in _sidecar(lenient)["endpoints"]
     assert _sidecar(strict)["endpoints"] == {}
@@ -246,18 +250,23 @@ def test_cli_min_samples_flag_reaches_the_aggregation(tmp_path):
 
 
 def test_cli_transform_flag_reaches_the_aggregation(tmp_path):
-    rows = (
-        _rows(30, score=0.50, endpoint="a")
-        + _rows(30, score=0.52, endpoint="c")
-    )
+    rows = _rows(30, score=0.50, endpoint="a") + _rows(30, score=0.52, endpoint="c")
     scores = _scores_file(tmp_path, rows)
     linear, spread = tmp_path / "lin.yaml", tmp_path / "pct.yaml"
 
     assert _cli("aggregate", "--scores", str(scores), "--out", str(linear)) == 0
-    assert _cli(
-        "aggregate", "--scores", str(scores), "--out", str(spread),
-        "--transform", "percentile",
-    ) == 0
+    assert (
+        _cli(
+            "aggregate",
+            "--scores",
+            str(scores),
+            "--out",
+            str(spread),
+            "--transform",
+            "percentile",
+        )
+        == 0
+    )
 
     assert _sidecar(linear)["transform"] == "linear"
     assert _sidecar(linear)["endpoints"]["a"]["quality"] == 50
@@ -272,16 +281,22 @@ def test_cli_config_flag_rekeys_by_area_from_tier_to_area(tmp_path):
     scores = _scores_file(tmp_path, rows)
 
     config = tmp_path / "config.yaml"
-    config.write_text(
-        yaml.safe_dump({"areas": {"coding": ["coding_fast"]}}, sort_keys=False)
-    )
+    config.write_text(yaml.safe_dump({"areas": {"coding": ["coding_fast"]}}, sort_keys=False))
 
     without, with_ = tmp_path / "w0.yaml", tmp_path / "w1.yaml"
     assert _cli("aggregate", "--scores", str(scores), "--out", str(without)) == 0
-    assert _cli(
-        "aggregate", "--scores", str(scores), "--out", str(with_),
-        "--config", str(config),
-    ) == 0
+    assert (
+        _cli(
+            "aggregate",
+            "--scores",
+            str(scores),
+            "--out",
+            str(with_),
+            "--config",
+            str(config),
+        )
+        == 0
+    )
 
     bare = _sidecar(without)
     assert bare["area_source"] == "tier"
@@ -306,8 +321,13 @@ def test_cli_missing_config_file_exits_nonzero_naming_it(tmp_path, capsys):
     missing = tmp_path / "nope.yaml"
 
     code = _cli(
-        "aggregate", "--scores", str(scores), "--out", str(tmp_path / "q.yaml"),
-        "--config", str(missing),
+        "aggregate",
+        "--scores",
+        str(scores),
+        "--out",
+        str(tmp_path / "q.yaml"),
+        "--config",
+        str(missing),
     )
 
     assert code == 1
@@ -319,8 +339,13 @@ def test_cli_a_bad_transform_value_exits_two(tmp_path):
 
     with pytest.raises(SystemExit) as excinfo:
         _cli(
-            "aggregate", "--scores", str(scores), "--out", str(tmp_path / "q.yaml"),
-            "--transform", "bogus",
+            "aggregate",
+            "--scores",
+            str(scores),
+            "--out",
+            str(tmp_path / "q.yaml"),
+            "--transform",
+            "bogus",
         )
 
     assert excinfo.value.code == 2
@@ -330,8 +355,10 @@ def test_cli_a_bad_transform_value_exits_two(tmp_path):
 def test_cli_a_missing_required_flag_exits_two(tmp_path, missing):
     argv = [
         "aggregate",
-        "--scores", str(_scores_file(tmp_path, _rows(30))),
-        "--out", str(tmp_path / "q.yaml"),
+        "--scores",
+        str(_scores_file(tmp_path, _rows(30))),
+        "--out",
+        str(tmp_path / "q.yaml"),
     ]
     index = argv.index(missing)
     del argv[index : index + 2]
@@ -347,8 +374,13 @@ def test_cli_missing_config_names_the_flag(tmp_path, capsys):
     missing = tmp_path / "nope.yaml"
 
     code = _cli(
-        "aggregate", "--scores", str(scores), "--out", str(tmp_path / "q.yaml"),
-        "--config", str(missing),
+        "aggregate",
+        "--scores",
+        str(scores),
+        "--out",
+        str(tmp_path / "q.yaml"),
+        "--config",
+        str(missing),
     )
 
     err = capsys.readouterr().err
@@ -363,8 +395,13 @@ def test_cli_a_malformed_config_names_the_file(tmp_path, capsys):
     config.write_text("not a mapping\n")
 
     code = _cli(
-        "aggregate", "--scores", str(scores), "--out", str(tmp_path / "q.yaml"),
-        "--config", str(config),
+        "aggregate",
+        "--scores",
+        str(scores),
+        "--out",
+        str(tmp_path / "q.yaml"),
+        "--config",
+        str(config),
     )
 
     assert code == 1
@@ -382,8 +419,13 @@ def test_cli_a_config_putting_a_tier_in_two_areas_names_both(tmp_path, capsys):
     )
 
     code = _cli(
-        "aggregate", "--scores", str(scores), "--out", str(tmp_path / "q.yaml"),
-        "--config", str(config),
+        "aggregate",
+        "--scores",
+        str(scores),
+        "--out",
+        str(tmp_path / "q.yaml"),
+        "--config",
+        str(config),
     )
 
     err = capsys.readouterr().err

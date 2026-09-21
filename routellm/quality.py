@@ -35,10 +35,12 @@ class CanaryConfig(BaseModel):
     contract_path : str, optional
         Path to Eva contract YAML for response validation (default None).
     """
+
     enabled: bool = False
     canary_model: str
-    weight: float = 0.05 # 5% traffic
-    contract_path: Optional[str] = None # Path to Eva contract YAML
+    weight: float = 0.05  # 5% traffic
+    contract_path: Optional[str] = None  # Path to Eva contract YAML
+
 
 class FineTuneConfig(BaseModel):
     """Configuration for trace recording.
@@ -77,13 +79,14 @@ class FineTuneConfig(BaseModel):
             )
         return data
 
+
 class QualityManager:
     """Handles canary testing and data collection for fine-tuning."""
-    
+
     def __init__(
-        self, 
+        self,
         canary_config: Optional[CanaryConfig] = None,
-        fine_tune_config: Optional[FineTuneConfig] = None
+        fine_tune_config: Optional[FineTuneConfig] = None,
     ):
         self.canary_config = canary_config or CanaryConfig(canary_model="")
         self.fine_tune_config = fine_tune_config or FineTuneConfig()
@@ -236,18 +239,14 @@ class QualityManager:
                 "routed_model": routed_model,
             }
 
-            final = os.path.join(
-                self.fine_tune_config.trace_dir, f"{trace_id}.json"
-            )
+            final = os.path.join(self.fine_tune_config.trace_dir, f"{trace_id}.json")
             temporary = f"{final}.tmp"
             with open(temporary, "w") as handle:
                 json.dump(trace, handle)
             os.replace(temporary, final)
             if self._listing is not None:
                 stat = os.stat(final)
-                self._listing.append(
-                    (trace_id, stat.st_size, stat.st_mtime_ns)
-                )
+                self._listing.append((trace_id, stat.st_size, stat.st_mtime_ns))
         except Exception as exc:
             logger.warning("failed to record trace: %s", exc)
 
@@ -287,8 +286,7 @@ class QualityManager:
             if name not in self._capped:
                 self._capped.add(name)
                 logger.warning(
-                    "trace directory over %s (%s files, %s bytes); "
-                    "deleting oldest first",
+                    "trace directory over %s (%s files, %s bytes); deleting oldest first",
                     name,
                     len(listing),
                     sum(entry[1] for entry in listing),
@@ -308,10 +306,7 @@ class QualityManager:
         Cached for `_LISTING_TTL_SECONDS` and refreshed after a delete.
         """
         now = time.monotonic()
-        if (
-            self._listing is not None
-            and now - self._listing_at < _LISTING_TTL_SECONDS
-        ):
+        if self._listing is not None and now - self._listing_at < _LISTING_TTL_SECONDS:
             self._listing.sort(key=_age_key)
             return self._listing
 
@@ -325,9 +320,7 @@ class QualityManager:
                     stat = os.stat(full)
                 except OSError:
                     continue
-                entries.append(
-                    (name[: -len(".json")], stat.st_size, stat.st_mtime_ns)
-                )
+                entries.append((name[: -len(".json")], stat.st_size, stat.st_mtime_ns))
         except OSError:
             entries = []
 

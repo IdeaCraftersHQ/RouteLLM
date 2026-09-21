@@ -77,7 +77,7 @@ def parse_cap(value):
     if parsed.get("symbol"):
         raise ValueError(
             f"payment cap {value!r} names the asset {parsed['symbol']}, but a "
-            "cap is stated in USD: write it as \"$0.01\". A per-asset cap is "
+            'cap is stated in USD: write it as "$0.01". A per-asset cap is '
             "an atomic amount against one token, which is not what this sets."
         )
     try:
@@ -165,9 +165,7 @@ class PaymentLimits:
                 continue
             # A path prefix only counts on a segment boundary, so `/v1`
             # does not cap `/v1beta`.
-            if base_path and not (
-                path == base_path or path.startswith(base_path + "/")
-            ):
+            if base_path and not (path == base_path or path.startswith(base_path + "/")):
                 continue
             # The longest matching prefix wins, so a cap on a
             # sub-path is not overridden by a broader one.

@@ -38,6 +38,7 @@ class CircuitBreaker:
     Tracks failures and health status of downstream services, opening
     circuit when failure threshold exceeded to prevent cascading failures.
     """
+
     def __init__(
         self,
         fail_max: int = 5,
@@ -74,7 +75,7 @@ class CircuitBreaker:
         self.state = CircuitState.CLOSED
         self.failures = 0
         self.last_failure_time = 0
-        self.history: List[tuple[float, bool]] = [] # (timestamp, success)
+        self.history: List[tuple[float, bool]] = []  # (timestamp, success)
 
     def _clean_history(self):
         """Remove stale entries from failure history."""
@@ -106,7 +107,7 @@ class CircuitBreaker:
         """
         if self.state == CircuitState.CLOSED:
             return True
-        
+
         if self.state == CircuitState.OPEN:
             now_ms = time.time() * 1000
             if now_ms - self.last_failure_time >= self.fail_wait_ms:
@@ -114,10 +115,10 @@ class CircuitBreaker:
                 self.state = CircuitState.HALF_OPEN
                 return True
             return False
-        
+
         if self.state == CircuitState.HALF_OPEN:
-            return True # Allow one trial
-            
+            return True  # Allow one trial
+
         return False
 
     def record_success(self):
@@ -141,11 +142,14 @@ class CircuitBreaker:
 
         if self.state == CircuitState.CLOSED:
             if self.failures >= self.fail_max or self._get_fail_rate() >= self.fail_rate:
-                logger.warning(f"Circuit Breaker: state changed to OPEN (failures: {self.failures}, rate: {self._get_fail_rate():.2f})")
+                logger.warning(
+                    f"Circuit Breaker: state changed to OPEN (failures: {self.failures}, rate: {self._get_fail_rate():.2f})"
+                )
                 self.state = CircuitState.OPEN
         elif self.state == CircuitState.HALF_OPEN:
             logger.warning("Circuit Breaker: trial failed, state changed back to OPEN")
             self.state = CircuitState.OPEN
+
 
 class ResilienceConfig(BaseModel):
     max_retries: int = 3
@@ -153,7 +157,7 @@ class ResilienceConfig(BaseModel):
     backoff_factor: float = 2.0
     initial_backoff_ms: int = 500
     timeout_ms: int = 30000
-    
+
     # Circuit Breaker
     cb_enabled: bool = True
     cb_fail_max: int = 5
@@ -161,6 +165,7 @@ class ResilienceConfig(BaseModel):
     cb_fail_wait_ms: int = 5000
     cb_rate_interval_ms: int = 60000
     cb_rate_minimum: int = 10
+
 
 class Resilience:
     def __init__(self, config: ResilienceConfig = None):
@@ -179,21 +184,29 @@ class Resilience:
             )
         return self.cb_map[key]
 
-    async def wrap_acompletion(self, model_name: str, fn: Callable[..., Awaitable[Any]], *args, **kwargs):
+    async def wrap_acompletion(
+        self, model_name: str, fn: Callable[..., Awaitable[Any]], *args, **kwargs
+    ):
         cb = self.get_cb(model_name)
-        
+
         last_error = None
         for attempt in range(self.config.max_retries + 1):
             if self.config.cb_enabled and not cb.can_execute():
                 raise Exception(f"Circuit breaker OPEN for {model_name}")
 
             if attempt > 0:
-                wait = (self.config.initial_backoff_ms / 1000) * (self.config.backoff_factor ** (attempt - 1))
-                logger.info(f"Retrying {model_name} (attempt {attempt}/{self.config.max_retries}) in {wait:.2f}s...")
+                wait = (self.config.initial_backoff_ms / 1000) * (
+                    self.config.backoff_factor ** (attempt - 1)
+                )
+                logger.info(
+                    f"Retrying {model_name} (attempt {attempt}/{self.config.max_retries}) in {wait:.2f}s..."
+                )
                 await asyncio.sleep(wait)
 
             try:
-                res = await asyncio.wait_for(fn(*args, **kwargs), timeout=self.config.timeout_ms / 1000)
+                res = await asyncio.wait_for(
+                    fn(*args, **kwargs), timeout=self.config.timeout_ms / 1000
+                )
                 if self.config.cb_enabled:
                     cb.record_success()
                 return res
@@ -212,29 +225,33 @@ class Resilience:
                 status_code = getattr(e, "status_code", None)
                 if attempt == self.config.max_retries:
                     raise
-                
+
                 # Check if retryable
                 if status_code and status_code not in self.config.retry_on_codes:
                     raise
-        
+
         if last_error:
             raise last_error
 
     def wrap_completion(self, model_name: str, fn: Callable[..., Any], *args, **kwargs):
         cb = self.get_cb(model_name)
-        
+
         last_error = None
         for attempt in range(self.config.max_retries + 1):
             if self.config.cb_enabled and not cb.can_execute():
                 raise Exception(f"Circuit breaker OPEN for {model_name}")
 
             if attempt > 0:
-                wait = (self.config.initial_backoff_ms / 1000) * (self.config.backoff_factor ** (attempt - 1))
-                logger.info(f"Retrying {model_name} (attempt {attempt}/{self.config.max_retries}) in {wait:.2f}s...")
+                wait = (self.config.initial_backoff_ms / 1000) * (
+                    self.config.backoff_factor ** (attempt - 1)
+                )
+                logger.info(
+                    f"Retrying {model_name} (attempt {attempt}/{self.config.max_retries}) in {wait:.2f}s..."
+                )
                 time.sleep(wait)
 
             try:
-                # Synchronous call doesn't easily support timeout without threads, 
+                # Synchronous call doesn't easily support timeout without threads,
                 # but we'll try to match the interface.
                 # LiteLLM completion usually has its own timeout param.
                 res = fn(*args, **kwargs)
@@ -249,10 +266,10 @@ class Resilience:
                 status_code = getattr(e, "status_code", None)
                 if attempt == self.config.max_retries:
                     raise
-                
+
                 # Check if retryable
                 if status_code and status_code not in self.config.retry_on_codes:
                     raise
-        
+
         if last_error:
             raise last_error

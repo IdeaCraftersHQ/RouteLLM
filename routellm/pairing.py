@@ -390,8 +390,7 @@ def load_catalog() -> list[ModelRecord]:
             raise
         age_hours = (time.time() - stored[0]) / 3600
         logger.warning(
-            "models.dev fetch failed; using the stale snapshot at %s "
-            "(%.1f hours old)",
+            "models.dev fetch failed; using the stale snapshot at %s (%.1f hours old)",
             path,
             age_hours,
         )
@@ -505,9 +504,14 @@ def _split_terms(select: str) -> tuple[list[str], list[str], str]:
         key, _, value = term.partition(":")
         if key == "tag":
             tags.append(value)
-        elif key in CAPABILITY_KEYS or key in RANGE_KEYS or key in (
-            "tool_call",
-            "input",
+        elif (
+            key in CAPABILITY_KEYS
+            or key in RANGE_KEYS
+            or key
+            in (
+                "tool_call",
+                "input",
+            )
         ):
             capability_terms.append(term)
         else:
@@ -543,9 +547,7 @@ def _catalog_filter(query: str, select: str):
     try:
         return aim.parse_query(query)
     except ValueError as exc:
-        raise ValueError(
-            f"Selector {select!r} has an invalid term: {exc}"
-        ) from exc
+        raise ValueError(f"Selector {select!r} has an invalid term: {exc}") from exc
 
 
 def _unsupported_term(name: str) -> ValueError:
@@ -762,9 +764,7 @@ def rank_candidates(
 
         measured = None
         if area is not None:
-            measured = (getattr(registry, "area_quality", {}) or {}).get(
-                name, {}
-            ).get(area)
+            measured = (getattr(registry, "area_quality", {}) or {}).get(name, {}).get(area)
 
         candidates.append(
             Candidate(
@@ -772,9 +772,7 @@ def rank_candidates(
                 endpoint=endpoint,
                 record=record,
                 capabilities=capabilities,
-                effective_quality=(
-                    measured if measured is not None else endpoint.quality
-                ),
+                effective_quality=(measured if measured is not None else endpoint.quality),
                 quality_area=area if measured is not None else None,
             )
         )
@@ -783,9 +781,7 @@ def rank_candidates(
     return [(candidate.name, candidate) for candidate in candidates]
 
 
-def _blocks_answer(
-    registry: EndpointRegistry, capability_query: CapabilityQuery
-) -> bool:
+def _blocks_answer(registry: EndpointRegistry, capability_query: CapabilityQuery) -> bool:
     """Return whether every endpoint answers a query without the catalog.
 
     A capability term is answerable locally when each endpoint's own
@@ -1003,9 +999,7 @@ def _quality_cell(endpoint: Endpoint) -> str:
     return f"{quality} ({source})"
 
 
-def _capability_matrix(
-    registry: EndpointRegistry, selects: Optional[list[str]] = None
-) -> str:
+def _capability_matrix(registry: EndpointRegistry, selects: Optional[list[str]] = None) -> str:
     """Return the capability matrix for a registry, as fixed-width text.
 
     One row per endpoint, then one row per tier carrying the union over
@@ -1036,8 +1030,7 @@ def _capability_matrix(
     """
     records = records_for_registry(registry)
     caps_by_name = {
-        name: capabilities_for(registry.get(name), records.get(name))
-        for name in registry.names()
+        name: capabilities_for(registry.get(name), records.get(name)) for name in registry.names()
     }
     tier_index = build_tier_index(registry, records)
 
@@ -1064,9 +1057,7 @@ def _capability_matrix(
         cells = [f"{_cell(getattr(caps, column)):>18}" for column in _MATRIX_COLUMNS]
         cells.append(f"{'-':>18}")
         via = _via(registry, tier_name, caps_by_name)
-        lines.append(
-            "  ".join([f"{tier_name + ' (tier)':<{width}}"] + cells + [via]).rstrip()
-        )
+        lines.append("  ".join([f"{tier_name + ' (tier)':<{width}}"] + cells + [via]).rstrip())
 
     lines.append("")
     lines.append("Unknown:")
@@ -1087,10 +1078,7 @@ def _capability_matrix(
             "are dropped silently): " + ", ".join(risky)
         )
     else:
-        lines.append(
-            "Every capability term the selectors use is answered by every "
-            "endpoint."
-        )
+        lines.append("Every capability term the selectors use is answered by every endpoint.")
 
     return "\n".join(lines)
 
@@ -1128,9 +1116,7 @@ def _via(
     return " ".join(parts)
 
 
-def _terms_at_risk(
-    selects: list[str], caps_by_name: dict[str, Capabilities]
-) -> list[str]:
+def _terms_at_risk(selects: list[str], caps_by_name: dict[str, Capabilities]) -> list[str]:
     """Return the selector terms some endpoint cannot answer.
 
     An unknown capability fails its term at selection time, so these
@@ -1144,9 +1130,7 @@ def _terms_at_risk(
                 wanted.append(key)
 
     return [
-        key
-        for key in wanted
-        if any(getattr(caps, key) is None for caps in caps_by_name.values())
+        key for key in wanted if any(getattr(caps, key) is None for caps in caps_by_name.values())
     ]
 
 
@@ -1190,9 +1174,7 @@ def _explain(config_path: Optional[str] = None) -> str:
                     "no configured endpoint."
                 )
 
-            lines.append(
-                f"{name}.{side}: select={value.select!r} order={value.order}"
-            )
+            lines.append(f"{name}.{side}: select={value.select!r} order={value.order}")
             for position, (_, candidate) in enumerate(ranked):
                 marker = "->" if position == 0 else "  "
                 lines.append(f"  {marker} {describe_candidate(candidate)}")

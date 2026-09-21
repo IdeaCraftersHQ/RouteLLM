@@ -72,9 +72,7 @@ def compute_tiers(model_ratings, num_tiers):
     return model2tier
 
 
-def compute_elo_mle_with_tie(
-    df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None
-):
+def compute_elo_mle_with_tie(df, SCALE=400, BASE=10, INIT_RATING=1000, sample_weight=None):
     """Compute Elo ratings using maximum likelihood estimation with ties.
 
     Fits a logistic regression model to battle outcomes, treating ties as

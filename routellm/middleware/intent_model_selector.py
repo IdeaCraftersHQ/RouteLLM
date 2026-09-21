@@ -88,7 +88,7 @@ class IntentModelSelector:
             for mapping in intent_mappings
             if mapping.model_pair is not None
         }
-    
+
     def detect_intent(self, prompt: str) -> str:
         """Detect the intent of a prompt using an LLM.
 
@@ -130,10 +130,9 @@ class IntentModelSelector:
         # Create a formatted list of intents with descriptions for the
         # prompt. A label that reaches here from intent_tiers alone
         # carries no description.
-        intent_options = "\n".join([
-            f"- {intent}: {intent_descriptions.get(intent, '')}"
-            for intent in intents
-        ])
+        intent_options = "\n".join(
+            [f"- {intent}: {intent_descriptions.get(intent, '')}" for intent in intents]
+        )
 
         # Create the classification prompt with more detailed instructions
         classification_prompt = f"""
@@ -155,42 +154,44 @@ Then, match these indicators to the most appropriate category.
 
 Respond with ONLY the category name in lowercase, nothing else. If none of the categories fit well, respond with "general".
 """
-        
+
         try:
             try:
                 # Import here to avoid circular imports
                 from litellm import completion
             except ImportError:
                 print("Error: litellm is not installed.")
-                print("This middleware requires litellm. Please install it in a virtual environment:")
+                print(
+                    "This middleware requires litellm. Please install it in a virtual environment:"
+                )
                 print("\npython3 -m venv venv")
                 print("source venv/bin/activate")
                 print("pip install litellm\n")
                 print("Then run your script again from the activated environment.")
                 raise
-            
+
             # Call the LLM to classify the intent
             response = completion(
                 model=self.intent_detection_model,
-                messages=[{"role": "user", "content": classification_prompt}]
+                messages=[{"role": "user", "content": classification_prompt}],
             )
-            
+
             # Extract the detected intent from the response
             detected_intent = response.choices[0].message.content.strip().lower()
-            
+
             # Validate that the detected intent is in our list or "general"
             if detected_intent not in intents and detected_intent != "general":
                 detected_intent = "general"
-                
+
         except Exception as e:
             # If there's an error, fall back to "general"
             print(f"Error detecting intent: {e}")
             detected_intent = "general"
-        
+
         # Cache the result
         self.intent_cache[prompt] = detected_intent
         return detected_intent
-    
+
     def analyze_intent_confidence(self, prompt: str) -> dict:
         """Analyze the confidence of intent classification for a prompt.
 
@@ -214,13 +215,12 @@ Respond with ONLY the category name in lowercase, nothing else. If none of the c
         intent_descriptions = {
             mapping.intent: mapping.description for mapping in self.intent_mappings
         }
-        
+
         # Create a formatted list of intents with descriptions
-        intent_options = "\n".join([
-            f"- {intent}: {intent_descriptions[intent]}"
-            for intent in intents
-        ])
-        
+        intent_options = "\n".join(
+            [f"- {intent}: {intent_descriptions[intent]}" for intent in intents]
+        )
+
         # Create the analysis prompt
         analysis_prompt = f"""
 You are an expert intent classifier for a language model router system. Analyze the following user message and determine how well it fits into each available category.
@@ -248,28 +248,29 @@ Respond in JSON format like this:
   "best_match": "category_name"
 }}
 """
-        
+
         try:
             try:
                 from litellm import completion
             except ImportError:
                 print("Error: litellm is not installed.")
                 return {"error": "litellm not installed", "best_match": "general"}
-            
+
             # Call the LLM for analysis
             response = completion(
                 model=self.intent_detection_model,
-                messages=[{"role": "user", "content": analysis_prompt}]
+                messages=[{"role": "user", "content": analysis_prompt}],
             )
-            
+
             # Extract and parse the JSON response
             import json
+
             try:
                 result = json.loads(response.choices[0].message.content)
                 return result
             except json.JSONDecodeError:
                 return {"error": "Failed to parse JSON response", "best_match": "general"}
-                
+
         except Exception as e:
             print(f"Error analyzing intent confidence: {e}")
             return {"error": str(e), "best_match": "general"}
@@ -325,11 +326,9 @@ Respond in JSON format like this:
             to a tier, in mapping order then tier-mapping order.
         """
         intents = [mapping.intent for mapping in self.intent_mappings]
-        intents.extend(
-            intent for intent in self.intent_tiers if intent not in intents
-        )
+        intents.extend(intent for intent in self.intent_tiers if intent not in intents)
         return intents
-    
+
     def save_mappings(self, filepath: str) -> None:
         """Save intent mappings to a JSON file.
 
@@ -352,28 +351,28 @@ Respond in JSON format like this:
             if mapping.model_pair is not None:
                 mapping_dict["model_pair"] = {
                     "strong": mapping.model_pair.strong,
-                    "weak": mapping.model_pair.weak
+                    "weak": mapping.model_pair.weak,
                 }
             serializable_mappings.append(mapping_dict)
 
         config = {
             "intent_mappings": serializable_mappings,
-            "intent_detection_model": self.intent_detection_model
+            "intent_detection_model": self.intent_detection_model,
         }
         if self.default_model_pair is not None:
             config["default_model_pair"] = {
                 "strong": self.default_model_pair.strong,
-                "weak": self.default_model_pair.weak
+                "weak": self.default_model_pair.weak,
             }
         if self.intent_tiers:
             config["intent_tiers"] = dict(self.intent_tiers)
 
         # Save to file
-        with open(filepath, 'w') as f:
+        with open(filepath, "w") as f:
             json.dump(config, f, indent=2)
-            
+
     @classmethod
-    def load_mappings(cls, filepath: str) -> 'IntentModelSelector':
+    def load_mappings(cls, filepath: str) -> "IntentModelSelector":
         """Load intent mappings from a JSON file.
 
         Accepts the pair-less shape a tier-only selector writes: a
@@ -400,10 +399,10 @@ Respond in JSON format like this:
         """
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"Mappings file not found: {filepath}")
-            
-        with open(filepath, 'r') as f:
+
+        with open(filepath, "r") as f:
             config = json.load(f)
-            
+
         # Convert to IntentModelMapping objects. An absent model_pair
         # is a tier-only mapping, which carries none.
         intent_mappings = []
@@ -417,7 +416,7 @@ Respond in JSON format like this:
             mapping = IntentModelMapping(
                 intent=mapping_dict["intent"],
                 description=mapping_dict.get("description", ""),
-                model_pair=model_pair
+                model_pair=model_pair,
             )
             intent_mappings.append(mapping)
 
@@ -433,5 +432,5 @@ Respond in JSON format like this:
             intent_mappings=intent_mappings,
             default_model_pair=default_model_pair,
             intent_tiers=config.get("intent_tiers"),
-            intent_detection_model=config.get("intent_detection_model", "gpt-3.5-turbo")
+            intent_detection_model=config.get("intent_detection_model", "gpt-3.5-turbo"),
         )

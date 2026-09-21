@@ -160,7 +160,9 @@ class MFModel_Train(torch.nn.Module):
         super().__init__()
         self.use_proj = use_proj
         self.P = torch.nn.Embedding(num_models, dim)
-        self.Q = torch.nn.Embedding(num_prompts, text_dim).requires_grad_(
+        self.Q = torch.nn.Embedding(
+            num_prompts, text_dim
+        ).requires_grad_(
             False
         )  # When loading the trained ckpt, delete Q, since during test time the prompt embedding is calculated using the OpenAI API
         embeddings = np.load(npy_path)
@@ -169,13 +171,11 @@ class MFModel_Train(torch.nn.Module):
         if self.use_proj:
             self.text_proj = torch.nn.Linear(text_dim, dim, bias=False)
         else:
-            assert (
-                text_dim == dim
-            ), f"text_dim {text_dim} must be equal to dim {dim} if not using projection"
+            assert text_dim == dim, (
+                f"text_dim {text_dim} must be equal to dim {dim} if not using projection"
+            )
 
-        self.classifier = nn.Linear(
-            dim, num_classes, bias=False
-        )  # bias should be False!
+        self.classifier = nn.Linear(dim, num_classes, bias=False)  # bias should be False!
 
     def get_device(self):
         """Get device where model parameters reside.
@@ -227,9 +227,7 @@ class MFModel_Train(torch.nn.Module):
         if self.use_proj:
             prompt_embed = self.text_proj(prompt_embed)
 
-        return self.classifier(
-            (model_win_embed - model_loss_embed) * prompt_embed
-        ).squeeze()
+        return self.classifier((model_win_embed - model_loss_embed) * prompt_embed).squeeze()
 
     @torch.no_grad()
     def predict(self, model_win, model_loss, prompt):
@@ -420,8 +418,7 @@ if __name__ == "__main__":
     filtered_data = [
         sample
         for sample in data
-        if sample["winner"] in ["model_a", "model_b"]
-        and sample["model_a"] != sample["model_b"]
+        if sample["winner"] in ["model_a", "model_b"] and sample["model_a"] != sample["model_b"]
     ]
 
     # shuffle and prepare train test split

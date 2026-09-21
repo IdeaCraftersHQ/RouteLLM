@@ -4,6 +4,7 @@ Covers `EndpointRegistry` construction and lookup, per-endpoint
 credential resolution, and the controller path that turns an endpoint
 into litellm call parameters.
 """
+
 import logging
 
 import pytest
@@ -246,9 +247,7 @@ def test_controller_passes_endpoint_call_params(controller, mock_completion):
     assert kwargs["api_key"] == "default-key"
 
 
-def test_controller_request_kwargs_win_over_extra(
-    controller, mock_completion, monkeypatch
-):
+def test_controller_request_kwargs_win_over_extra(controller, mock_completion, monkeypatch):
     # Only cloud_strong carries extra, so route to the strong model.
     monkeypatch.setenv("OPENAI_API_KEY", "test")
     monkeypatch.setattr(
@@ -271,9 +270,7 @@ def test_controller_request_kwargs_win_over_extra(
     assert kwargs["timeout"] == 5
 
 
-def test_controller_extra_applied_when_request_is_silent(
-    controller, mock_completion, monkeypatch
-):
+def test_controller_extra_applied_when_request_is_silent(controller, mock_completion, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test")
     monkeypatch.setattr(
         controller.routers["random"],
@@ -322,9 +319,7 @@ def test_controller_balancer_overrides_endpoint(controller, mock_completion):
     assert kwargs["api_key"] == "balanced-key"
 
 
-def test_controller_balancer_target_model_equal_to_endpoint_name(
-    controller, mock_completion
-):
+def test_controller_balancer_target_model_equal_to_endpoint_name(controller, mock_completion):
     # The balancer's selected target carries a model string equal to the
     # registry name it balances. Nothing about that collision means
     # "no balancer matched", so its model must still reach litellm
@@ -398,9 +393,7 @@ def mock_acompletion(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_acompletion_passes_endpoint_call_params(
-    controller, mock_acompletion, monkeypatch
-):
+async def test_acompletion_passes_endpoint_call_params(controller, mock_acompletion, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test")
     monkeypatch.setattr(
         controller.routers["random"],
@@ -423,9 +416,7 @@ async def test_acompletion_passes_endpoint_call_params(
 
 
 @pytest.mark.asyncio
-async def test_acompletion_applies_endpoint_extra(
-    controller, mock_acompletion, monkeypatch
-):
+async def test_acompletion_applies_endpoint_extra(controller, mock_acompletion, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test")
     monkeypatch.setattr(
         controller.routers["random"],

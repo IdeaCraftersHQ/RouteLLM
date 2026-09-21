@@ -1,5 +1,6 @@
 from routellm.payment.types import PaymentChallenge, PaymentReceipt
 
+
 def test_payment_challenge_fields():
     c = PaymentChallenge(
         scheme="x402",
@@ -10,6 +11,7 @@ def test_payment_challenge_fields():
     )
     assert c.scheme == "x402"
     assert c.amount == "1.00"
+
 
 def test_payment_receipt_fields():
     r = PaymentReceipt(
