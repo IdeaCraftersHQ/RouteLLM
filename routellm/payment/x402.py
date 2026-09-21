@@ -30,6 +30,7 @@ class X402Adapter(PaymentGateway):
         private_key: str | None = None,
         networks: list[str] | None = None,
         limits=None,
+        budget=None,
     ):
         """Initialize x402 payment adapter.
 
@@ -45,10 +46,16 @@ class X402Adapter(PaymentGateway):
             built from this adapter is capped the same way the
             controller's own retry is. None caps nothing of ours,
             leaving the SDK's own per-payment default standing.
+        budget : PaymentBudget, optional
+            The cumulative total every payment is debited against.
+            Carried for the same reason as `limits`: both seams draw
+            on one wallet, so both must draw on one ledger. None
+            leaves the total unbounded.
         """
         self._private_key = private_key or os.environ.get("ROUTELLM_WALLET_PRIVATE_KEY", "")
         self._networks = networks or ["base", "ethereum", "polygon"]
         self._limits = limits
+        self._budget = budget
 
     @property
     def limits(self):
@@ -118,6 +125,16 @@ class X402Adapter(PaymentGateway):
 
         return x402HTTPClient(client)
 
+    @property
+    def budget(self):
+        """The cumulative ledger, or None when no total was set."""
+        return self._budget
+
+    @budget.setter
+    def budget(self, value):
+        """Set the ledger every seam this adapter pays at debits."""
+        self._budget = value
+
     def build_session(self, transport=None, scope=None):
         """Build an httpx client that settles 402s before returning.
 
@@ -160,6 +177,7 @@ class X402Adapter(PaymentGateway):
 
         client = self._build_client()
         limits = self._limits
+        budget = self._budget
 
         if scope is None:
             return httpx.AsyncClient(
@@ -170,7 +188,7 @@ class X402Adapter(PaymentGateway):
 
         return httpx.AsyncClient(
             transport=scoped_payment_transport(
-                scope, client, transport, limits=limits
+                scope, client, transport, limits=limits, budget=budget
             )
         )
 
