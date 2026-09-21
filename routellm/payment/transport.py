@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 def install_payment_session(
-    gateway, transport=None, payable_bases=None, limits=None
+    gateway, transport=None, payable_bases=None, limits=None, budget=None
 ):
     """Route litellm's async requests through `gateway`'s paying client.
 
@@ -54,6 +54,12 @@ def install_payment_session(
         to bind both. Two places to hold it is two places to forget
         it. None caps nothing of ours, which leaves the SDK's own
         default per-payment ceiling standing.
+    budget : PaymentBudget, optional
+        The cumulative total every payment is debited against. Set
+        onto `gateway` for the same reason `limits` is: the gateway
+        pays at two seams and one ledger has to serve both, or the
+        process spends the budget twice. None leaves the total
+        unbounded.
 
     Returns
     -------
@@ -71,13 +77,17 @@ def install_payment_session(
     if limits is not None:
         gateway.limits = limits
 
+    if budget is not None:
+        gateway.budget = budget
+
     session = gateway.build_session(transport=transport, scope=scope)
     litellm.aclient_session = session
     return session
 
 
 def maybe_install_payment_session(
-    provider, wallet_key, networks=None, payable_bases=(), limits=None
+    provider, wallet_key, networks=None, payable_bases=(), limits=None,
+    budget=None,
 ):
     """Install the paying session only when payment was actually asked for.
 
@@ -105,6 +115,10 @@ def maybe_install_payment_session(
     limits : PaymentLimits, optional
         Per-payment caps, from `--max-payment` and the endpoints'
         `max_payment:`. None leaves the SDK's own default standing.
+    budget : PaymentBudget, optional
+        The cumulative total from `--payment-budget`. None leaves the
+        total unbounded, which is what an operator who set no budget
+        asked for.
 
     Returns
     -------
@@ -118,7 +132,7 @@ def maybe_install_payment_session(
 
     gateway = X402Adapter(private_key=wallet_key, networks=networks)
     install_payment_session(
-        gateway, payable_bases=payable_bases, limits=limits
+        gateway, payable_bases=payable_bases, limits=limits, budget=budget
     )
 
     bases = list(payable_bases or ())

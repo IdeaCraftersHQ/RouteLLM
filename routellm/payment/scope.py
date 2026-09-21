@@ -133,7 +133,7 @@ class PaymentScope:
 
 
 def scoped_payment_transport(
-    scope: PaymentScope, client, transport=None, limits=None
+    scope: PaymentScope, client, transport=None, limits=None, budget=None
 ):
     """Build an x402 transport that only pays inside `scope`, and only so much.
 
@@ -177,11 +177,17 @@ def scoped_payment_transport(
         Transport that actually reaches the provider.
     limits : PaymentLimits, optional
         Per-payment caps. None caps nothing of ours.
+    budget : PaymentBudget, optional
+        The cumulative ledger every authorised payment is debited
+        against. The cap bounds one payment; this bounds their sum,
+        which the cap alone cannot, since any number of payments may
+        each sit just under it. None leaves the total unbounded.
 
     Returns
     -------
     x402AsyncTransport
-        A payment transport gated on `scope` and on `limits`.
+        A payment transport gated on `scope`, on `limits` and on
+        `budget`.
     """
     from x402.http.clients.httpx import PaymentError, x402AsyncTransport
 
@@ -221,6 +227,32 @@ def scoped_payment_transport(
                 return [None, None]
             return list(limits.effective(url))
 
+        def _budget_probe(self, obj=False):
+            """Return the ledger this transport debits, or its remainder.
+
+            The budget is consulted per request inside
+            `handle_async_request`, so there is otherwise nothing on
+            the installed session to read it off. A caller checking
+            that the process-global session really carries the
+            operator's budget -- and that it is the same ledger the
+            controller holds, not a second one -- needs to ask without
+            sending a request and paying one.
+
+            Parameters
+            ----------
+            obj : bool, optional
+                True returns the ledger itself, so a caller can check
+                identity. False returns its remainder as money.
+
+            Returns
+            -------
+            PaymentBudget or str or None
+                The ledger, its remainder, or None when none is set.
+            """
+            if obj:
+                return budget
+            return None if budget is None else budget.remaining
+
         async def handle_async_request(
             self, request: httpx.Request
         ) -> httpx.Response:
@@ -241,8 +273,9 @@ def scoped_payment_transport(
             Raises
             ------
             PaymentError
-                When the challenge is above the effective cap. The
-                message names which limit refused it.
+                When the challenge is above the effective cap, or when
+                the cumulative budget no longer covers it. The message
+                names which limit refused it.
             """
             if not scope.allows(request.url):
                 logger.debug(
@@ -264,13 +297,43 @@ def scoped_payment_transport(
                     {"max_amount_per_payment": cap}
                 )
 
+            debited = False
+            if budget:
+                # Reserved before anything is signed: the budget has to
+                # refuse before a wallet is authorised, never after.
+                # The figure is the cap, because that is the amount the
+                # wallet is about to be authorised to spend -- nothing
+                # has settled yet, so no smaller figure is knowable.
+                refused = budget.debit(cap)
+                if refused is not None:
+                    raise PaymentError(refused)
+                debited = True
+
             try:
-                return await super().handle_async_request(request)
+                response = await super().handle_async_request(request)
             except PaymentError as exc:
+                # Nothing was signed, so the reservation was never
+                # spent and goes back. Keeping it would let an
+                # unpayable upstream drain the budget by being refused
+                # over and over.
+                if debited:
+                    budget.refund(cap)
                 if cap is None or "max_amount_per_payment" not in str(exc):
                     raise
                 from routellm.payment.limits import refusal_message
 
                 raise PaymentError(refusal_message(cap, source, exc)) from exc
+            except BaseException:
+                if debited:
+                    budget.refund(cap)
+                raise
+
+            if debited and response.status_code == 402:
+                # A 402 came back: either the request never entered the
+                # payment cycle or the cycle gave up, and in both cases
+                # nothing was signed.
+                budget.refund(cap)
+
+            return response
 
     return _ScopedX402Transport(client, transport)

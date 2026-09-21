@@ -418,3 +418,25 @@ class PaymentBudget:
 
             self._spent += asked
             return None
+
+    def refund(self, amount):
+        """Return `amount` to the budget after a payment did not happen.
+
+        A debit is taken before the payment is signed, because the
+        budget has to refuse *before* a wallet is authorised rather
+        than after. When the signing then does not happen -- the cap
+        refused the price, or the payment cycle raised -- the reserved
+        amount was never authorised and must go back, or every refusal
+        would quietly shrink the budget.
+
+        Parameters
+        ----------
+        amount : str or None
+            The figure previously debited. None debited nothing and so
+            refunds nothing.
+        """
+        if self._total is None or amount is None:
+            return
+
+        with self._lock:
+            self._spent -= parse_cap(amount)
