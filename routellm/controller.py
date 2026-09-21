@@ -722,8 +722,9 @@ class Controller:
                 )
                 
                 receipt = await self.payment_gateway.pay(challenge)
-                # Retry with payment receipt in headers
-                return await call_fn({"X-Payment-Receipt": receipt.tx_hash})
+                # Retry with the signed payment on the outbound header
+                # the protocol reserves for the client direction.
+                return await call_fn({"X-PAYMENT": receipt.tx_hash})
             raise
 
     def completion(
