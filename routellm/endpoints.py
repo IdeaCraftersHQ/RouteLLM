@@ -134,6 +134,10 @@ class Endpoint(BaseModel):
         Whether an unknown capability refuses a request that needs it.
         Default False: an unknown capability serves by default, so a
         config that declares nothing keeps routing as it always did.
+    quality_measured : bool
+        Whether `quality` came from a `quality_from:` sidecar rather
+        than from this endpoint's own `quality:`. Read only by the
+        `--capabilities` matrix, which marks each score accordingly.
     """
 
     name: str
@@ -145,6 +149,7 @@ class Endpoint(BaseModel):
     extra: dict[str, Any] = Field(default_factory=dict)
     capabilities: Optional[Capabilities] = None
     strict: bool = False
+    quality_measured: bool = False
 
     @field_validator("name")
     @classmethod
@@ -315,16 +320,27 @@ class EndpointRegistry:
         self._validate_tiers()
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "EndpointRegistry":
+    def from_config(
+        cls, config: dict[str, Any], config_path: Optional[Any] = None
+    ) -> "EndpointRegistry":
         """Build a registry from a loaded config dict.
 
-        Reads the `endpoints:` and `tiers:` keys; every other top-level
-        key is left to its own owner.
+        Reads the `endpoints:`, `tiers:` and `quality_from:` keys;
+        every other top-level key is left to its own owner.
+
+        `quality_from:` names a measured-quality sidecar, resolved
+        relative to the CONFIG FILE rather than the CWD. It fills
+        `quality` only for an endpoint that sets none: a hand-set
+        number always wins over a measurement.
 
         Parameters
         ----------
         config : dict
             Loaded YAML config. Absent keys yield empty collections.
+        config_path : str or Path, optional
+            The file `config` was read from, used to resolve a relative
+            `quality_from:`. Without it a relative path falls back to
+            the CWD, which is only ever right for an in-memory config.
 
         Returns
         -------
@@ -335,8 +351,9 @@ class EndpointRegistry:
         Raises
         ------
         ValueError
-            If any endpoint or tier is malformed, or the tier graph
-            fails validation.
+            If any endpoint or tier is malformed, the tier graph fails
+            validation, or `quality_from:` names a file that is not
+            there.
         """
         config = config or {}
 
@@ -345,6 +362,14 @@ class EndpointRegistry:
             name: Endpoint(name=name, **(spec or {}))
             for name, spec in raw_endpoints.items()
         }
+
+        quality_from = config.get("quality_from")
+        if quality_from:
+            from routellm.quality_scores import apply_sidecar, resolve_sidecar_path
+
+            apply_sidecar(
+                endpoints, resolve_sidecar_path(quality_from, config_path)
+            )
 
         raw_tiers = config.get("tiers") or {}
         tiers = {
@@ -565,4 +590,5 @@ class EndpointRegistry:
             extra={},
             capabilities=None,
             strict=False,
+            quality_measured=False,
         )

@@ -937,6 +937,22 @@ def _cell(value) -> str:
     return str(value)
 
 
+def _quality_cell(endpoint: Endpoint) -> str:
+    """Render one endpoint's quality, saying where the number came from.
+
+    `(measured)` means a `quality_from:` sidecar supplied it,
+    `(manual)` means the endpoint's own `quality:` did. The distinction
+    is the point: a measurement that quietly replaced a decision would
+    be worse than no measurement.
+    """
+    quality = endpoint.quality
+    if quality is None:
+        return "?"
+
+    source = "measured" if getattr(endpoint, "quality_measured", False) else "manual"
+    return f"{quality} ({source})"
+
+
 def _capability_matrix(
     registry: EndpointRegistry, selects: Optional[list[str]] = None
 ) -> str:
@@ -983,18 +999,20 @@ def _capability_matrix(
     header = "  ".join(
         [f"{'endpoint':<{width}}"]
         + [f"{column:>18}" for column in _MATRIX_COLUMNS]
-        + ["via"]
+        + [f"{'quality':>18}", "via"]
     )
     lines = ["Capabilities", header, "-" * len(header)]
 
     for name in registry.names():
         caps = caps_by_name[name]
         cells = [f"{_cell(getattr(caps, column)):>18}" for column in _MATRIX_COLUMNS]
+        cells.append(f"{_quality_cell(registry.get(name)):>18}")
         lines.append("  ".join([f"{name:<{width}}"] + cells + [""]).rstrip())
 
     for tier_name in registry.tier_names():
         caps = tier_index.get(tier_name, Capabilities())
         cells = [f"{_cell(getattr(caps, column)):>18}" for column in _MATRIX_COLUMNS]
+        cells.append(f"{'-':>18}")
         via = _via(registry, tier_name, caps_by_name)
         lines.append(
             "  ".join([f"{tier_name + ' (tier)':<{width}}"] + cells + [via]).rstrip()
@@ -1099,7 +1117,7 @@ def _explain(config_path: Optional[str] = None) -> str:
     """
     config = load_config(explicit=config_path).data
 
-    registry = EndpointRegistry.from_config(config)
+    registry = EndpointRegistry.from_config(config, config_path=config_path)
     lines: list[str] = []
 
     for name in registry.tier_names():
@@ -1212,7 +1230,7 @@ def _registry_from(config_path: str) -> tuple[EndpointRegistry, list[str]]:
     with open(config_path) as handle:
         config = yaml.safe_load(handle) or {}
 
-    registry = EndpointRegistry.from_config(config)
+    registry = EndpointRegistry.from_config(config, config_path=config_path)
     selects = [
         side.select
         for tier in registry.tiers.values()

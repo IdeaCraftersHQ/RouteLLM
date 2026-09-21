@@ -72,7 +72,9 @@ def legacy_pair() -> tuple[str, str]:
     return LEGACY_STRONG, LEGACY_WEAK
 
 
-def build_registry(file_config: Optional[dict]) -> EndpointRegistry:
+def build_registry(
+    file_config: Optional[dict], config_path: Optional[str] = None
+) -> EndpointRegistry:
     """Build the endpoint registry the server routes against.
 
     The merged config is the single source for endpoints and tiers, and
@@ -93,6 +95,11 @@ def build_registry(file_config: Optional[dict]) -> EndpointRegistry:
     ----------
     file_config : dict, optional
         The merged config as `load_config` returns it.
+    config_path : str, optional
+        The file that config was read from. A relative `quality_from:`
+        is resolved against its directory, never against the CWD, so a
+        server started from elsewhere reads the sidecar the operator
+        wrote next to the config.
 
     Returns
     -------
@@ -100,7 +107,9 @@ def build_registry(file_config: Optional[dict]) -> EndpointRegistry:
         Registry holding the configured endpoints and tiers, plus the
         implicit `default` tier when one was derived.
     """
-    registry = EndpointRegistry.from_config(file_config or {})
+    registry = EndpointRegistry.from_config(
+        file_config or {}, config_path=config_path
+    )
 
     if registry.has_tier("default"):
         logging.info("default tier: from --config")
@@ -302,8 +311,11 @@ async def lifespan(app):
     # `endpoints:` and `tiers:` belong to the registry and `intents:`
     # to the intent middleware; the rest of the merged mapping stays
     # router config, so all three are popped out before the handoff.
+    # The winning layer's path resolves a relative `quality_from:`
+    # against the file that set it, never against the CWD.
     file_config = loaded.data
-    endpoints = build_registry(file_config)
+    config_origin = str(loaded.layers[-1].path) if loaded.layers else None
+    endpoints = build_registry(file_config, config_origin)
     intents = build_intents(file_config, endpoints)
     router_config = dict(file_config)
     router_config.pop("endpoints", None)

@@ -442,6 +442,45 @@ prints one row per endpoint over `vision`, `tools`, `structured_output`, `reason
 
 Add `--explain` to print the selector tables too, selectors first. There is deliberately no `python -m routellm.capabilities`: this command already loads the YAML, builds the registry and resolves the selectors, which is everything the matrix needs, and a second entry point would duplicate all of it and drift from it.
 
+#### Measured quality (optional)
+
+An endpoint's `quality:` is a number written by hand, and it orders `quality_desc` selectors. It can be *measured* instead. A config points at a sidecar:
+
+```yaml
+endpoints:
+  cloud_strong: {model: gpt-4o}
+  local_server: {model: openai/qwen3-coder, api_base: http://127.0.0.1:11800/v1}
+
+quality_from: quality.yaml
+```
+
+```yaml
+# quality.yaml
+version: 1
+generated_at: "2026-09-21T10:00:00Z"
+min_samples: 50
+transform: linear
+source: evals
+endpoints:
+  cloud_strong: {quality: 91, n: 50, by_area: {}}
+  local_server: {quality: 78, n: 50, by_area: {}}
+```
+
+`quality_from:` is resolved **relative to the config file**, not to the working directory, so a server started from elsewhere reads the sidecar the operator wrote next to the config. An endpoint's own `quality:` always wins over the sidecar — a hand-set number is a decision, and a measurement never overrides a decision silently. A sidecar naming an endpoint the registry does not carry is a warning naming it, not an error: endpoints come and go faster than measurements do. A missing sidecar file is an error naming the resolved path.
+
+`--capabilities` marks each score `(measured)` or `(manual)` so the distinction is visible where the numbers are read.
+
+The harness that writes one:
+
+```
+python -m routellm.evals.endpoint_quality --config c.yaml \
+    --endpoints cloud_strong,local_server --limit 50 --out quality.yaml
+```
+
+It runs the coding benchmark against each named endpoint with `strong_model` and `weak_model` both set to that one endpoint, so no router runs and every call lands where it is meant to. **This spends real tokens on real providers** — `--limit` defaults to 50 prompts per endpoint, so four endpoints is 200 paid completions. Start small.
+
+This whole section is optional and severable: drop it and hand-set `quality:` keeps working exactly as it does today.
+
 ### Intents
 
 There are two ways to pick the area of expertise a request is answered from. An app that already knows names the tier itself, in the `model` field. An app that does not sends `default` and lets an intent classifier pick, which is what an `intents:` section turns on:
