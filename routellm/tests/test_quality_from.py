@@ -4,8 +4,13 @@ The sidecar wins over a hand-written YAML `quality` by default: it is
 measured, and the YAML number is a guess someone typed once and never
 revisited. `quality_from_override: false` flips that. Either way an
 endpoint the sidecar does not name is never touched.
-`routellm.openai_server` parses `sys.argv` at import, so the two tests
-that touch it import it behind a neutral argv, as the other server
+
+The merge happens inside `EndpointRegistry.from_config`, so every
+consumer that builds a registry -- the server and both pairing CLIs --
+orders on the same numbers. Tests that exercise the wiring go through
+`from_config` rather than any one caller of it.
+`routellm.openai_server` parses `sys.argv` at import, so the one test
+that touches it imports it behind a neutral argv, as the other server
 tests do.
 """
 
@@ -58,16 +63,30 @@ def _server(monkeypatch):
     return server
 
 
-def test_no_quality_from_leaves_every_endpoint_untouched(tmp_path, monkeypatch):
-    """The backward-compatible default: no key, no change."""
-    apply_quality_from = _server(monkeypatch).apply_quality_from
+def test_no_quality_from_leaves_every_endpoint_untouched(tmp_path):
+    """The backward-compatible default: no key, no change.
 
-    registry = _registry(local_fast=60, cloud_strong=88)
-    changed = apply_quality_from(registry, {"endpoints": {}}, None)
+    A sidecar sits next to the config and is deliberately NOT named by
+    it, so the assertion pins the absence of the key rather than the
+    absence of a file.
+    """
+    _write(tmp_path)
+    config = {
+        "endpoints": {
+            "local_fast": {"model": "m/local_fast", "quality": 60},
+            "cloud_strong": {"model": "m/cloud_strong", "quality": 88},
+        }
+    }
+    path = tmp_path / "routellm.yaml"
+    path.write_text(yaml.safe_dump(config, sort_keys=False))
 
-    assert changed == 0
+    registry = EndpointRegistry.from_config(
+        yaml.safe_load(path.read_text()), config_path=path
+    )
+
     assert registry.get("local_fast").quality == 60
     assert registry.get("cloud_strong").quality == 88
+    assert registry.area_quality == {}
 
 
 def test_sidecar_overrides_the_yaml_quality_and_logs_it(tmp_path, caplog):
@@ -146,20 +165,28 @@ def test_malformed_yaml_names_the_path(tmp_path):
 
 
 def test_relative_path_resolves_against_the_config_file(tmp_path, monkeypatch):
-    apply_quality_from = _server(monkeypatch).apply_quality_from
-
     config_dir = tmp_path / "etc"
     config_dir.mkdir()
     _write(config_dir)
     config_path = config_dir / "routellm.yaml"
-    config_path.write_text("quality_from: ./quality.yaml\n")
-
-    registry = _registry(local_fast=60)
-    changed = apply_quality_from(
-        registry, {"quality_from": "./quality.yaml"}, str(config_path)
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "endpoints": {"local_fast": {"model": "m/local_fast", "quality": 60}},
+                "quality_from": "./quality.yaml",
+            },
+            sort_keys=False,
+        )
     )
 
-    assert changed == 1
+    # Stand outside the config's directory: the relative path is
+    # resolved against the config file, never against the CWD.
+    monkeypatch.chdir(tmp_path)
+
+    registry = EndpointRegistry.from_config(
+        yaml.safe_load(config_path.read_text()), config_path=config_path
+    )
+
     assert registry.get("local_fast").quality == 72
 
 
