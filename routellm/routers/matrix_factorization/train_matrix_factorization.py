@@ -390,8 +390,7 @@ def train_loops(
         else:
             test_ls = None  # No evaluation
 
-        if test_acc > best_test_acc:
-            best_test_acc = test_acc
+        best_test_acc = max(best_test_acc, test_acc)
 
         progress_bar.set_postfix(**info)
         progress_bar.update(1)
@@ -413,7 +412,7 @@ if __name__ == "__main__":
     weight_decay = 1e-5
 
     # load and filter data
-    data = json.load(open(json_path, "r"))
+    data = json.load(open(json_path))
 
     filtered_data = [
         sample

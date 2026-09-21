@@ -77,8 +77,15 @@ ignore = [
 	"PLR0913",
 	"PLR0915",
 	"PLR2004",
+	# Heavy and optional dependencies -- torch, the payment SDK, the
+	# training stack -- are imported inside the functions that need
+	# them, deliberately, so importing routellm stays cheap.
+	"PLC0415",
 ]
 
 [tool.ruff.lint.per-file-ignores]
 # Tests re-export fixtures and assert on constants.
-"routellm/tests/*" = ["PLC0415"]
+"routellm/tests/*" = ["PLC0415", "BLE001", "PLW1510"]
+# The fallback loop defines a closure and calls it in the same
+# iteration, so late binding never bites; B023 cannot see that.
+"routellm/controller.py" = ["B023"]

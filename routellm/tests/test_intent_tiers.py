@@ -21,8 +21,8 @@ import routellm.controller
 from routellm.controller import Controller
 from routellm.endpoints import EndpointRegistry, Tier
 from routellm.middleware.intent_model_selector import (
-    IntentModelSelector,
     IntentModelMapping,
+    IntentModelSelector,
 )
 from routellm.routers.base import Router
 from routellm.traffic import TrafficManager, TrafficRule

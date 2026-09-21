@@ -25,7 +25,7 @@ import logging
 import sys
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +152,7 @@ def _sidecar(scores: dict[str, tuple[float, int]], limit: int) -> dict[str, Any]
     }
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Measure each named endpoint and write the quality sidecar.
 
     Parameters
@@ -200,7 +200,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
-    configured = set((config.get("endpoints") or {}))
+    configured = set(config.get("endpoints") or {})
     names = [name.strip() for name in args.endpoints.split(",") if name.strip()]
 
     unknown = [name for name in names if name not in configured]

@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-import routellm.pairing as pairing
+from routellm import pairing
 from routellm.endpoints import EndpointRegistry
 from routellm.pairing import (
     CATALOG_CACHE_ENV,
@@ -500,7 +500,7 @@ def test_fetch_gives_up_at_the_timeout_without_waiting_for_the_worker(monkeypatc
     the thread finishes, which is what a `with` block around the pool
     would do through `shutdown(wait=True)`.
     """
-    import hop.aim as aim
+    from hop import aim
 
     started = threading.Event()
 

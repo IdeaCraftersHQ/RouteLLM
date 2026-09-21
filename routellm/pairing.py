@@ -52,19 +52,19 @@ import sys
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from routellm.config import ConfigError, load_config
 from routellm.capabilities import (
     CAPABILITY_KEYS,
-    build_tier_index,
     RANGE_KEYS,
     Capabilities,
     CapabilityQuery,
+    build_tier_index,
     capabilities_for,
     matches,
     parse_capability_terms,
 )
+from routellm.config import ConfigError, load_config
 from routellm.endpoints import Endpoint, EndpointRegistry, Selector
 
 logger = logging.getLogger(__name__)
@@ -98,7 +98,7 @@ PAIRING_EXTRA = "pairing"
 #: litellm provider name -> models.dev provider id. None marks a
 #: provider models.dev does not list (local runtimes), whose endpoints
 #: stay tag-only candidates.
-PROVIDER_ALIASES: dict[str, Optional[str]] = {
+PROVIDER_ALIASES: dict[str, str | None] = {
     "openai": "openai",
     "anthropic": "anthropic",
     "gemini": "google",
@@ -165,16 +165,16 @@ class ModelRecord:
 
     provider: str
     id: str
-    cost_input: Optional[float] = None
-    cost_output: Optional[float] = None
+    cost_input: float | None = None
+    cost_output: float | None = None
     tool_call: bool = False
     reasoning: bool = False
-    context: Optional[int] = None
-    release_date: Optional[str] = None
+    context: int | None = None
+    release_date: str | None = None
     structured_output: bool = False
     open_weights: bool = False
     modalities_in: list[str] = field(default_factory=list)
-    max_output: Optional[int] = None
+    max_output: int | None = None
 
 
 @dataclass
@@ -206,13 +206,13 @@ class Candidate:
 
     name: str
     endpoint: Endpoint
-    record: Optional[ModelRecord] = None
-    capabilities: Optional[Capabilities] = None
-    effective_quality: Optional[int] = None
-    quality_area: Optional[str] = None
+    record: ModelRecord | None = None
+    capabilities: Capabilities | None = None
+    effective_quality: int | None = None
+    quality_area: str | None = None
 
     @property
-    def total_cost(self) -> Optional[float]:
+    def total_cost(self) -> float | None:
         """Return input plus output USD per 1M, or None when unpriced."""
         if self.record is None:
             return None
@@ -240,7 +240,7 @@ def _import_aim():
         If the optional dependency is not installed.
     """
     try:
-        import hop.aim as aim
+        from hop import aim
     except ImportError as exc:
         raise CatalogUnavailable(
             "Policy-based pairing needs the models.dev client. Install it "
@@ -317,7 +317,7 @@ def snapshot_path() -> Path:
 
 
 def write_snapshot(
-    path: Path, records: list[ModelRecord], fetched_at: Optional[float] = None
+    path: Path, records: list[ModelRecord], fetched_at: float | None = None
 ) -> None:
     """Write `records` to `path` with a fetch timestamp.
 
@@ -338,7 +338,7 @@ def write_snapshot(
     path.write_text(json.dumps(payload))
 
 
-def read_snapshot(path: Path) -> Optional[tuple[float, list[ModelRecord]]]:
+def read_snapshot(path: Path) -> tuple[float, list[ModelRecord]] | None:
     """Read a snapshot, or None when there is no readable one.
 
     A corrupt or partially written file is treated as no snapshot
@@ -405,7 +405,7 @@ def load_catalog() -> list[ModelRecord]:
 # ---------------------------------------------------------------------------
 
 
-def catalog_provider_for(model: str) -> Optional[tuple[str, str]]:
+def catalog_provider_for(model: str) -> tuple[str, str] | None:
     """Map a litellm model name onto a models.dev `(provider, id)` pair.
 
     Parameters
@@ -560,7 +560,7 @@ def _unsupported_term(name: str) -> ValueError:
     )
 
 
-def _record_matches(record: Optional[ModelRecord], filter_) -> bool:
+def _record_matches(record: ModelRecord | None, filter_) -> bool:
     """Return whether a catalog record satisfies an aim filter.
 
     A candidate with no record fails any catalog term, so the absence
@@ -605,7 +605,7 @@ def _record_matches(record: Optional[ModelRecord], filter_) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _sort_key(candidate: Candidate, order: str, area: Optional[str] = None):
+def _sort_key(candidate: Candidate, order: str, area: str | None = None):
     """Return the sort key placing `candidate` under `order`.
 
     Missing values always sort last, whichever direction the order
@@ -655,7 +655,7 @@ def _sort_key(candidate: Candidate, order: str, area: Optional[str] = None):
     return (0, -float(context), candidate.name)
 
 
-def _release_key(record: Optional[ModelRecord]) -> tuple:
+def _release_key(record: ModelRecord | None) -> tuple:
     """Return the release-date tiebreak key, newest first, undated last.
 
     An absent date gets its own trailing group rather than an empty
@@ -681,7 +681,7 @@ def _index_catalog(records: list[ModelRecord]) -> dict[tuple[str, str], ModelRec
 def rank_candidates(
     registry: EndpointRegistry,
     selector: Selector,
-    area: Optional[str] = None,
+    area: str | None = None,
 ) -> list[tuple[str, Candidate]]:
     """Return the endpoints matching a selector, best first.
 
@@ -846,7 +846,7 @@ def records_for_registry(
 def resolve_pairing(
     registry: EndpointRegistry,
     selector: Selector,
-    area: Optional[str] = None,
+    area: str | None = None,
 ) -> str:
     """Return the endpoint name a selector picks.
 
@@ -999,7 +999,7 @@ def _quality_cell(endpoint: Endpoint) -> str:
     return f"{quality} ({source})"
 
 
-def _capability_matrix(registry: EndpointRegistry, selects: Optional[list[str]] = None) -> str:
+def _capability_matrix(registry: EndpointRegistry, selects: list[str] | None = None) -> str:
     """Return the capability matrix for a registry, as fixed-width text.
 
     One row per endpoint, then one row per tier carrying the union over
@@ -1134,7 +1134,7 @@ def _terms_at_risk(selects: list[str], caps_by_name: dict[str, Capabilities]) ->
     ]
 
 
-def _explain(config_path: Optional[str] = None) -> str:
+def _explain(config_path: str | None = None) -> str:
     """Return the candidate table and pick for every selector in a config.
 
     Parameters
@@ -1187,7 +1187,7 @@ def _explain(config_path: Optional[str] = None) -> str:
     return "\n".join(lines).rstrip()
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Print the candidate table and pick for a config's selectors.
 
     Parameters
@@ -1246,7 +1246,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             registry, selects = _registry_from(args.config)
             blocks.append(_capability_matrix(registry, selects))
         print("\n\n".join(block for block in blocks if block))
-    except (ValueError, CatalogUnavailable, OSError) as exc:
+    except (ValueError, CatalogUnavailable, OSError):
         print(_explain(args.config))
     except (ValueError, CatalogUnavailable, OSError, ConfigError) as exc:
         print(str(exc), file=sys.stderr)
@@ -1255,7 +1255,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 
 def _registry_from(
-    config_path: Optional[str] = None,
+    config_path: str | None = None,
 ) -> tuple[EndpointRegistry, list[str]]:
     """Build a registry from a YAML config with its selectors resolved.
 

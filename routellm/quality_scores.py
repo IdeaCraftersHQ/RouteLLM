@@ -32,9 +32,9 @@ import os
 import re
 import sys
 import time
-from datetime import datetime, timezone
+from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterator, Optional, Union
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -50,7 +50,7 @@ SCORER_FORMS = (
 )
 
 
-def resolve_sidecar_path(quality_from: str, config_path: Optional[Union[str, Path]]) -> Path:
+def resolve_sidecar_path(quality_from: str, config_path: str | Path | None) -> Path:
     """Return the sidecar path `quality_from` names.
 
     A relative path is resolved against the CONFIG FILE's directory,
@@ -392,9 +392,9 @@ def _scored_ids(out_path: str) -> set:
 def score_traces(
     traces_dir: str,
     spec: str,
-    out_path: Optional[str] = None,
+    out_path: str | None = None,
     *,
-    limit: Optional[int] = None,
+    limit: int | None = None,
     rescore: bool = False,
     allow_llm: bool = False,
 ) -> int:
@@ -505,7 +505,7 @@ def aggregate_scores(
     rows: list,
     min_samples: int = 30,
     transform: str = "linear",
-    areas: Optional[dict] = None,
+    areas: dict | None = None,
 ) -> dict:
     """Turn scored traces into the quality sidecar, as a dict.
 
@@ -848,7 +848,7 @@ def _warn_if_stale(path: str, generated_at: str) -> None:
     if not generated_at:
         return
     try:
-        stamp = datetime.strptime(generated_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        stamp = datetime.strptime(generated_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
     except ValueError:
         logger.warning(
             "quality sidecar %s has an unreadable generated_at %r",
@@ -857,7 +857,7 @@ def _warn_if_stale(path: str, generated_at: str) -> None:
         )
         return
 
-    age = (datetime.now(timezone.utc) - stamp).days
+    age = (datetime.now(UTC) - stamp).days
     if age > STALE_AFTER_DAYS:
         logger.warning(
             "quality sidecar %s is stale: measured %s days ago (%s). "
@@ -988,7 +988,7 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Run the CLI, returning its exit code."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     args = _parser().parse_args(argv)

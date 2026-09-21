@@ -79,7 +79,7 @@ model-name grammar that splits on '-'.
 import logging
 import os
 import re
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -194,16 +194,16 @@ class Endpoint(BaseModel):
 
     name: str
     model: str
-    api_base: Optional[str] = None
-    api_key_env: Optional[str] = None
+    api_base: str | None = None
+    api_key_env: str | None = None
     tags: list[str] = Field(default_factory=list)
-    quality: Optional[int] = Field(default=None, ge=0, le=100)
+    quality: int | None = Field(default=None, ge=0, le=100)
     extra: dict[str, Any] = Field(default_factory=dict)
-    capabilities: Optional[Capabilities] = None
+    capabilities: Capabilities | None = None
     strict: bool = False
     quality_measured: bool = False
     pay: StrictBool = False
-    max_payment: Optional[str] = None
+    max_payment: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -223,7 +223,7 @@ class Endpoint(BaseModel):
 
     @field_validator("max_payment")
     @classmethod
-    def _validate_max_payment(cls, value: Optional[str]) -> Optional[str]:
+    def _validate_max_payment(cls, value: str | None) -> str | None:
         """Refuse a cap the payment library could not act on.
 
         A cap nobody can parse has to fail at load. Dropping it back
@@ -252,9 +252,9 @@ class Endpoint(BaseModel):
 
     def credentials(
         self,
-        default_base: Optional[str],
-        default_key: Optional[str],
-    ) -> tuple[Optional[str], Optional[str]]:
+        default_base: str | None,
+        default_key: str | None,
+    ) -> tuple[str | None, str | None]:
         """Resolve the base URL and API key for a call to this endpoint.
 
         The environment is read here rather than at config load, so a
@@ -322,11 +322,11 @@ class Tier(BaseModel):
     """
 
     name: str
-    router: Optional[str] = None
-    threshold: Optional[float] = Field(default=None, ge=0, le=1)
-    intent_routing: Optional[bool] = None
-    strong: Union[str, Selector]
-    weak: Union[str, Selector]
+    router: str | None = None
+    threshold: float | None = Field(default=None, ge=0, le=1)
+    intent_routing: bool | None = None
+    strong: str | Selector
+    weak: str | Selector
 
     def accepts_intent_routing(self) -> bool:
         """Return whether an intent may choose a tier in place of this one.
@@ -353,7 +353,7 @@ class Tier(BaseModel):
 
     @field_validator("strong", "weak")
     @classmethod
-    def _validate_reference(cls, value: Union[str, Selector]) -> Union[str, Selector]:
+    def _validate_reference(cls, value: str | Selector) -> str | Selector:
         if isinstance(value, Selector):
             return value
         if not value.strip():
@@ -411,8 +411,8 @@ class EndpointRegistry:
 
     def __init__(
         self,
-        endpoints: Optional[dict[str, Endpoint]] = None,
-        tiers: Optional[dict[str, Tier]] = None,
+        endpoints: dict[str, Endpoint] | None = None,
+        tiers: dict[str, Tier] | None = None,
     ):
         """Initialize the registry.
 
@@ -452,7 +452,7 @@ class EndpointRegistry:
 
     @classmethod
     def from_config(
-        cls, config: dict[str, Any], config_path: Optional[Any] = None
+        cls, config: dict[str, Any], config_path: Any | None = None
     ) -> "EndpointRegistry":
         """Build a registry from a loaded config dict.
 
@@ -533,7 +533,7 @@ class EndpointRegistry:
         registry.areas = _invert_areas(config.get("areas") or {}, tiers)
         return registry
 
-    def area_of(self, tier: Optional[str]) -> Optional[str]:
+    def area_of(self, tier: str | None) -> str | None:
         """Return the area a tier belongs to, or None.
 
         A null tier is tolerated: a flat pair has no tier at all
@@ -659,7 +659,7 @@ class EndpointRegistry:
         """Return whether `name` is a configured tier."""
         return name in self._tiers
 
-    def payable_bases(self, default_base: Optional[str] = None) -> list[str]:
+    def payable_bases(self, default_base: str | None = None) -> list[str]:
         """Return the base URLs the configured endpoints may be charged on.
 
         Only endpoints carrying `pay: true` contribute, so an endpoint
@@ -703,7 +703,7 @@ class EndpointRegistry:
                 bases.append(base)
         return bases
 
-    def payment_caps(self, default_base: Optional[str] = None) -> dict[str, str]:
+    def payment_caps(self, default_base: str | None = None) -> dict[str, str]:
         """Return each payable endpoint's own cap, keyed on its base URL.
 
         The scope a payment is enforced against is keyed on base URLs,

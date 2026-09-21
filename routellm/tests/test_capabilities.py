@@ -26,7 +26,7 @@ from routellm.pairing import ModelRecord
 @pytest.fixture(autouse=True)
 def _fresh_warnings(monkeypatch):
     """Reset the per-process warned set so each test starts quiet."""
-    import routellm.capabilities as capabilities
+    from routellm import capabilities
 
     monkeypatch.setattr(capabilities, "_warned", set())
 

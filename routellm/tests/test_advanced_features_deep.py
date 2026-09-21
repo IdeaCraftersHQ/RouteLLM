@@ -1,11 +1,12 @@
-import pytest
-import time
 import json
 import os
+import time
+from unittest.mock import patch
+
 import numpy as np
-from unittest.mock import MagicMock, patch
-from routellm.resilience import CircuitBreaker, CircuitState
+
 from routellm.caching import Cache, CacheConfig
+from routellm.resilience import CircuitBreaker, CircuitState
 
 
 def test_circuit_breaker_transitions():
@@ -99,7 +100,6 @@ def test_semantic_cache(mock_emb, tmp_path):
 
 def test_traffic_manager_rules():
     from routellm.traffic import TrafficManager, TrafficRule
-    from routellm.types import ModelPair
 
     rules = [
         TrafficRule(pattern="urgent", strong_model="high-tier", weak_model="mid-tier"),
@@ -121,7 +121,7 @@ def test_traffic_manager_rules():
 
 
 def test_quality_manager_traces(tmp_path):
-    from routellm.quality import QualityManager, FineTuneConfig
+    from routellm.quality import FineTuneConfig, QualityManager
 
     trace_dir = str(tmp_path / "traces")
     config = FineTuneConfig(enabled=True, trace_dir=trace_dir)
@@ -136,7 +136,7 @@ def test_quality_manager_traces(tmp_path):
     # Verify file exists and content
     files = os.listdir(trace_dir)
     assert len(files) == 1
-    with open(os.path.join(trace_dir, files[0]), "r") as f:
+    with open(os.path.join(trace_dir, files[0])) as f:
         data = json.load(f)
         assert data["input"]["prompt"] == prompt
         assert data["routed_model"] == model
@@ -144,7 +144,7 @@ def test_quality_manager_traces(tmp_path):
 
 
 def test_canary_selection():
-    from routellm.quality import QualityManager, CanaryConfig
+    from routellm.quality import CanaryConfig, QualityManager
 
     # 100% weight to ensure it always triggers for testing
     config = CanaryConfig(enabled=True, canary_model="canary-v1", weight=1.0)

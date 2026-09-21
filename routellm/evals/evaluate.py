@@ -130,7 +130,7 @@ def generate_results(
 def pretty_print_results(threshold, accuracy, model_counts, total):
     header = "=" * 15 + f" {router} with threshold {threshold} on {args.benchmark} " + "=" * 15
     print("\n" + header)
-    print("Average accuracy: {:.3f}".format(accuracy))
+    print(f"Average accuracy: {accuracy:.3f}")
     print(f"Model counts: {', '.join([f'{k}: {v}' for k, v in model_counts.items()])}")
     print(
         f"Model %: {', '.join([f'{k}: {v / total * 100:.3f}%' for k, v in model_counts.items()])}"

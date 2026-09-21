@@ -5,10 +5,12 @@ fallback mechanisms for routing.
 """
 
 import asyncio
-import time
 import logging
+import time
+from collections.abc import Awaitable, Callable
 from enum import Enum
-from typing import Callable, List, Optional, Any, Dict, Awaitable
+from typing import Any
+
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -44,7 +46,7 @@ class CircuitBreaker:
         fail_max: int = 5,
         fail_rate: float = 0.5,
         fail_wait_ms: int = 5000,
-        fail_codes: List[int] = None,
+        fail_codes: list[int] = None,
         rate_interval_ms: int = 60000,
         rate_minimum: int = 10,
     ):
@@ -75,7 +77,7 @@ class CircuitBreaker:
         self.state = CircuitState.CLOSED
         self.failures = 0
         self.last_failure_time = 0
-        self.history: List[tuple[float, bool]] = []  # (timestamp, success)
+        self.history: list[tuple[float, bool]] = []  # (timestamp, success)
 
     def _clean_history(self):
         """Remove stale entries from failure history."""
@@ -153,7 +155,7 @@ class CircuitBreaker:
 
 class ResilienceConfig(BaseModel):
     max_retries: int = 3
-    retry_on_codes: List[int] = [429, 500, 502, 503, 504]
+    retry_on_codes: list[int] = [429, 500, 502, 503, 504]
     backoff_factor: float = 2.0
     initial_backoff_ms: int = 500
     timeout_ms: int = 30000
@@ -170,7 +172,7 @@ class ResilienceConfig(BaseModel):
 class Resilience:
     def __init__(self, config: ResilienceConfig = None):
         self.config = config or ResilienceConfig()
-        self.cb_map: Dict[str, CircuitBreaker] = {}
+        self.cb_map: dict[str, CircuitBreaker] = {}
 
     def get_cb(self, key: str) -> CircuitBreaker:
         if key not in self.cb_map:
@@ -210,15 +212,15 @@ class Resilience:
                 if self.config.cb_enabled:
                     cb.record_success()
                 return res
-            except asyncio.TimeoutError as e:
-                logger.error(f"Timeout calling {model_name}: {str(e)}")
+            except TimeoutError as e:
+                logger.error(f"Timeout calling {model_name}: {e!s}")
                 if self.config.cb_enabled:
                     cb.record_failure(e)
                 last_error = e
                 if attempt == self.config.max_retries:
                     raise
             except Exception as e:
-                logger.error(f"Error calling {model_name}: {str(e)}")
+                logger.error(f"Error calling {model_name}: {e!s}")
                 if self.config.cb_enabled:
                     cb.record_failure(e)
                 last_error = e
@@ -259,7 +261,7 @@ class Resilience:
                     cb.record_success()
                 return res
             except Exception as e:
-                logger.error(f"Error calling {model_name}: {str(e)}")
+                logger.error(f"Error calling {model_name}: {e!s}")
                 if self.config.cb_enabled:
                     cb.record_failure(e)
                 last_error = e

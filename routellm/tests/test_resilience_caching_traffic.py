@@ -1,15 +1,16 @@
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-import asyncio
-from unittest.mock import MagicMock, AsyncMock
-from routellm.controller import Controller, ModelPair
-from routellm.resilience import ResilienceConfig
+
 from routellm.caching import CacheConfig
+from routellm.controller import Controller
+from routellm.resilience import ResilienceConfig
 from routellm.traffic import (
-    TrafficManager,
-    TrafficRule,
     LoadBalancer,
     LoadBalancerConfig,
     LoadBalancerEndpoint,
+    TrafficManager,
+    TrafficRule,
 )
 
 

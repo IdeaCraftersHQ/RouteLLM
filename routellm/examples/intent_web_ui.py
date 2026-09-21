@@ -9,31 +9,26 @@ Usage:
 """
 
 import argparse
-import json
 import os
 import sys
-from typing import Dict, List, Optional
 
 # Add the parent directory to sys.path to allow imports
 repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 sys.path.insert(0, repo_root)
 
 import gradio as gr
-import numpy as np
-import pandas as pd
-import yaml
 
-from routellm.controller import Controller, ModelPair
+from routellm.controller import ModelPair
 from routellm.middleware import (
-    IntentModelSelector,
-    IntentModelMapping,
     DomainIntentDetector,
-    load_intent_config,
+    IntentModelMapping,
+    IntentModelSelector,
     create_example_config,
+    load_intent_config,
 )
 
 
-def load_or_create_config(config_path: Optional[str] = None) -> IntentModelSelector:
+def load_or_create_config(config_path: str | None = None) -> IntentModelSelector:
     """
     Load intent configuration from a file or create a default one.
 
@@ -85,7 +80,7 @@ def load_or_create_config(config_path: Optional[str] = None) -> IntentModelSelec
     )
 
 
-def create_web_ui(intent_selector: IntentModelSelector, config_path: Optional[str] = None):
+def create_web_ui(intent_selector: IntentModelSelector, config_path: str | None = None):
     """
     Create a web UI for testing intent-based routing.
 
@@ -164,7 +159,7 @@ def create_web_ui(intent_selector: IntentModelSelector, config_path: Optional[st
             return (
                 f"LLM-based intent: {llm_intent}",
                 f"Embedding-based intent: {embedding_intent}",
-                f"Error getting confidence scores: {str(e)}",
+                f"Error getting confidence scores: {e!s}",
                 "",
                 f"Selected model pair:\nStrong: {intent_selector.get_model_pair(prompt).strong}\nWeak: {intent_selector.get_model_pair(prompt).weak}",
             )
@@ -188,7 +183,7 @@ def create_web_ui(intent_selector: IntentModelSelector, config_path: Optional[st
             domain_detector.export_examples(export_path)
             return f"Exported examples to {export_path}"
         except Exception as e:
-            return f"Error exporting examples: {str(e)}"
+            return f"Error exporting examples: {e!s}"
 
     # Create the Gradio interface
     with gr.Blocks(title="Intent-Based Routing") as demo:

@@ -6,7 +6,6 @@ for routing decisions.
 
 import re
 import time
-from typing import List
 
 import numpy as np
 import torch
@@ -31,7 +30,7 @@ class CausalLLMClassifier:
         score_threshold: int,
         prompt_field: str = "messages",
         use_last_turn: bool = False,
-        additional_fields: List[str] = list(["label", "pidx"]),
+        additional_fields: list[str] = list(["label", "pidx"]),
         max_new_tokens: int = 6,
     ):
         """Initialize causal LLM classifier.

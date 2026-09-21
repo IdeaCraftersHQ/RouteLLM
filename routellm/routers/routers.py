@@ -15,6 +15,7 @@ from datasets import concatenate_datasets, load_dataset
 from huggingface_hub import hf_hub_download
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
+from routellm.routers.base import Router, no_parallel
 from routellm.routers.causal_llm.configs import RouterModelConfig
 from routellm.routers.causal_llm.llm_utils import (
     load_prompt_format,
@@ -23,16 +24,15 @@ from routellm.routers.causal_llm.llm_utils import (
 from routellm.routers.causal_llm.model import CausalLLMClassifier
 from routellm.routers.embeddings import get_embedding_client
 from routellm.routers.matrix_factorization.model import MODEL_IDS, MFModel
-from routellm.routers.similarity_weighted.utils import (
-    compute_elo_mle_with_tie,
-    compute_tiers,
-    preprocess_battles,
-)
-from routellm.routers.base import Router, no_parallel  # noqa: F401
 from routellm.routers.registry import (  # noqa: F401
     ROUTER_CLS,
     discover_routers,
     register_router,
+)
+from routellm.routers.similarity_weighted.utils import (
+    compute_elo_mle_with_tie,
+    compute_tiers,
+    preprocess_battles,
 )
 
 logger = logging.getLogger(__name__)
@@ -99,9 +99,9 @@ class CausalLLMRouter(Router):
         classifier_message = hf_hub_download(
             repo_id=checkpoint_path, filename="classifier_ft_v5.txt"
         )
-        with open(system_message, "r") as pr:
+        with open(system_message) as pr:
             system_message = pr.read()
-        with open(classifier_message, "r") as pr:
+        with open(classifier_message) as pr:
             classifier_message = pr.read()
         self.to_openai_messages = functools.partial(
             to_openai_api_messages, system_message, classifier_message
@@ -428,5 +428,5 @@ register_router("sw_ranking", SWRankingRouter)
 # keep this module from importing.
 try:
     discover_routers()
-except Exception:  # noqa: BLE001
+except Exception:
     logger.warning("router entry point discovery failed", exc_info=True)

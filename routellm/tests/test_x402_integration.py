@@ -1,7 +1,8 @@
 """Integration test: full 402 retry flow through RouteLLM Controller."""
 
+from unittest.mock import MagicMock
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock
 
 from routellm.payment.gateway import PaymentGateway
 from routellm.payment.types import PaymentChallenge, PaymentReceipt
@@ -44,6 +45,7 @@ async def test_full_402_flow():
     retries with X-PAYMENT header, and returns successful response.
     """
     from unittest.mock import patch
+
     from routellm.controller import Controller
 
     gateway = FakeX402Gateway()

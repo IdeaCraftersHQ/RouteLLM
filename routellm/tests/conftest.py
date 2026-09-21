@@ -14,7 +14,6 @@ themselves (see `test_config_discovery.py` and `test_config_cli.py`);
 those keep working unchanged.
 """
 
-import os
 
 import pytest
 

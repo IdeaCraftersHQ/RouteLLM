@@ -39,9 +39,10 @@ which layer last set each leaf key so `resolve_path` can do that.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any
 
 import yaml
 
@@ -93,10 +94,10 @@ class LoadedConfig:
         Every location searched, existing or not, in the same order.
     """
 
-    data: Dict[str, Any] = field(default_factory=dict)
-    layers: List[ResolvedPath] = field(default_factory=list)
-    origins: Dict[str, Path] = field(default_factory=dict)
-    chain: List[ResolvedPath] = field(default_factory=list)
+    data: dict[str, Any] = field(default_factory=dict)
+    layers: list[ResolvedPath] = field(default_factory=list)
+    origins: dict[str, Path] = field(default_factory=dict)
+    chain: list[ResolvedPath] = field(default_factory=list)
 
     def resolve_path(self, key: str, value: Any) -> Path:
         """Resolve a path-valued config entry against the file that set it.
@@ -138,7 +139,7 @@ def _user_config_dir() -> Path:
     return Path.home() / ".config"
 
 
-def _project_file(cwd: Path) -> Optional[Path]:
+def _project_file(cwd: Path) -> Path | None:
     """Find the nearest project marker at or above `cwd`.
 
     Both markers are probed per directory, in `PROJECT_MARKERS` order.
@@ -164,9 +165,9 @@ def _project_file(cwd: Path) -> Optional[Path]:
 
 
 def config_paths(
-    cwd: Optional[os.PathLike | str] = None,
-    explicit: Optional[os.PathLike | str] = None,
-) -> List[ResolvedPath]:
+    cwd: os.PathLike | str | None = None,
+    explicit: os.PathLike | str | None = None,
+) -> list[ResolvedPath]:
     """Return the full config chain, lowest precedence first.
 
     Parameters
@@ -209,7 +210,7 @@ def _entry(path: Path, source: str) -> ResolvedPath:
     return ResolvedPath(path, source, path.is_file())
 
 
-def deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> Dict[str, Any]:
+def deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
     """Merge `override` onto `base`, recursing into nested mappings.
 
     Parameters
@@ -226,7 +227,7 @@ def deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> Dict[str
         replace wholesale; a key whose value in `override` is None is
         deleted from the result rather than set to None.
     """
-    merged: Dict[str, Any] = dict(base)
+    merged: dict[str, Any] = dict(base)
     for key, value in override.items():
         if value is None:
             merged.pop(key, None)
@@ -244,7 +245,7 @@ def deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> Dict[str
 
 
 def _record_origins(
-    origins: Dict[str, Path],
+    origins: dict[str, Path],
     layer: Mapping[str, Any],
     path: Path,
     prefix: str = "",
@@ -262,7 +263,7 @@ def _record_origins(
             origins[dotted] = path
 
 
-def _read(entry: ResolvedPath) -> Dict[str, Any]:
+def _read(entry: ResolvedPath) -> dict[str, Any]:
     """Parse one layer's YAML, naming the file and the layer on failure."""
     try:
         parsed = yaml.safe_load(entry.path.read_text())
@@ -280,7 +281,7 @@ def _read(entry: ResolvedPath) -> Dict[str, Any]:
     return dict(parsed)
 
 
-def _defaults() -> Dict[str, Any]:
+def _defaults() -> dict[str, Any]:
     """Return the built-in defaults layer: today's router configs, nothing else."""
     from routellm.controller import GPT_4_AUGMENTED_CONFIG
 
@@ -288,8 +289,8 @@ def _defaults() -> Dict[str, Any]:
 
 
 def load_config(
-    cwd: Optional[os.PathLike | str] = None,
-    explicit: Optional[os.PathLike | str] = None,
+    cwd: os.PathLike | str | None = None,
+    explicit: os.PathLike | str | None = None,
 ) -> LoadedConfig:
     """Load and merge every config layer that applies.
 
@@ -318,8 +319,8 @@ def load_config(
     chain = config_paths(cwd=cwd, explicit=explicit)
 
     data = _defaults()
-    origins: Dict[str, Path] = {}
-    layers: List[ResolvedPath] = []
+    origins: dict[str, Path] = {}
+    layers: list[ResolvedPath] = []
 
     for entry in chain:
         if not entry.exists:
@@ -364,7 +365,7 @@ def explain(loaded: LoadedConfig) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _top_level_origin(loaded: LoadedConfig, line: str) -> Optional[Path]:
+def _top_level_origin(loaded: LoadedConfig, line: str) -> Path | None:
     """Return the origin for a dumped top-level key line, or None.
 
     Only unindented `key:` / `key: value` lines carry a comment; a
@@ -388,7 +389,7 @@ def _top_level_origin(loaded: LoadedConfig, line: str) -> Optional[Path]:
 # ---------------------------------------------------------------------------
 
 
-def winning_path(chain: List[ResolvedPath]) -> Optional[ResolvedPath]:
+def winning_path(chain: list[ResolvedPath]) -> ResolvedPath | None:
     """Return the highest-precedence entry that exists, or None.
 
     Parameters
@@ -414,7 +415,7 @@ def winning_path(chain: List[ResolvedPath]) -> Optional[ResolvedPath]:
 NO_PROJECT_LINE = "[absent] project (no .routellm.yaml or routellm.yaml found)"
 
 
-def _chain_lines(chain: List[ResolvedPath]) -> List[str]:
+def _chain_lines(chain: list[ResolvedPath]) -> list[str]:
     """Render one `[used]`/`[absent]` line per searched location.
 
     A chain carrying no project entry gets `NO_PROJECT_LINE` in its
@@ -433,7 +434,7 @@ def _chain_lines(chain: List[ResolvedPath]) -> List[str]:
     return lines
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Inspect the config chain: `path`, `paths`, or `show`.
 
     Parameters

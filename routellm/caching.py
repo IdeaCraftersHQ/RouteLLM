@@ -10,7 +10,7 @@ import json
 import logging
 import sqlite3
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 import numpy as np
 from pydantic import BaseModel
@@ -82,7 +82,7 @@ class Cache:
         conn.commit()
         conn.close()
 
-    def _get_key(self, prompt: str, model: str, params: Dict[str, Any]) -> str:
+    def _get_key(self, prompt: str, model: str, params: dict[str, Any]) -> str:
         """Generate cache key from prompt, model, and parameters.
 
         Parameters
@@ -102,7 +102,7 @@ class Cache:
         data = {"prompt": prompt, "model": model, "params": params}
         return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
-    def get(self, prompt: str, model: str, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def get(self, prompt: str, model: str, params: dict[str, Any]) -> dict[str, Any] | None:
         """Retrieve cached completion via exact or semantic match.
 
         Attempts exact match first, then falls back to semantic matching
@@ -177,8 +177,8 @@ class Cache:
         return None
 
     async def aget(
-        self, prompt: str, model: str, params: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
+        self, prompt: str, model: str, params: dict[str, Any]
+    ) -> dict[str, Any] | None:
         """Async wrapper for get().
 
         Parameters
@@ -197,7 +197,7 @@ class Cache:
         """
         return await asyncio.get_event_loop().run_in_executor(None, self.get, prompt, model, params)
 
-    def put(self, prompt: str, model: str, params: Dict[str, Any], response: Dict[str, Any]):
+    def put(self, prompt: str, model: str, params: dict[str, Any], response: dict[str, Any]):
         """Store completion in cache.
 
         Parameters
@@ -222,7 +222,7 @@ class Cache:
                 embedding = self._get_embedding(prompt)
                 logger.debug(f"Cache: Generated embedding for model={model}")
             except Exception as e:
-                logger.error(f"Failed to generate embedding for cache: {str(e)}")
+                logger.error(f"Failed to generate embedding for cache: {e!s}")
 
         conn = sqlite3.connect(self.config.db_path)
         cursor = conn.cursor()
@@ -240,7 +240,7 @@ class Cache:
         conn.commit()
         conn.close()
 
-    async def aput(self, prompt: str, model: str, params: Dict[str, Any], response: Dict[str, Any]):
+    async def aput(self, prompt: str, model: str, params: dict[str, Any], response: dict[str, Any]):
         """Async wrapper for put().
 
         Parameters

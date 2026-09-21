@@ -13,7 +13,7 @@ both the fetch and the snapshot path, as test_examples.py does, because
 
 import pytest
 
-import routellm.pairing as pairing
+from routellm import pairing
 from routellm.capabilities import (
     CAPABILITY_KEYS,
     RANGE_KEYS,

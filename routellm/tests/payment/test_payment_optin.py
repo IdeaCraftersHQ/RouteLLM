@@ -48,9 +48,10 @@ def test_provider_without_wallet_key_installs_nothing():
 
 def test_provider_with_wallet_key_installs_a_paying_session():
     """Both present is the only combination that changes anything."""
+    from x402.http.clients.httpx import x402AsyncTransport
+
     from routellm.payment.transport import maybe_install_payment_session
     from routellm.payment.x402 import X402Adapter
-    from x402.http.clients.httpx import x402AsyncTransport
 
     litellm.aclient_session = None
     gateway = maybe_install_payment_session(provider="x402", wallet_key="0x" + "11" * 32)

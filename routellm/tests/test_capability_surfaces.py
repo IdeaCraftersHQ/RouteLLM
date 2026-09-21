@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-import routellm.pairing as pairing
+from routellm import pairing
 from routellm.endpoints import EndpointRegistry
 from routellm.pairing import ModelRecord, _capability_matrix, main
 

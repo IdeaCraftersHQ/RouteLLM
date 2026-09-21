@@ -7,7 +7,8 @@ import argparse
 import logging
 import os
 import time
-from typing import AsyncGenerator, Dict, List, Literal, Optional, Union
+from collections.abc import AsyncGenerator
+from typing import Literal
 
 import fastapi
 import shortuuid
@@ -16,8 +17,8 @@ from fastapi.concurrency import asynccontextmanager
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from routellm.config import load_config
 from routellm.capabilities import Capabilities, side_capabilities, union
+from routellm.config import load_config
 from routellm.controller import Controller, RoutingError
 from routellm.endpoints import Endpoint, EndpointRegistry, Tier
 from routellm.hints import TYPESAFE_INSTALL_HINT
@@ -73,7 +74,7 @@ def legacy_pair() -> tuple[str, str]:
 
 
 def build_registry(
-    file_config: Optional[dict], config_path: Optional[str] = None
+    file_config: dict | None, config_path: str | None = None
 ) -> EndpointRegistry:
     """Build the endpoint registry the server routes against.
 
@@ -170,9 +171,9 @@ TYPESAFE_DETECTOR_HINT = (
 
 
 def build_intents(
-    file_config: Optional[dict],
+    file_config: dict | None,
     registry: EndpointRegistry,
-) -> Optional[IntentModelSelector]:
+) -> IntentModelSelector | None:
     """Build the intent middleware the server routes tiers with.
 
     Reads the `intents:` key: a `detector` of `jev` or `litellm`, the
@@ -281,7 +282,7 @@ def build_intents(
     )
 
 
-def build_router_config(file_config: Optional[dict]) -> Optional[dict]:
+def build_router_config(file_config: dict | None) -> dict | None:
     """Return the router config, with the keys other owners claim removed.
 
     `endpoints:` and `tiers:` belong to the registry, `intents:` to the
@@ -509,37 +510,33 @@ class ErrorResponse(BaseModel):
 class UsageInfo(BaseModel):
     prompt_tokens: int = 0
     total_tokens: int = 0
-    completion_tokens: Optional[int] = 0
+    completion_tokens: int | None = 0
 
 
 class ChatCompletionRequest(BaseModel):
     # OpenAI fields: https://platform.openai.com/docs/api-reference/chat/create
     model: str
-    messages: Union[
-        str,
-        List[Dict[str, str]],
-        List[Dict[str, Union[str, List[Dict[str, Union[str, Dict[str, str]]]]]]],
-    ]
+    messages: str | list[dict[str, str]] | list[dict[str, str | list[dict[str, str | dict[str, str]]]]]
     # Every optional field defaults to None so an unset one stays unset.
     # A default value here would be manufactured into the litellm call,
     # and a provider that does not accept the parameter rejects the whole
     # request over a value the client never sent.
-    frequency_penalty: Optional[float] = None
-    logit_bias: Optional[Dict[int, float]] = None
-    logprobs: Optional[bool] = None
-    top_logprobs: Optional[int] = None
-    max_tokens: Optional[int] = None
-    n: Optional[int] = None
-    presence_penalty: Optional[float] = None
-    response_format: Optional[Dict[str, str]] = None  # { "type": "json_object" } for json mode
-    seed: Optional[int] = None
-    stop: Optional[Union[str, List[str]]] = None
-    stream: Optional[bool] = None
-    temperature: Optional[float] = None
-    top_p: Optional[float] = None
-    tools: Optional[List[Dict[str, Union[str, int, float]]]] = None
-    tool_choice: Optional[str] = None
-    user: Optional[str] = None
+    frequency_penalty: float | None = None
+    logit_bias: dict[int, float] | None = None
+    logprobs: bool | None = None
+    top_logprobs: int | None = None
+    max_tokens: int | None = None
+    n: int | None = None
+    presence_penalty: float | None = None
+    response_format: dict[str, str] | None = None  # { "type": "json_object" } for json mode
+    seed: int | None = None
+    stop: str | list[str] | None = None
+    stream: bool | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    tools: list[dict[str, str | int | float]] | None = None
+    tool_choice: str | None = None
+    user: str | None = None
 
 
 class ChatMessage(BaseModel):
@@ -550,7 +547,7 @@ class ChatMessage(BaseModel):
 class ChatCompletionResponseChoice(BaseModel):
     index: int
     message: ChatMessage
-    finish_reason: Optional[Literal["stop", "length"]] = None
+    finish_reason: Literal["stop", "length"] | None = None
 
 
 class ChatCompletionResponse(BaseModel):
@@ -558,7 +555,7 @@ class ChatCompletionResponse(BaseModel):
     object: str = "chat.completion"
     created: int = Field(default_factory=lambda: int(time.time()))
     model: str
-    choices: List[ChatCompletionResponseChoice]
+    choices: list[ChatCompletionResponseChoice]
     usage: UsageInfo
 
 

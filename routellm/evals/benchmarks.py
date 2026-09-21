@@ -13,7 +13,6 @@ import pandas as pd
 from tqdm import tqdm
 
 from routellm.controller import Controller
-from routellm.routers.routers import Router
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 

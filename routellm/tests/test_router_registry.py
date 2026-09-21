@@ -10,9 +10,8 @@ import logging
 
 import pytest
 
-import routellm.routers.registry as registry
+from routellm.routers import registry
 from routellm.routers.base import Router
-from routellm.types import ModelPair
 from routellm.routers.registry import (
     ROUTER_CLS,
     discovery_failures,
@@ -22,6 +21,7 @@ from routellm.routers.registry import (
     reset_registry,
     router_names,
 )
+from routellm.types import ModelPair
 
 
 class DummyRouter:

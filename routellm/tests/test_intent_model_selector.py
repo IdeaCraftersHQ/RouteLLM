@@ -1,7 +1,7 @@
-import unittest
-import tempfile
 import os
 import sys
+import tempfile
+import unittest
 from unittest.mock import MagicMock, patch
 
 # Add the repository root to the Python path
@@ -240,8 +240,8 @@ def test_save_intent_config_accepts_a_bare_filename(monkeypatch, tmp_path):
 
 
 # Import sys and os at the top of the file to ensure they're available
-import sys
 import os
+import sys
 
 # Add the repository root to the Python path at import time
 repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))

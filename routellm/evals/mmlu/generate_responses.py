@@ -16,8 +16,8 @@ import tiktoken
 import tqdm
 from openai import OpenAI
 
-from routellm.types import ModelPair
 from routellm.evals.mmlu.domains import ALL_MMLU_DOMAINS
+from routellm.types import ModelPair
 
 ROUTED_PAIR = ModelPair(strong="gpt-4-1106-preview", weak="mistralai/Mixtral-8x7B-Instruct-v0.1")
 
@@ -51,17 +51,15 @@ def format_example(df, idx, include_answer=True):
     prompt = df.iloc[idx, 0]
     k = df.shape[1] - 2
     for j in range(k):
-        prompt += "\n{}. {}".format(choices[j], df.iloc[idx, j + 1])
+        prompt += f"\n{choices[j]}. {df.iloc[idx, j + 1]}"
     prompt += "\nAnswer:"
     if include_answer:
-        prompt += " {}\n\n".format(df.iloc[idx, k + 1])
+        prompt += f" {df.iloc[idx, k + 1]}\n\n"
     return prompt
 
 
 def gen_prompt(train_df, subject, k=-1):
-    prompt = "The following are multiple choice questions (with answers) about{}.\n\n".format(
-        format_subject(subject)
-    )
+    prompt = f"The following are multiple choice questions (with answers) about{format_subject(subject)}.\n\n"
     if k == -1:
         k = train_df.shape[0]
     for i in range(k):

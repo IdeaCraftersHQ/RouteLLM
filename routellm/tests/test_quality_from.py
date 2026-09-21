@@ -20,7 +20,7 @@ import sys
 import pytest
 import yaml
 
-from routellm.endpoints import Endpoint, EndpointRegistry, Selector, Tier
+from routellm.endpoints import Endpoint, EndpointRegistry, Selector
 from routellm.pairing import resolve_pairing
 from routellm.quality_scores import apply_sidecar, load_sidecar
 
