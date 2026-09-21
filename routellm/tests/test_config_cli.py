@@ -245,6 +245,57 @@ def test_trailing_flag_missing_file_exits_1(env):
     assert str(missing) in err
 
 
+def test_path_leading_flag_missing_file_exits_1(env):
+    """`path` refuses a missing explicit file named before the subcommand.
+
+    `config_paths()`/`winning_path()` never validate the explicit layer,
+    only rank it; a missing file there used to fall through silently to
+    whatever exists lower on the chain instead of being reported.
+    """
+    missing = env.project / "gone.yaml"
+
+    code, out, err = env.run("--config", str(missing), "path")
+
+    assert code == 1
+    assert out.strip() == ""
+    assert "--config" in err
+    assert str(missing) in err
+
+
+def test_path_trailing_flag_missing_file_exits_1(env):
+    """`path` refuses a missing explicit file named after the subcommand."""
+    missing = env.project / "gone.yaml"
+
+    code, out, err = env.run("path", "--config", str(missing))
+
+    assert code == 1
+    assert out.strip() == ""
+    assert "--config" in err
+    assert str(missing) in err
+
+
+def test_path_prints_the_explicit_file_when_it_exists_leading(env):
+    """An existing explicit file, named before the subcommand, still wins."""
+    env.write(env.user, {"a": 2})
+    explicit = env.write(env.project / "explicit.yaml", {"a": 9})
+
+    code, out, _ = env.run("--config", str(explicit), "path")
+
+    assert code == 0
+    assert out.strip() == str(explicit)
+
+
+def test_path_prints_the_explicit_file_when_it_exists_trailing(env):
+    """An existing explicit file, named after the subcommand, still wins."""
+    env.write(env.user, {"a": 2})
+    explicit = env.write(env.project / "explicit.yaml", {"a": 9})
+
+    code, out, _ = env.run("path", "--config", str(explicit))
+
+    assert code == 0
+    assert out.strip() == str(explicit)
+
+
 def test_paths_and_show_agree_when_no_project_marker_exists(env):
     """Both surfaces report the project layer, absent, on the same line.
 

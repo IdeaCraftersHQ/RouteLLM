@@ -517,7 +517,16 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
 
         if args.command == "path":
-            winner = winning_path(config_paths(explicit=getattr(args, "config", None)))
+            explicit = getattr(args, "config", None)
+            # config_paths()+winning_path() never stat the explicit
+            # layer for validity, only for precedence: a missing
+            # --config/ROUTELLM_CONFIG file just falls through to
+            # whatever exists lower on the chain. load_config() already
+            # raises FileNotFoundError with the right message for that
+            # case (caught below); call it here for the side effect of
+            # that check before ever consulting the chain for a winner.
+            load_config(explicit=explicit)
+            winner = winning_path(config_paths(explicit=explicit))
             if winner is None:
                 print(
                     "no routellm config file on the chain; "
