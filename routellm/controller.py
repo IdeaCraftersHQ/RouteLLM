@@ -855,16 +855,54 @@ class Controller:
 
         return headers, body, decoded, "" if url is None else str(url)
 
-    async def _request_with_payment(self, call_fn):
+    def _may_pay(self, endpoint: Optional[str]) -> bool:
+        """Whether `endpoint` is authorised to charge the configured wallet.
+
+        This is the second of the two seams a 402 can be paid at. The
+        transport under litellm settles the ones it sees; this one
+        catches the errors litellm raises for everything else, which is
+        exactly what happens when the transport declined. Scoping only
+        the transport would therefore close the hole and leave it open.
+
+        Here the endpoint is known by name, so the question is its own
+        `pay:` flag rather than a URL match. A name the registry does
+        not know resolves to a passthrough endpoint, whose `pay` is
+        False because no config line ever wrote one: an unconfigured
+        model is never payable.
+
+        Parameters
+        ----------
+        endpoint : str or None
+            The routed endpoint name. None means the caller did not say,
+            which only the internal helper's direct callers do.
+
+        Returns
+        -------
+        bool
+            True when a payment may be signed for this call.
+        """
+        if endpoint is None:
+            # No name to check. The request path always passes one, so
+            # this is reached only by a caller that already narrowed
+            # the call itself, and refusing here would break it.
+            return True
+        return bool(self.endpoints.resolve(endpoint).pay)
+
+    async def _request_with_payment(self, call_fn, endpoint=None):
         """Retry a refused call once, carrying proof of payment.
 
         A 402 is parsed, paid and retried only when a payment gateway is
-        configured; otherwise the error propagates untouched.
+        configured AND the endpoint was authorised to charge; otherwise
+        the error propagates untouched, exactly as it would with no
+        wallet at all.
 
         Parameters
         ----------
         call_fn : callable
             Coroutine function taking a dict of extra headers.
+        endpoint : str, optional
+            The routed endpoint name, whose `pay:` flag decides whether
+            a payment may be signed. None skips the check.
 
         Returns
         -------
@@ -876,7 +914,7 @@ class Controller:
         except Exception as e:
             # Check if it's a 402 challenge; the status code decides
             # where the error carries one, the message text otherwise.
-            if self._is_402(e) and self.payment_gateway:
+            if self._is_402(e) and self.payment_gateway and self._may_pay(endpoint):
                 import logging
 
                 logging.getLogger(__name__).info(
@@ -901,6 +939,16 @@ class Controller:
                 # server chose, so it travels on the receipt rather than
                 # being assumed here.
                 return await call_fn({receipt.header_name: receipt.proof})
+
+            if self._is_402(e) and self.payment_gateway:
+                import logging
+
+                logging.getLogger(__name__).info(
+                    "Received 402 from %r, which is not authorised to "
+                    "charge this wallet; set `pay: true` on it to allow "
+                    "payment. Re-raising unpaid.",
+                    endpoint,
+                )
             raise
 
     def completion(
@@ -1141,7 +1189,7 @@ class Controller:
                 started = time.monotonic()
                 res = await self.resilience.wrap_acompletion(
                     model_name,
-                    lambda: self._request_with_payment(_call)
+                    lambda: self._request_with_payment(_call, endpoint=model_name)
                 )
                 latency_ms = int((time.monotonic() - started) * 1000)
                 
