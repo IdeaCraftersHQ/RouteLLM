@@ -105,3 +105,26 @@ tiers:
 #   threshold: 0.33
 #   strong: cloud_strong
 #   weak: colibri_glm
+
+# --- measured quality --------------------------------------------------
+# `quality:` on an endpoint above is a number a human typed once. The
+# sidecar is the measured one: record traces, score them, aggregate, and
+# point at the result. See docs/runbooks/traces-to-quality.md.
+#
+# The sidecar wins over an endpoint's `quality:`, logging one INFO line
+# per override; set `quality_from_override: false` to make an explicit
+# `quality:` win instead, with the sidecar filling only endpoints that
+# set none. A relative path resolves against this file's directory, and
+# the sidecar is read once, at startup.
+#
+# quality_from: ./quality.yaml
+# quality_from_override: true
+
+# An area groups the tiers answering one kind of request, so quality can
+# be measured per area and a selector inside such a tier orders on its
+# area's number before the overall one. A tier in no area is unaffected;
+# a tier in two is a load error.
+#
+# areas:
+#   coding:      [coding, coding_quality, coding_fast]
+#   copywriting: [copywriting, copywriting_quality, copywriting_fast]

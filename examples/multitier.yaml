@@ -310,6 +310,22 @@ endpoints:
     model: text-embedding-3-small
     api_key_env: OPENAI_API_KEY
 
+# --- areas -----------------------------------------------------------
+# An area groups the tiers that answer the same kind of request, so a
+# measured quality can be attributed per area rather than only overall.
+# `routellm.quality_scores aggregate --config <this file>` reads it to
+# split scores into `by_area`, and a selector inside one of these tiers
+# then orders on its area's number in preference to the endpoint's
+# overall one.
+#
+# A tier in no area orders on the overall number, as every tier did
+# before areas existed. A tier in two is a load error.
+
+areas:
+  coding:      [coding, coding_quality, coding_fast]
+  copywriting: [copywriting, copywriting_quality, copywriting_fast]
+  design:      [design, design_quality, design_fast]
+
 tiers:
 
   # --- areas of expertise --------------------------------------------

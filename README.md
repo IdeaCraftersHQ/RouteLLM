@@ -37,7 +37,8 @@ Reduce costs and latency with intelligent data management:
 ### Quality & Continuous Improvement
 Maintain high standards and automate model improvement:
 - **Canary Testing**: Safely split a percentage of traffic to a new model candidate for live validation.
-- **Trace Collection**: Standardized request/response recording for fine-tuning with **Fit**.
+- **Trace Collection**: Standardized request/response recording, in **Fit**'s trace format with the routing decision attached.
+- **Measured Quality**: Score recorded traces offline and let selectors order on the measurement instead of a hand-written number.
 - **Contract Enforcement**: conceptual integration points for **Eva** to enforce output quality contracts.
 
 ## Usage: Advanced Configuration
@@ -480,6 +481,17 @@ python -m routellm.evals.endpoint_quality --config c.yaml \
 It runs the coding benchmark against each named endpoint with `strong_model` and `weak_model` both set to that one endpoint, so no router runs and every call lands where it is meant to. **This spends real tokens on real providers** — `--limit` defaults to 50 prompts per endpoint, so four endpoints is 200 paid completions. Start small.
 
 This whole section is optional and severable: drop it and hand-set `quality:` keeps working exactly as it does today.
+### Measured quality
+
+`quality:` on an endpoint is a number someone typed once, and every `quality_desc` selector orders on it. Point the config at a sidecar to order on a measurement instead:
+
+```yaml
+quality_from: ./quality.yaml   # the sidecar wins; set quality_from_override: false to flip it
+areas:
+  coding: [coding, coding_quality, coding_fast]   # per-area numbers, used inside those tiers
+```
+
+Record traces, score them offline against a rubric, aggregate, and restart: `python -m routellm.quality_scores score --traces .routellm_traces --scorer rubric:./rubric.yaml` then `aggregate --scores scores.jsonl --out quality.yaml`. Scoring needs the `fit` extra; aggregation needs nothing. An endpoint the sidecar does not name keeps the number it has, and each override logs one line naming both. The whole loop is in [docs/runbooks/traces-to-quality.md](docs/runbooks/traces-to-quality.md).
 
 ### Intents
 
