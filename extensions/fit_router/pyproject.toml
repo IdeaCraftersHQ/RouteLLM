@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "routellm-fit"
+version = "0.1.0"
+description = "A routellm router trained on scored traces. Registers the 'fit' router through the routellm.routers entry point group."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Jad Bitar" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    # Routellm core (sibling package); installed via local path / editable in dev
+    "routellm",
+    "hop-top-fit @ git+https://github.com/hop-top/fit.git#subdirectory=py",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+# Training needs GRPO, which needs torch. That is fit's dependency, not
+# routellm's: `--dry-run` builds the dataset without it.
+training = ["hop-top-fit[training] @ git+https://github.com/hop-top/fit.git#subdirectory=py"]
+
+[project.entry-points."routellm.routers"]
+fit = "routellm_fit.router:FitRouter"
+
+[tool.setuptools.packages.find]
+include = ["routellm_fit*"]
+exclude = ["tests*"]
