@@ -792,8 +792,85 @@ class Controller:
 
         return "402" in str(exc)
 
+    @staticmethod
+    def _extract_402_response(exc):
+        """Recover the 402's headers, body and URL from an exception.
+
+        The payment gateway can only sign what the server actually
+        asked for, so the raw response has to survive the trip through
+        the exception. litellm is inconsistent here: the errors it
+        builds for an authenticated or rate-limited call take a
+        `response`, but the generic `APIError` it raises for a status it
+        has no class for -- 402 among them -- carries only a `request`.
+        Where the response is absent this returns empty wire data, and
+        the gateway decides whether an unreadable challenge is payable.
+        Inventing an amount and a currency here would sign a blank
+        cheque against a challenge nobody read.
+
+        Parameters
+        ----------
+        exc : BaseException
+            The exception raised by the downstream call.
+
+        Returns
+        -------
+        tuple[dict[str, str], bytes, dict, str]
+            Lowercased response headers, raw body bytes, the decoded
+            JSON body (empty dict when it does not decode), and the URL
+            of the refused request. Any component absent comes back
+            empty.
+        """
+        response = getattr(exc, "response", None)
+
+        headers: dict[str, str] = {}
+        raw_headers = getattr(response, "headers", None)
+        if raw_headers is not None:
+            try:
+                headers = {str(k).lower(): str(v) for k, v in dict(raw_headers).items()}
+            except (TypeError, ValueError):
+                headers = {}
+
+        body = getattr(response, "content", None)
+        if not isinstance(body, (bytes, bytearray)):
+            body = b""
+        body = bytes(body)
+
+        # The descriptive fields are read from the body the server sent,
+        # never assumed. A provider that states its price in JSON is
+        # quoted back accurately; one that states nothing yields empty
+        # strings rather than a fabricated amount.
+        decoded: dict = {}
+        json_fn = getattr(response, "json", None)
+        if callable(json_fn):
+            try:
+                candidate = json_fn()
+            except Exception:
+                candidate = None
+            if isinstance(candidate, dict):
+                decoded = candidate
+
+        url = getattr(getattr(response, "request", None), "url", None)
+        if url is None:
+            url = getattr(getattr(exc, "request", None), "url", None)
+
+        return headers, body, decoded, "" if url is None else str(url)
+
     async def _request_with_payment(self, call_fn):
-        """Wrapper to handle 402 Payment Required challenges."""
+        """Retry a refused call once, carrying proof of payment.
+
+        A 402 is parsed, paid and retried only when a payment gateway is
+        configured; otherwise the error propagates untouched.
+
+        Parameters
+        ----------
+        call_fn : callable
+            Coroutine function taking a dict of extra headers.
+
+        Returns
+        -------
+        Any
+            The downstream response, from the first call or the retry.
+        """
         try:
             return await call_fn({})
         except Exception as e:
@@ -801,22 +878,29 @@ class Controller:
             # where the error carries one, the message text otherwise.
             if self._is_402(e) and self.payment_gateway:
                 import logging
-                logging.getLogger(__name__).info("Received 402 challenge, attempting to pay...")
-                
-                # Extract challenge data from error (mocked for now as LiteLLM doesn't have native 402 support yet)
-                # In a real scenario, we'd parse the 'WWW-Authenticate' header or body
-                challenge = PaymentChallenge(
-                    scheme=self.payment_gateway.name,
-                    network=self.payment_gateway.networks[0],
-                    amount="1", # Mock amount
-                    currency="USDC",
-                    payload={}
+
+                logging.getLogger(__name__).info(
+                    "Received 402 challenge, attempting to pay..."
                 )
-                
+
+                headers, body, stated, resource_url = self._extract_402_response(e)
+                challenge = PaymentChallenge(
+                    scheme=stated.get("scheme") or self.payment_gateway.name,
+                    network=stated.get("network")
+                    or self.payment_gateway.networks[0],
+                    amount=stated.get("amount", ""),
+                    currency=stated.get("currency", ""),
+                    payload=stated,
+                    headers=headers,
+                    body=body,
+                    resource_url=stated.get("resource") or resource_url,
+                )
+
                 receipt = await self.payment_gateway.pay(challenge)
-                # Retry with the signed payment on the outbound header
-                # the protocol reserves for the client direction.
-                return await call_fn({"X-PAYMENT": receipt.tx_hash})
+                # The header name belongs to the protocol version the
+                # server chose, so it travels on the receipt rather than
+                # being assumed here.
+                return await call_fn({receipt.header_name: receipt.proof})
             raise
 
     def completion(
