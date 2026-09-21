@@ -10,6 +10,7 @@ The models.dev catalog is never fetched: `_fetch_catalog` is patched
 with records for the cloud models the example names, so the result does
 not move when models.dev does.
 """
+
 from pathlib import Path
 
 import pytest
@@ -382,9 +383,7 @@ def test_every_local_endpoint_declares_its_capabilities(config):
             "every capability term drops it silently"
         )
         for field in ("vision", "tools", "context"):
-            assert field in capabilities, (
-                f"local endpoint {name!r} leaves {field!r} unknown"
-            )
+            assert field in capabilities, f"local endpoint {name!r} leaves {field!r} unknown"
 
 
 def test_the_capability_selector_resolves_against_the_fake_catalog(resolved):
@@ -418,6 +417,8 @@ def _record_for(model):
         if (record.provider, record.id) == key:
             return record
     return None
+
+
 def test_every_area_names_existing_tiers(config):
     """The example's `areas:` block groups tiers it actually defines."""
     registry = EndpointRegistry.from_config(config)

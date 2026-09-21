@@ -30,9 +30,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def install_payment_session(
-    gateway, transport=None, payable_bases=None, limits=None, budget=None
-):
+def install_payment_session(gateway, transport=None, payable_bases=None, limits=None, budget=None):
     """Route litellm's async requests through `gateway`'s paying client.
 
     Parameters
@@ -86,7 +84,11 @@ def install_payment_session(
 
 
 def maybe_install_payment_session(
-    provider, wallet_key, networks=None, payable_bases=(), limits=None,
+    provider,
+    wallet_key,
+    networks=None,
+    payable_bases=(),
+    limits=None,
     budget=None,
 ):
     """Install the paying session only when payment was actually asked for.
@@ -131,9 +133,7 @@ def maybe_install_payment_session(
     from routellm.payment.x402 import X402Adapter
 
     gateway = X402Adapter(private_key=wallet_key, networks=networks)
-    install_payment_session(
-        gateway, payable_bases=payable_bases, limits=limits, budget=budget
-    )
+    install_payment_session(gateway, payable_bases=payable_bases, limits=limits, budget=budget)
 
     bases = list(payable_bases or ())
     if bases:

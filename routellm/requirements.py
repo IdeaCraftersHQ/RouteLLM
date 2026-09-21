@@ -84,9 +84,7 @@ class Requirements:
         )
 
 
-def derive(
-    messages: Any, kwargs: dict[str, Any], model: Optional[str]
-) -> Requirements:
+def derive(messages: Any, kwargs: dict[str, Any], model: Optional[str]) -> Requirements:
     """Read a request's requirements off its messages and kwargs.
 
     Never raises: a hand-rolled client may send message content in
@@ -161,9 +159,7 @@ def _wants_schema(response_format: Any) -> bool:
     return response_format.get("type") in _STRUCTURED_TYPES
 
 
-def _context_needed(
-    messages: Any, kwargs: dict[str, Any], model: Optional[str]
-) -> Optional[int]:
+def _context_needed(messages: Any, kwargs: dict[str, Any], model: Optional[str]) -> Optional[int]:
     """Return the estimated tokens this request occupies.
 
     The prompt's count plus whatever `max_tokens` reserves for the

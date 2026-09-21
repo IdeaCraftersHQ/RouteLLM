@@ -19,6 +19,7 @@ asset with its own decimals. `spend_controls.max_amount_per_payment`
 takes the Money string and the SDK resolves it against the scheme's
 default asset, so nothing here multiplies by a power of ten.
 """
+
 import base64
 import json
 
@@ -65,18 +66,12 @@ class ChargingProvider(httpx.AsyncBaseTransport):
         self.paid_urls: list[str] = []
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        proof = request.headers.get("PAYMENT-SIGNATURE") or request.headers.get(
-            "X-PAYMENT"
-        )
+        proof = request.headers.get("PAYMENT-SIGNATURE") or request.headers.get("X-PAYMENT")
         if not proof:
             body = challenge(str(request.url), self.amount)
             return httpx.Response(
                 402,
-                headers={
-                    "PAYMENT-REQUIRED": base64.b64encode(
-                        json.dumps(body).encode()
-                    ).decode()
-                },
+                headers={"PAYMENT-REQUIRED": base64.b64encode(json.dumps(body).encode()).decode()},
                 json=body,
                 request=request,
             )
@@ -207,9 +202,7 @@ async def test_a_challenge_under_the_cap_is_paid():
         limits=PaymentLimits(global_cap="$0.01"),
     )
     async with session:
-        response = await session.post(
-            f"{AUTHORISED}/chat/completions", json={"messages": []}
-        )
+        response = await session.post(f"{AUTHORISED}/chat/completions", json={"messages": []})
 
     assert response.status_code == 200
     assert provider.paid_urls == [f"{AUTHORISED}/chat/completions"]
@@ -233,9 +226,7 @@ async def test_a_challenge_over_the_global_ceiling_is_refused_by_name():
     )
     async with session:
         with pytest.raises(Exception) as caught:
-            await session.post(
-                f"{AUTHORISED}/chat/completions", json={"messages": []}
-            )
+            await session.post(f"{AUTHORISED}/chat/completions", json={"messages": []})
 
     message = str(caught.value)
     assert "--max-payment" in message
@@ -261,9 +252,7 @@ async def test_a_challenge_over_the_endpoint_cap_names_the_endpoint():
     )
     async with session:
         with pytest.raises(Exception) as caught:
-            await session.post(
-                f"{AUTHORISED}/chat/completions", json={"messages": []}
-            )
+            await session.post(f"{AUTHORISED}/chat/completions", json={"messages": []})
 
     message = str(caught.value)
     assert "max_payment" in message
@@ -292,18 +281,12 @@ async def test_an_endpoint_cap_lower_than_the_global_one_wins():
         adapter,
         transport=provider,
         payable_bases=[AUTHORISED, OTHER],
-        limits=PaymentLimits(
-            global_cap="$0.01", per_base={AUTHORISED: "$0.0005"}
-        ),
+        limits=PaymentLimits(global_cap="$0.01", per_base={AUTHORISED: "$0.0005"}),
     )
     async with session:
         with pytest.raises(Exception):
-            await session.post(
-                f"{AUTHORISED}/chat/completions", json={"messages": []}
-            )
-        allowed = await session.post(
-            f"{OTHER}/chat/completions", json={"messages": []}
-        )
+            await session.post(f"{AUTHORISED}/chat/completions", json={"messages": []})
+        allowed = await session.post(f"{OTHER}/chat/completions", json={"messages": []})
 
     assert allowed.status_code == 200
     assert provider.paid_urls == [f"{OTHER}/chat/completions"]
@@ -333,9 +316,7 @@ async def test_no_configured_cap_keeps_the_sdk_default_ceiling():
     )
     async with session:
         with pytest.raises(Exception):
-            await session.post(
-                f"{AUTHORISED}/chat/completions", json={"messages": []}
-            )
+            await session.post(f"{AUTHORISED}/chat/completions", json={"messages": []})
 
     assert provider.paid_urls == []
 
@@ -357,14 +338,10 @@ async def test_a_session_built_from_the_gateway_carries_its_limits():
     adapter = X402Adapter(private_key=TEST_KEY, networks=["base-sepolia"])
     adapter.limits = PaymentLimits(global_cap="$0.005")
 
-    session = adapter.build_session(
-        transport=provider, scope=PaymentScope([AUTHORISED])
-    )
+    session = adapter.build_session(transport=provider, scope=PaymentScope([AUTHORISED]))
     async with session:
         with pytest.raises(Exception) as caught:
-            await session.post(
-                f"{AUTHORISED}/chat/completions", json={"messages": []}
-            )
+            await session.post(f"{AUTHORISED}/chat/completions", json={"messages": []})
 
     assert "--max-payment" in str(caught.value)
     assert provider.paid_urls == []
@@ -597,11 +574,7 @@ async def test_the_adapter_enforces_the_cap_the_challenge_states():
                 network="base-sepolia",
                 amount="",
                 currency="",
-                headers={
-                    "payment-required": base64.b64encode(
-                        json.dumps(body).encode()
-                    ).decode()
-                },
+                headers={"payment-required": base64.b64encode(json.dumps(body).encode()).decode()},
                 body=json.dumps(body).encode(),
                 resource_url=f"{AUTHORISED}/chat/completions",
                 max_amount="$0.005",
@@ -629,11 +602,7 @@ async def test_the_adapter_pays_a_challenge_under_the_cap():
             network="base-sepolia",
             amount="",
             currency="",
-            headers={
-                "payment-required": base64.b64encode(
-                    json.dumps(body).encode()
-                ).decode()
-            },
+            headers={"payment-required": base64.b64encode(json.dumps(body).encode()).decode()},
             body=json.dumps(body).encode(),
             resource_url=f"{AUTHORISED}/chat/completions",
             max_amount="$0.005",
@@ -743,11 +712,7 @@ def test_two_endpoints_on_one_base_enforce_the_lowest_cap(tight_first):
         "pay": True,
         "max_payment": "$0.002",
     }
-    ordered = (
-        {"tight": tight, "loose": loose}
-        if tight_first
-        else {"loose": loose, "tight": tight}
-    )
+    ordered = {"tight": tight, "loose": loose} if tight_first else {"loose": loose, "tight": tight}
 
     registry = EndpointRegistry.from_config({"endpoints": ordered})
 

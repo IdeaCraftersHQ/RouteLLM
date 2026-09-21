@@ -128,17 +128,13 @@ class MFModel(torch.nn.Module, PyTorchModelHubMixin):
         self.embedding_model = "text-embedding-3-small"
 
         if self.use_proj:
-            self.text_proj = torch.nn.Sequential(
-                torch.nn.Linear(text_dim, dim, bias=False)
-            )
+            self.text_proj = torch.nn.Sequential(torch.nn.Linear(text_dim, dim, bias=False))
         else:
-            assert (
-                text_dim == dim
-            ), f"text_dim {text_dim} must be equal to dim {dim} if not using projection"
+            assert text_dim == dim, (
+                f"text_dim {text_dim} must be equal to dim {dim} if not using projection"
+            )
 
-        self.classifier = torch.nn.Sequential(
-            torch.nn.Linear(dim, num_classes, bias=False)
-        )
+        self.classifier = torch.nn.Sequential(torch.nn.Linear(dim, num_classes, bias=False))
 
     def get_device(self):
         """Get device where model parameters reside.

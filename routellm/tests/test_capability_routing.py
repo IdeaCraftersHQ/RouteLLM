@@ -130,9 +130,7 @@ def _route(controller, messages, model="default", **kwargs):
 
     prompt = requirements_module._prompt_text(messages)
     reqs = requirements_module.derive(messages, request, model)
-    picked, path, pair = controller._route(
-        prompt, request, tier, router, threshold, reqs
-    )
+    picked, path, pair = controller._route(prompt, request, tier, router, threshold, reqs)
     return picked, path, pair
 
 
@@ -369,9 +367,7 @@ def test_an_incapable_fallback_sibling_is_skipped(hi_router, tmp_path):
         }
     ]
 
-    _, with_check, sibling, _ = controller._models_to_try(
-        "seeing", path, None, reqs
-    )
+    _, with_check, sibling, _ = controller._models_to_try("seeing", path, None, reqs)
     _, without_check, plain_sibling, _ = controller._models_to_try(
         "seeing", path, None, Requirements()
     )

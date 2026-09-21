@@ -101,10 +101,7 @@ def _registry(**endpoints):
 
 def _names(registry, select, order="quality_desc"):
     """Return the ranked endpoint names a selector picks."""
-    return [
-        name
-        for name, _ in rank_candidates(registry, Selector(select=select, order=order))
-    ]
+    return [name for name, _ in rank_candidates(registry, Selector(select=select, order=order))]
 
 
 # ---------------------------------------------------------------------------
@@ -205,9 +202,7 @@ def test_max_output_desc_orders_and_puts_unknown_last(catalog):
         big=Endpoint(name="big", model="anthropic/claude-sonnet-4", tags=["pool"]),
         mid=Endpoint(name="mid", model="gpt-4o", tags=["pool"]),
         small=Endpoint(name="small", model="gpt-4o-mini", tags=["pool"]),
-        mystery=Endpoint(
-            name="mystery", model="ollama_chat/qwen3:8b", tags=["pool"]
-        ),
+        mystery=Endpoint(name="mystery", model="ollama_chat/qwen3:8b", tags=["pool"]),
     )
 
     ranked = _names(registry, "tag:pool", order="max_output_desc")

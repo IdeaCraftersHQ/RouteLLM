@@ -10,6 +10,7 @@ among them.
 The controller knows which endpoint it was calling, so the question it
 asks is the endpoint's `pay` flag rather than a URL match.
 """
+
 import pytest
 
 from routellm.payment.gateway import PaymentGateway

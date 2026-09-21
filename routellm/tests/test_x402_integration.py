@@ -1,4 +1,5 @@
 """Integration test: full 402 retry flow through RouteLLM Controller."""
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
@@ -54,13 +55,15 @@ async def test_full_402_flow():
     error_402 = Exception("402 Payment Required")
     error_402.status_code = 402
     error_402.response = MagicMock()
-    error_402.response.json = MagicMock(return_value={
-        "scheme": "x402",
-        "network": "base",
-        "amount": "0.001",
-        "currency": "USDC",
-        "resource": "https://llm.example.com/v1/chat",
-    })
+    error_402.response.json = MagicMock(
+        return_value={
+            "scheme": "x402",
+            "network": "base",
+            "amount": "0.001",
+            "currency": "USDC",
+            "resource": "https://llm.example.com/v1/chat",
+        }
+    )
 
     call_count = 0
     received_headers = []

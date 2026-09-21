@@ -6,6 +6,7 @@ its own subprocess, setting `sys.argv` before the import and driving the
 app through `TestClient` exactly as `test_tiers.py` does, with litellm's
 `acompletion` patched so nothing leaves the machine.
 """
+
 import json
 import subprocess
 import sys
@@ -107,8 +108,7 @@ def test_models_lists_tiers_and_routers(tmp_path, tiered_config):
     """Every tier name and one id per router, at the default threshold."""
     payload = _run(
         tmp_path,
-        ["x", "--config", str(tiered_config), "--routers", "random",
-         "--default-threshold", "0.5"],
+        ["x", "--config", str(tiered_config), "--routers", "random", "--default-threshold", "0.5"],
         """
 with TestClient(server.app) as client:
     reply = client.get("/v1/models")
@@ -135,8 +135,7 @@ def test_models_ids_are_routable(tmp_path, tiered_config):
     """Each listed id is accepted as the model of a completion."""
     payload = _run(
         tmp_path,
-        ["x", "--config", str(tiered_config), "--routers", "random",
-         "--default-threshold", "0.5"],
+        ["x", "--config", str(tiered_config), "--routers", "random", "--default-threshold", "0.5"],
         """
 with TestClient(server.app) as client:
     ids = [item["id"] for item in client.get("/v1/models").json()["data"]]
@@ -171,9 +170,19 @@ def test_flags_build_an_implicit_default_tier(tmp_path):
 
     payload = _run(
         tmp_path,
-        ["x", "--config", str(config), "--routers", "random",
-         "--strong-model", "gpt-4o", "--weak-model", "ollama_chat/qwen3:8b",
-         "--default-threshold", "0.25"],
+        [
+            "x",
+            "--config",
+            str(config),
+            "--routers",
+            "random",
+            "--strong-model",
+            "gpt-4o",
+            "--weak-model",
+            "ollama_chat/qwen3:8b",
+            "--default-threshold",
+            "0.25",
+        ],
         """
 with TestClient(server.app) as client:
     ids = [item["id"] for item in client.get("/v1/models").json()["data"]]
@@ -202,9 +211,19 @@ def test_config_default_tier_wins_over_the_flags(tmp_path, tiered_config):
     """A config `default` tier is used even when both flags are given."""
     payload = _run(
         tmp_path,
-        ["x", "--config", str(tiered_config), "--routers", "random",
-         "--strong-model", "gpt-4o", "--weak-model", "ollama_chat/qwen3:8b",
-         "--default-threshold", "0.25"],
+        [
+            "x",
+            "--config",
+            str(tiered_config),
+            "--routers",
+            "random",
+            "--strong-model",
+            "gpt-4o",
+            "--weak-model",
+            "ollama_chat/qwen3:8b",
+            "--default-threshold",
+            "0.25",
+        ],
         """
 with TestClient(server.app) as client:
     ids = [item["id"] for item in client.get("/v1/models").json()["data"]]
@@ -237,8 +256,17 @@ def test_implicit_tier_reuses_a_configured_endpoint(tmp_path):
 
     payload = _run(
         tmp_path,
-        ["x", "--config", str(config), "--routers", "random",
-         "--strong-model", "big", "--weak-model", "small"],
+        [
+            "x",
+            "--config",
+            str(config),
+            "--routers",
+            "random",
+            "--strong-model",
+            "big",
+            "--weak-model",
+            "small",
+        ],
         """
 with TestClient(server.app) as client:
     reply = client.post(
@@ -314,8 +342,7 @@ def test_one_model_flag_alone_is_an_argparse_error(tmp_path, no_default_config):
     ):
         result = _spawn(
             tmp_path,
-            ["x", "--config", str(no_default_config), "--routers", "random",
-             flag, value],
+            ["x", "--config", str(no_default_config), "--routers", "random", flag, value],
             "print('{}')\n",
         )
 
@@ -523,8 +550,7 @@ def test_flag_still_overrides_discovery(tmp_path, tiered_config):
 
     payload = _run(
         tmp_path,
-        ["x", "--config", str(tiered_config), "--routers", "random",
-         "--default-threshold", "0.5"],
+        ["x", "--config", str(tiered_config), "--routers", "random", "--default-threshold", "0.5"],
         """
 with TestClient(server.app) as client:
     reply = client.get("/v1/models")

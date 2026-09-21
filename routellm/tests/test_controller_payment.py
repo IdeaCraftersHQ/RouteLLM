@@ -15,13 +15,15 @@ class MockGateway(PaymentGateway):
         pass  # pragma: no cover
 
     def __init__(self):
-        self.pay = AsyncMock(return_value=PaymentReceipt(
-            tx_hash="0xpaid",
-            network="base",
-            amount="1.00",
-            currency="USDC",
-            paid_at=1000000,
-        ))
+        self.pay = AsyncMock(
+            return_value=PaymentReceipt(
+                tx_hash="0xpaid",
+                network="base",
+                amount="1.00",
+                currency="USDC",
+                paid_at=1000000,
+            )
+        )
         self.verify = AsyncMock(return_value=True)
 
     @property
@@ -48,12 +50,14 @@ async def test_controller_retries_on_402():
     error_402 = Exception("Payment Required")
     error_402.status_code = 402
     error_402.response = MagicMock()
-    error_402.response.json = MagicMock(return_value={
-        "scheme": "x402",
-        "network": "base",
-        "amount": "1.00",
-        "currency": "USDC",
-    })
+    error_402.response.json = MagicMock(
+        return_value={
+            "scheme": "x402",
+            "network": "base",
+            "amount": "1.00",
+            "currency": "USDC",
+        }
+    )
 
     call_count = 0
 

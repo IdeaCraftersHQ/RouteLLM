@@ -5,6 +5,7 @@ response it came on, so a challenge cannot be recovered from the error
 it raises. These tests pin the payment cycle to an httpx transport,
 underneath litellm, where the wire data is still intact.
 """
+
 import base64
 import json
 
@@ -76,9 +77,7 @@ class PayingProvider(httpx.AsyncBaseTransport):
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
-        proof = request.headers.get("PAYMENT-SIGNATURE") or request.headers.get(
-            "X-PAYMENT"
-        )
+        proof = request.headers.get("PAYMENT-SIGNATURE") or request.headers.get("X-PAYMENT")
         if not proof:
             headers = {}
             if self.version == 2:
@@ -87,9 +86,7 @@ class PayingProvider(httpx.AsyncBaseTransport):
                 headers["PAYMENT-REQUIRED"] = base64.b64encode(
                     json.dumps(self.challenge).encode()
                 ).decode()
-            return httpx.Response(
-                402, headers=headers, json=self.challenge, request=request
-            )
+            return httpx.Response(402, headers=headers, json=self.challenge, request=request)
         self.proofs.append(proof)
         return httpx.Response(
             200,
@@ -129,9 +126,7 @@ class AlwaysRefuses(httpx.AsyncBaseTransport):
         return httpx.Response(
             402,
             headers={
-                "PAYMENT-REQUIRED": base64.b64encode(
-                    json.dumps(self.challenge).encode()
-                ).decode()
+                "PAYMENT-REQUIRED": base64.b64encode(json.dumps(self.challenge).encode()).decode()
             },
             json=self.challenge,
             request=request,

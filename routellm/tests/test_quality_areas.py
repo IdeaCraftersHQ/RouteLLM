@@ -33,9 +33,7 @@ def _config(areas=None, tiers=None):
 
 
 def test_areas_invert_into_tier_to_area():
-    registry = EndpointRegistry.from_config(
-        _config(areas={"coding": ["coding", "coding_quality"]})
-    )
+    registry = EndpointRegistry.from_config(_config(areas={"coding": ["coding", "coding_quality"]}))
 
     assert registry.areas == {"coding": "coding", "coding_quality": "coding"}
     assert registry.area_of("coding_quality") == "coding"
@@ -168,9 +166,7 @@ def test_the_recorded_trace_carries_the_area(tmp_path):
     from routellm.quality import FineTuneConfig, QualityManager
 
     manager = QualityManager(
-        fine_tune_config=FineTuneConfig(
-            enabled=True, trace_dir=str(tmp_path / "traces")
-        )
+        fine_tune_config=FineTuneConfig(enabled=True, trace_dir=str(tmp_path / "traces"))
     )
     manager.record_trace(
         "hello",
@@ -234,9 +230,7 @@ def test_the_controller_fills_the_area_from_the_registry(tmp_path):
             progress_bar=False,
         )
         controller.quality_manager = QualityManager(
-            fine_tune_config=FineTuneConfig(
-                enabled=True, trace_dir=str(tmp_path / "traces")
-            )
+            fine_tune_config=FineTuneConfig(enabled=True, trace_dir=str(tmp_path / "traces"))
         )
         controller.completion(
             model="coding_quality",

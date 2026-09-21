@@ -67,9 +67,7 @@ def test_sidecar_fills_missing_quality(tmp_path):
     config = {**CONFIG, "quality_from": "quality.yaml"}
     path = _write(tmp_path, config)
 
-    registry = EndpointRegistry.from_config(
-        yaml.safe_load(path.read_text()), config_path=path
-    )
+    registry = EndpointRegistry.from_config(yaml.safe_load(path.read_text()), config_path=path)
 
     assert registry.get("cloud_strong").quality == 91
     assert registry.get("local_server").quality == 78
@@ -90,9 +88,7 @@ def test_sidecar_beats_an_explicit_quality_by_default(tmp_path):
     }
     path = _write(tmp_path, config)
 
-    registry = EndpointRegistry.from_config(
-        yaml.safe_load(path.read_text()), config_path=path
-    )
+    registry = EndpointRegistry.from_config(yaml.safe_load(path.read_text()), config_path=path)
 
     assert registry.get("cloud_strong").quality == 91
     assert registry.get("local_server").quality == 78
@@ -110,9 +106,7 @@ def test_quality_from_override_true_beats_an_explicit_quality(tmp_path):
     }
     path = _write(tmp_path, config)
 
-    registry = EndpointRegistry.from_config(
-        yaml.safe_load(path.read_text()), config_path=path
-    )
+    registry = EndpointRegistry.from_config(yaml.safe_load(path.read_text()), config_path=path)
 
     assert registry.get("cloud_strong").quality == 91
 
@@ -134,9 +128,7 @@ def test_explicit_quality_wins_when_override_is_false(tmp_path):
     }
     path = _write(tmp_path, config)
 
-    registry = EndpointRegistry.from_config(
-        yaml.safe_load(path.read_text()), config_path=path
-    )
+    registry = EndpointRegistry.from_config(yaml.safe_load(path.read_text()), config_path=path)
 
     assert registry.get("cloud_strong").quality == 42
     assert registry.get("local_server").quality == 78
@@ -151,9 +143,7 @@ def test_quality_from_resolves_relative_to_the_config_file(tmp_path):
 
     # Deliberately NOT chdir'ing into `nested`: the path is relative to
     # the config file, never to the CWD.
-    registry = EndpointRegistry.from_config(
-        yaml.safe_load(path.read_text()), config_path=path
-    )
+    registry = EndpointRegistry.from_config(yaml.safe_load(path.read_text()), config_path=path)
 
     assert registry.get("cloud_strong").quality == 91
 
@@ -170,9 +160,7 @@ def test_missing_sidecar_file_raises_naming_the_path(tmp_path):
     path = _write(tmp_path, config, sidecar=None)
 
     with pytest.raises(FileNotFoundError) as excinfo:
-        EndpointRegistry.from_config(
-            yaml.safe_load(path.read_text()), config_path=path
-        )
+        EndpointRegistry.from_config(yaml.safe_load(path.read_text()), config_path=path)
 
     message = str(excinfo.value)
     assert str(tmp_path / "absent.yaml") in message
@@ -190,9 +178,7 @@ def test_unknown_endpoint_in_the_sidecar_warns_and_is_ignored(tmp_path, caplog):
     path = _write(tmp_path, {**CONFIG, "quality_from": "quality.yaml"}, sidecar)
 
     with caplog.at_level(logging.WARNING, logger="routellm.quality_scores"):
-        registry = EndpointRegistry.from_config(
-            yaml.safe_load(path.read_text()), config_path=path
-        )
+        registry = EndpointRegistry.from_config(yaml.safe_load(path.read_text()), config_path=path)
 
     assert "retired_model" not in registry.names()
     assert any("retired_model" in record.message for record in caplog.records)
@@ -207,15 +193,11 @@ def test_sidecar_quality_orders_a_quality_desc_selector(tmp_path):
         "quality_from": "quality.yaml",
     }
     path = _write(tmp_path, config)
-    registry = EndpointRegistry.from_config(
-        yaml.safe_load(path.read_text()), config_path=path
-    )
+    registry = EndpointRegistry.from_config(yaml.safe_load(path.read_text()), config_path=path)
 
     ranked = [
         name
-        for name, _ in rank_candidates(
-            registry, Selector(select="tag:pool", order="quality_desc")
-        )
+        for name, _ in rank_candidates(registry, Selector(select="tag:pool", order="quality_desc"))
     ]
 
     assert ranked == ["cloud_strong", "local_server"]
@@ -224,9 +206,7 @@ def test_sidecar_quality_orders_a_quality_desc_selector(tmp_path):
 def test_a_config_without_quality_from_is_untouched(tmp_path):
     path = _write(tmp_path, CONFIG)
 
-    registry = EndpointRegistry.from_config(
-        yaml.safe_load(path.read_text()), config_path=path
-    )
+    registry = EndpointRegistry.from_config(yaml.safe_load(path.read_text()), config_path=path)
 
     assert registry.get("cloud_strong").quality is None
 
@@ -256,13 +236,9 @@ def test_harness_writes_the_sidecar_shape(tmp_path, monkeypatch):
     monkeypatch.setattr(
         endpoint_quality,
         "_score_endpoint",
-        lambda controller, name, limit: (0.91, 50)
-        if name == "cloud_strong"
-        else (0.78, 50),
+        lambda controller, name, limit: (0.91, 50) if name == "cloud_strong" else (0.78, 50),
     )
-    monkeypatch.setattr(
-        endpoint_quality, "_build_controller", lambda config, name, path: object()
-    )
+    monkeypatch.setattr(endpoint_quality, "_build_controller", lambda config, name, path: object())
 
     out = tmp_path / "quality.yaml"
     config = _write(tmp_path, CONFIG)
@@ -333,25 +309,17 @@ def test_matrix_marks_quality_measured_or_manual(tmp_path):
         "quality_from_override": False,
     }
     path = _write(tmp_path, config)
-    registry = EndpointRegistry.from_config(
-        yaml.safe_load(path.read_text()), config_path=path
-    )
+    registry = EndpointRegistry.from_config(yaml.safe_load(path.read_text()), config_path=path)
 
     rendered = _capability_matrix(registry, [])
-    cloud = next(
-        line for line in rendered.splitlines() if line.startswith("cloud_strong")
-    )
-    local = next(
-        line for line in rendered.splitlines() if line.startswith("local_server")
-    )
+    cloud = next(line for line in rendered.splitlines() if line.startswith("cloud_strong"))
+    local = next(line for line in rendered.splitlines() if line.startswith("local_server"))
 
     assert "42 (manual)" in cloud
     assert "78 (measured)" in local
 
 
-def test_the_explain_cli_resolves_quality_from_against_the_config(
-    tmp_path, capsys, monkeypatch
-):
+def test_the_explain_cli_resolves_quality_from_against_the_config(tmp_path, capsys, monkeypatch):
     """The CLI must not resolve a relative sidecar against the CWD.
 
     Regression: `_explain` and the matrix both built the registry
@@ -382,9 +350,7 @@ def test_the_explain_cli_resolves_quality_from_against_the_config(
     assert "42 (manual)" in out
 
 
-def test_the_explain_cli_without_the_matrix_also_resolves_it(
-    tmp_path, capsys, monkeypatch
-):
+def test_the_explain_cli_without_the_matrix_also_resolves_it(tmp_path, capsys, monkeypatch):
     from routellm.pairing import main
 
     config = {

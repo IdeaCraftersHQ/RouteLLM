@@ -19,9 +19,7 @@ from openai import OpenAI
 from routellm.types import ModelPair
 from routellm.evals.mmlu.domains import ALL_MMLU_DOMAINS
 
-ROUTED_PAIR = ModelPair(
-    strong="gpt-4-1106-preview", weak="mistralai/Mixtral-8x7B-Instruct-v0.1"
-)
+ROUTED_PAIR = ModelPair(strong="gpt-4-1106-preview", weak="mistralai/Mixtral-8x7B-Instruct-v0.1")
 
 choices = ["A", "B", "C", "D"]
 tokenizer = tiktoken.encoding_for_model("gpt-3.5-turbo")
@@ -125,9 +123,7 @@ def evaluate(args, subject, dev_df, test_df):
         num_threads=args.parallel,
         progress_bar=True,
     )
-    preds = [
-        s["answer"].strip()[0] if len(s["answer"].strip()) > 0 else "" for s in states
-    ]
+    preds = [s["answer"].strip()[0] if len(s["answer"].strip()) > 0 else "" for s in states]
     models = [s["model"] for s in states]
     latency = time.time() - tic
 
@@ -155,9 +151,7 @@ def generate_domain_data(args, domain):
     if os.path.exists(cache_key):
         return pd.read_csv(cache_key)
 
-    dev_df = pd.read_csv(f"{current_dir}/data/dev/{domain}_dev.csv", header=None)[
-        : args.ntrain
-    ]
+    dev_df = pd.read_csv(f"{current_dir}/data/dev/{domain}_dev.csv", header=None)[: args.ntrain]
     test_df = pd.read_csv(f"{current_dir}/data/test/{domain}_test.csv", header=None)
 
     # Dummy router just to get the results

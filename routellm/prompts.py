@@ -18,6 +18,7 @@ every adapter. This module imports nothing from routers or from any
 optional SDK: loading a prompt file must never pull in a heavy
 dependency.
 """
+
 from __future__ import annotations
 
 import logging
@@ -93,8 +94,7 @@ class PromptFile:
             document = {}
         if not isinstance(document, dict):
             raise ValueError(
-                f"{path}: prompt file must be a mapping of sections, "
-                f"got {type(document).__name__}"
+                f"{path}: prompt file must be a mapping of sections, got {type(document).__name__}"
             )
         return cls(document, path)
 
@@ -126,15 +126,12 @@ class PromptFile:
             return {}
         if not isinstance(raw, dict):
             raise ValueError(
-                f"{self.path}: section {name!r} must be a mapping, "
-                f"got {type(raw).__name__}"
+                f"{self.path}: section {name!r} must be a mapping, got {type(raw).__name__}"
             )
         for key, value in raw.items():
             expected = schema.get(key)
             if expected is None:
-                raise ValueError(
-                    f"{self.path}: unknown key {key!r} in section {name!r}"
-                )
+                raise ValueError(f"{self.path}: unknown key {key!r} in section {name!r}")
             wrong_type = not isinstance(value, expected)
             # bool subclasses int, so isinstance(True, int) is True; an
             # int field must still reject a bool value.

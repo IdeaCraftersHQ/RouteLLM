@@ -58,9 +58,7 @@ def _rows(path):
 def test_composite_spec_scores_every_trace(tmp_path):
     pytest.importorskip("fit")
 
-    traces = _write(
-        tmp_path / "traces", _trace("trace-1"), _trace("trace-2"), _trace("trace-3")
-    )
+    traces = _write(tmp_path / "traces", _trace("trace-1"), _trace("trace-2"), _trace("trace-3"))
     out = tmp_path / "scores.jsonl"
 
     written = score_traces(str(traces), "composite:accuracy,relevance,safety", str(out))
@@ -86,9 +84,7 @@ def test_missing_fit_names_the_extra(monkeypatch):
             raise ImportError(f"No module named {name!r}")
         return real(name, *args, **kwargs)
 
-    monkeypatch.setattr(
-        "routellm.quality_scores.importlib.import_module", _refuse
-    )
+    monkeypatch.setattr("routellm.quality_scores.importlib.import_module", _refuse)
 
     with pytest.raises(RuntimeError) as excinfo:
         build_scorer("composite:accuracy")
@@ -122,9 +118,7 @@ def test_rubric_scorer_is_deterministic(tmp_path, monkeypatch):
     monkeypatch.setattr(httpx, "post", _explode)
 
     rubric = tmp_path / "rubric.yaml"
-    rubric.write_text(
-        "patterns:\n  - [\"\\\\bbecause\\\\b\", 0.6]\n  - [\"\\\\bstep\\\\b\", 0.4]\n"
-    )
+    rubric.write_text('patterns:\n  - ["\\\\bbecause\\\\b", 0.6]\n  - ["\\\\bstep\\\\b", 0.4]\n')
 
     scorer = build_scorer(f"rubric:{rubric}")
     first = scorer.score("because of the first step", {})
@@ -270,9 +264,12 @@ def test_cli_score_writes_the_file_it_was_given(tmp_path):
 
     code = _cli(
         "score",
-        "--traces", str(traces),
-        "--scorer", f"module:{__name__}:constant_scorer",
-        "--out", str(out),
+        "--traces",
+        str(traces),
+        "--scorer",
+        f"module:{__name__}:constant_scorer",
+        "--out",
+        str(out),
     )
 
     assert code == 0
@@ -282,11 +279,16 @@ def test_cli_score_writes_the_file_it_was_given(tmp_path):
 def test_cli_score_defaults_out_beside_the_traces(tmp_path):
     traces = _traces_dir(tmp_path)
 
-    assert _cli(
-        "score",
-        "--traces", str(traces),
-        "--scorer", f"module:{__name__}:constant_scorer",
-    ) == 0
+    assert (
+        _cli(
+            "score",
+            "--traces",
+            str(traces),
+            "--scorer",
+            f"module:{__name__}:constant_scorer",
+        )
+        == 0
+    )
     assert len(_rows(tmp_path / "scores.jsonl")) == 4
 
 
@@ -294,13 +296,20 @@ def test_cli_limit_actually_limits(tmp_path):
     traces = _traces_dir(tmp_path)
     out = tmp_path / "scores.jsonl"
 
-    assert _cli(
-        "score",
-        "--traces", str(traces),
-        "--scorer", f"module:{__name__}:constant_scorer",
-        "--out", str(out),
-        "--limit", "2",
-    ) == 0
+    assert (
+        _cli(
+            "score",
+            "--traces",
+            str(traces),
+            "--scorer",
+            f"module:{__name__}:constant_scorer",
+            "--out",
+            str(out),
+            "--limit",
+            "2",
+        )
+        == 0
+    )
     assert len(_rows(out)) == 2
 
 
@@ -309,9 +318,12 @@ def test_cli_rescore_flag_changes_the_row_count(tmp_path):
     out = tmp_path / "scores.jsonl"
     argv = [
         "score",
-        "--traces", str(traces),
-        "--scorer", f"module:{__name__}:constant_scorer",
-        "--out", str(out),
+        "--traces",
+        str(traces),
+        "--scorer",
+        f"module:{__name__}:constant_scorer",
+        "--out",
+        str(out),
     ]
 
     assert _cli(*argv) == 0
@@ -331,9 +343,12 @@ def test_cli_missing_traces_dir_exits_nonzero_naming_it(tmp_path, capsys):
 
     code = _cli(
         "score",
-        "--traces", str(missing),
-        "--scorer", f"module:{__name__}:constant_scorer",
-        "--out", str(tmp_path / "s.jsonl"),
+        "--traces",
+        str(missing),
+        "--scorer",
+        f"module:{__name__}:constant_scorer",
+        "--out",
+        str(tmp_path / "s.jsonl"),
     )
 
     assert code == 1
@@ -343,9 +358,12 @@ def test_cli_missing_traces_dir_exits_nonzero_naming_it(tmp_path, capsys):
 def test_cli_unknown_scorer_exits_nonzero_listing_the_forms(tmp_path, capsys):
     code = _cli(
         "score",
-        "--traces", str(_traces_dir(tmp_path)),
-        "--scorer", "nonsense:x",
-        "--out", str(tmp_path / "s.jsonl"),
+        "--traces",
+        str(_traces_dir(tmp_path)),
+        "--scorer",
+        "nonsense:x",
+        "--out",
+        str(tmp_path / "s.jsonl"),
     )
 
     assert code == 1
@@ -357,9 +375,12 @@ def test_cli_unknown_scorer_exits_nonzero_listing_the_forms(tmp_path, capsys):
 def test_cli_judge_without_allow_llm_exits_nonzero(tmp_path, capsys):
     code = _cli(
         "score",
-        "--traces", str(_traces_dir(tmp_path)),
-        "--scorer", "judge:some-model",
-        "--out", str(tmp_path / "s.jsonl"),
+        "--traces",
+        str(_traces_dir(tmp_path)),
+        "--scorer",
+        "judge:some-model",
+        "--out",
+        str(tmp_path / "s.jsonl"),
     )
 
     assert code == 1
@@ -375,15 +396,16 @@ def test_cli_judge_without_allow_llm_exits_nonzero(tmp_path, capsys):
         ("module:json:JSONDecoder", "score"),
     ],
 )
-def test_cli_a_broken_scorer_spec_names_the_offending_input(
-    tmp_path, capsys, spec, needle
-):
+def test_cli_a_broken_scorer_spec_names_the_offending_input(tmp_path, capsys, spec, needle):
     """Every bad spec is a sentence and an exit code, never a traceback."""
     code = _cli(
         "score",
-        "--traces", str(_traces_dir(tmp_path)),
-        "--scorer", spec,
-        "--out", str(tmp_path / "s.jsonl"),
+        "--traces",
+        str(_traces_dir(tmp_path)),
+        "--scorer",
+        spec,
+        "--out",
+        str(tmp_path / "s.jsonl"),
     )
 
     assert code == 1
@@ -398,9 +420,12 @@ def test_cli_a_malformed_rubric_names_the_file(tmp_path, capsys):
 
     code = _cli(
         "score",
-        "--traces", str(_traces_dir(tmp_path)),
-        "--scorer", f"rubric:{rubric}",
-        "--out", str(tmp_path / "s.jsonl"),
+        "--traces",
+        str(_traces_dir(tmp_path)),
+        "--scorer",
+        f"rubric:{rubric}",
+        "--out",
+        str(tmp_path / "s.jsonl"),
     )
 
     assert code == 1
@@ -413,9 +438,12 @@ def test_cli_a_rubric_with_a_bad_regex_names_the_pattern(tmp_path, capsys):
 
     code = _cli(
         "score",
-        "--traces", str(_traces_dir(tmp_path)),
-        "--scorer", f"rubric:{rubric}",
-        "--out", str(tmp_path / "s.jsonl"),
+        "--traces",
+        str(_traces_dir(tmp_path)),
+        "--scorer",
+        f"rubric:{rubric}",
+        "--out",
+        str(tmp_path / "s.jsonl"),
     )
 
     assert code == 1
@@ -461,12 +489,18 @@ def test_cli_allow_llm_lets_a_judge_spec_through(tmp_path, monkeypatch):
     traces = _traces_dir(tmp_path, count=2)
     out = tmp_path / "scores.jsonl"
 
-    assert _cli(
-        "score",
-        "--traces", str(traces),
-        "--scorer", "judge:some-model",
-        "--out", str(out),
-        "--allow-llm",
-    ) == 0
+    assert (
+        _cli(
+            "score",
+            "--traces",
+            str(traces),
+            "--scorer",
+            "judge:some-model",
+            "--out",
+            str(out),
+            "--allow-llm",
+        )
+        == 0
+    )
     assert built["allow_llm"] is True
     assert len(_rows(out)) == 2

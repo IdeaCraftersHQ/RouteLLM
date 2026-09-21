@@ -9,6 +9,7 @@ An endpoint that says nothing about payment does not pay, so adding the
 flag to a running server authorises exactly the endpoints it is written
 on and no others.
 """
+
 import sys
 
 import pytest
@@ -45,11 +46,7 @@ def registry(config: dict) -> EndpointRegistry:
 def test_an_endpoint_does_not_pay_unless_it_says_so():
     """The default is not paying. Silence is never consent to charge."""
     reg = registry(
-        {
-            "endpoints": {
-                "cloud": {"model": "gpt-4o", "api_base": "https://a.example.com/v1"}
-            }
-        }
+        {"endpoints": {"cloud": {"model": "gpt-4o", "api_base": "https://a.example.com/v1"}}}
     )
 
     assert reg.resolve("cloud").pay is False
@@ -83,9 +80,7 @@ def test_a_payable_endpoint_without_a_base_falls_back_to_the_default():
     Authorising it has to authorise the URL it is actually called on,
     or `pay: true` would silently do nothing.
     """
-    reg = registry(
-        {"endpoints": {"payer": {"model": "gpt-4o", "pay": True}}}
-    )
+    reg = registry({"endpoints": {"payer": {"model": "gpt-4o", "pay": True}}})
 
     assert reg.payable_bases(default_base="https://default.example.com/v1") == [
         "https://default.example.com/v1"
@@ -172,9 +167,7 @@ def test_the_server_authorises_only_the_endpoints_that_asked():
         }
     )
 
-    assert payable_bases_for(reg, default_base=None) == [
-        "https://paid.example.com/v1"
-    ]
+    assert payable_bases_for(reg, default_base=None) == ["https://paid.example.com/v1"]
 
 
 def test_the_server_authorises_nothing_when_no_endpoint_asked():

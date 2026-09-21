@@ -3,6 +3,7 @@
 These exercise routellm.prompts on its own: no adapter, no SDK, no
 router. Adapter wiring lives in test_jev_prompts.py.
 """
+
 import pathlib
 import subprocess
 import sys
@@ -107,9 +108,7 @@ def test_unrequested_section_ignored(tmp_path):
     )
     prompt_file = PromptFile.load(_write(tmp_path, text))
 
-    assert prompt_file.section("router", ROUTER_SCHEMA) == {
-        "instructions": "file router question"
-    }
+    assert prompt_file.section("router", ROUTER_SCHEMA) == {"instructions": "file router question"}
 
 
 def test_partial_section_returns_only_present_keys(tmp_path):

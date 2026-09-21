@@ -536,9 +536,7 @@ THROWAWAY_KEY = "0x" + "11" * 32
         (v1_response, "X-PAYMENT", 1),
     ],
 )
-async def test_real_sdk_signs_and_encodes(
-    response_factory, expected_header, expected_version
-):
+async def test_real_sdk_signs_and_encodes(response_factory, expected_header, expected_version):
     """A real wallet signs a real challenge and the proof decodes.
 
     Drives the actual x402 SDK, so it pins the signer wiring too: the
@@ -604,9 +602,9 @@ async def test_v1_network_registration_is_not_skipped():
 @pytest.mark.parametrize(
     "provider,key,expect_gateway",
     [
-        (None, "", False),          # default server: no payment path at all
-        (None, "0x" + "11" * 32, False),   # a key alone enables nothing
-        ("x402", "", False),        # the flag alone enables nothing
+        (None, "", False),  # default server: no payment path at all
+        (None, "0x" + "11" * 32, False),  # a key alone enables nothing
+        ("x402", "", False),  # the flag alone enables nothing
         ("x402", "0x" + "11" * 32, True),  # both -> opt in
     ],
 )

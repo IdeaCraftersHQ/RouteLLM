@@ -5,6 +5,7 @@ module level), so these tests import `routellm.routers.registry`
 directly: that module is real, torch-free, and holds the backing dict
 the stubbed module re-exports.
 """
+
 import logging
 
 import pytest
@@ -225,9 +226,7 @@ class _ScoringRouter(Router):
 def test_route_agrees_with_route_with_score(win_rate, threshold, expected):
     pair = ModelPair(strong="strong", weak="weak")
 
-    model, score = _ScoringRouter(win_rate).route_with_score(
-        "prompt", threshold, pair
-    )
+    model, score = _ScoringRouter(win_rate).route_with_score("prompt", threshold, pair)
 
     assert model == expected
     assert score == win_rate
@@ -250,9 +249,7 @@ def test_route_only_subclass_reports_no_score():
         def route(self, prompt, threshold, routed_pair):
             return routed_pair.weak
 
-    model, score = RouteOnly().route_with_score(
-        "prompt", 0.5, ModelPair(strong="s", weak="w")
-    )
+    model, score = RouteOnly().route_with_score("prompt", 0.5, ModelPair(strong="s", weak="w"))
 
     assert model == "w"
     assert score is None

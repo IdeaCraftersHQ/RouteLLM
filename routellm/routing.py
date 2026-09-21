@@ -76,7 +76,7 @@ def parse_model_name(
         return _known_tier(tier, registry, error_cls), router, threshold
 
     if model_name.startswith("router-"):
-        remainder = model_name[len("router-"):]
+        remainder = model_name[len("router-") :]
         threshold = _as_threshold(remainder.rsplit("-", 1)[-1])
         if threshold is not None:
             router, threshold = _parse_router_form(model_name, model_name, error_cls)
@@ -87,9 +87,7 @@ def parse_model_name(
     return _known_tier(model_name, registry, error_cls), None, None
 
 
-def _parse_router_form(
-    text: str, model_name: str, error_cls: type
-) -> tuple[str, float]:
+def _parse_router_form(text: str, model_name: str, error_cls: type) -> tuple[str, float]:
     """Parse the `router-<name>-<threshold>` form out of `text`."""
     parts = text.split("-")
     if len(parts) != 3 or parts[0] != "router":
@@ -100,9 +98,7 @@ def _parse_router_form(
 
     threshold = _as_threshold(parts[2])
     if threshold is None:
-        raise error_cls(
-            f"Invalid threshold: {parts[2]}. Threshold must be a float in [0, 1]."
-        )
+        raise error_cls(f"Invalid threshold: {parts[2]}. Threshold must be a float in [0, 1].")
 
     return parts[1], threshold
 

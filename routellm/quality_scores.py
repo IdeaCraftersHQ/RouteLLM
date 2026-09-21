@@ -50,9 +50,7 @@ SCORER_FORMS = (
 )
 
 
-def resolve_sidecar_path(
-    quality_from: str, config_path: Optional[Union[str, Path]]
-) -> Path:
+def resolve_sidecar_path(quality_from: str, config_path: Optional[Union[str, Path]]) -> Path:
     """Return the sidecar path `quality_from` names.
 
     A relative path is resolved against the CONFIG FILE's directory,
@@ -212,9 +210,7 @@ def _build_rubric(path: str):
         try:
             re.compile(pattern)
         except re.error as exc:
-            raise ValueError(
-                f"Invalid regex {pattern!r} in rubric {path}: {exc}"
-            ) from exc
+            raise ValueError(f"Invalid regex {pattern!r} in rubric {path}: {exc}") from exc
 
     reward_fn = _import_fit("fit.training.reward_fn")
     return RubricScorer(reward_fn.RubricJudgeReward(patterns), patterns)
@@ -267,8 +263,7 @@ def build_scorer(spec: str, allow_llm: bool = False, trace_count: int = 0):
         module_name, _, factory_name = rest.rpartition(":")
         if not module_name:
             raise ValueError(
-                f"Scorer spec {spec!r} is malformed; module: wants "
-                "module:pkg.mod:factory"
+                f"Scorer spec {spec!r} is malformed; module: wants module:pkg.mod:factory"
             )
         try:
             module = importlib.import_module(module_name)
@@ -317,8 +312,7 @@ def build_scorer(spec: str, allow_llm: bool = False, trace_count: int = 0):
         return _JudgeScorer(reward_fn.LLMJudgeReward(model=rest))
 
     raise ValueError(
-        f"Unknown scorer spec {spec!r}. The four forms are:\n  "
-        + "\n  ".join(SCORER_FORMS)
+        f"Unknown scorer spec {spec!r}. The four forms are:\n  " + "\n  ".join(SCORER_FORMS)
     )
 
 
@@ -585,15 +579,9 @@ def aggregate_scores(
         if area is None:
             area = row.get("tier")
         if area is not None:
-            per_area.setdefault(endpoint, {}).setdefault(area, []).append(
-                float(score)
-            )
+            per_area.setdefault(endpoint, {}).setdefault(area, []).append(float(score))
 
-    rated = {
-        name: values
-        for name, values in overall.items()
-        if len(values) >= min_samples
-    }
+    rated = {name: values for name, values in overall.items() if len(values) >= min_samples}
 
     effective = transform
     if transform == "percentile" and len(rated) < 2:
@@ -608,9 +596,7 @@ def aggregate_scores(
         means = {name: sum(v) / len(v) for name, v in rated.items()}
         qualities = _percentile_scale(means)
     else:
-        qualities = {
-            name: _linear(sum(v) / len(v)) for name, v in rated.items()
-        }
+        qualities = {name: _linear(sum(v) / len(v)) for name, v in rated.items()}
 
     endpoints: dict = {}
     for name in sorted(rated):
@@ -723,8 +709,7 @@ def _areas_from_config(path: str) -> dict:
 
     if not os.path.exists(path):
         raise FileNotFoundError(
-            f"No config file at {path} (given as --config, read only "
-            "for its `areas:` map)"
+            f"No config file at {path} (given as --config, read only for its `areas:` map)"
         )
 
     try:
@@ -735,15 +720,13 @@ def _areas_from_config(path: str) -> dict:
 
     if not isinstance(config, dict):
         raise ValueError(
-            f"Malformed config at {path}: expected a mapping, found "
-            f"{type(config).__name__}"
+            f"Malformed config at {path}: expected a mapping, found {type(config).__name__}"
         )
 
     areas = config.get("areas") or {}
     if not areas:
         logger.warning(
-            "config %s has no `areas:`; by_area will be keyed on the "
-            "raw tier names",
+            "config %s has no `areas:`; by_area will be keyed on the raw tier names",
             path,
         )
 
@@ -752,8 +735,7 @@ def _areas_from_config(path: str) -> dict:
         for tier in tiers or []:
             if tier in inverted and inverted[tier] != area:
                 raise ValueError(
-                    f"Tier {tier!r} is in two areas in {path}, "
-                    f"{inverted[tier]!r} and {area!r}."
+                    f"Tier {tier!r} is in two areas in {path}, {inverted[tier]!r} and {area!r}."
                 )
             inverted[tier] = area
     return inverted
@@ -837,8 +819,7 @@ def load_sidecar(path: str) -> Sidecar:
 
     if not isinstance(raw, dict):
         raise ValueError(
-            f"Malformed quality sidecar at {path}: expected a mapping, "
-            f"found {type(raw).__name__}"
+            f"Malformed quality sidecar at {path}: expected a mapping, found {type(raw).__name__}"
         )
 
     version = raw.get("version")
@@ -867,9 +848,7 @@ def _warn_if_stale(path: str, generated_at: str) -> None:
     if not generated_at:
         return
     try:
-        stamp = datetime.strptime(generated_at, "%Y-%m-%dT%H:%M:%SZ").replace(
-            tzinfo=timezone.utc
-        )
+        stamp = datetime.strptime(generated_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     except ValueError:
         logger.warning(
             "quality sidecar %s has an unreadable generated_at %r",
@@ -929,8 +908,7 @@ def apply_sidecar(registry, sidecar: Sidecar, override: bool = True) -> int:
     for name, measured in sidecar.endpoints.items():
         if name not in registry.names():
             logger.warning(
-                "quality sidecar names %r, which is not a configured "
-                "endpoint; ignored",
+                "quality sidecar names %r, which is not a configured endpoint; ignored",
                 name,
             )
             continue
@@ -1006,9 +984,7 @@ def _parser() -> argparse.ArgumentParser:
     agg.add_argument("--config", default=None, help="routellm YAML, read for areas:")
     agg.add_argument("--out", required=True, help="sidecar YAML to write")
     agg.add_argument("--min-samples", type=int, default=30)
-    agg.add_argument(
-        "--transform", choices=("linear", "percentile"), default="linear"
-    )
+    agg.add_argument("--transform", choices=("linear", "percentile"), default="linear")
     return parser
 
 

@@ -5,6 +5,7 @@ Every path in this file lives under `tmp_path`: `HOME` and
 with `monkeypatch.chdir`, and `config.SYSTEM_PATH` is monkeypatched to a
 temp file so nothing ever reads the real `/etc`.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

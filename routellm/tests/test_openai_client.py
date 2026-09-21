@@ -6,9 +6,7 @@ from routellm.routers.routers import ROUTER_CLS
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-system_content = (
-    "You are a helpful assistant. Respond to the questions as best as you can."
-)
+system_content = "You are a helpful assistant. Respond to the questions as best as you can."
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

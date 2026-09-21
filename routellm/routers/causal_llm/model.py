@@ -22,6 +22,7 @@ class CausalLLMClassifier:
     Uses special tokens [[1]] through [[5]] to indicate difficulty level.
     Higher scores indicate harder prompts requiring strong model.
     """
+
     def __init__(
         self,
         config: RouterModelConfig,
@@ -86,9 +87,7 @@ class CausalLLMClassifier:
         self.orig_vocab_size = len(self.tokenizer) - config.num_outputs
         self.max_new_tokens = max_new_tokens
         self.score_threshold = score_threshold
-        assert (
-            self.score_threshold == config.num_outputs - 1
-        ), "this is the default value for now."
+        assert self.score_threshold == config.num_outputs - 1, "this is the default value for now."
         print(f"Done loading model in {time.time() - s} seconds.")
 
     def preprocess(self, row):
@@ -114,9 +113,7 @@ class CausalLLMClassifier:
             data_row[field] = row[field]
         # select turns from the prompt field
         openai_messages = (
-            row[self.prompt_field]
-            if self.use_last_turn
-            else row[self.prompt_field][:-1]
+            row[self.prompt_field] if self.use_last_turn else row[self.prompt_field][:-1]
         )
         # convert openai messages formot to model's prompt format
         text = self.prompt_format.generate_prompt(openai_messages)

@@ -10,6 +10,7 @@ Routers are stubbed the same way as in `test_tiers.py`: a fixed win
 rate registered into `routellm.controller.ROUTER_CLS`, which the root
 conftest has already replaced with a stub dict.
 """
+
 import builtins
 import sys
 from unittest.mock import MagicMock
@@ -303,9 +304,7 @@ def test_a_tier_only_selector_pairs_with_the_default():
         intent_tiers={"legal": "premium"},
     )
 
-    assert selector.get_model_pair("draft a contract") == ModelPair(
-        strong="s", weak="w"
-    )
+    assert selector.get_model_pair("draft a contract") == ModelPair(strong="s", weak="w")
 
 
 def test_intent_tiers_leave_get_model_pair_alone_for_mapping_callers():
@@ -323,9 +322,7 @@ def test_intent_tiers_leave_get_model_pair_alone_for_mapping_callers():
         intent_tiers={"legal": "premium"},
     )
 
-    assert selector.get_model_pair("draft a contract") == ModelPair(
-        strong="big", weak="small"
-    )
+    assert selector.get_model_pair("draft a contract") == ModelPair(strong="big", weak="small")
 
 
 # ---------------------------------------------------------------------------
@@ -400,9 +397,7 @@ def test_the_jev_detector_is_imported_lazily(registry, server_config, monkeypatc
     fake = MagicMock()
     detector = MagicMock()
     fake.JevIntentDetector.return_value = detector
-    monkeypatch.setitem(
-        sys.modules, "routellm_typesafe.intent_detector", fake
-    )
+    monkeypatch.setitem(sys.modules, "routellm_typesafe.intent_detector", fake)
 
     config = {
         "intents": {

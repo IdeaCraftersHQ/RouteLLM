@@ -82,21 +82,15 @@ def get_model(config: RouterModelConfig, model_ckpt: str, pad_token_id: int = 2)
             trust_remote_code=True,
             torch_dtype=torch.bfloat16,
             use_cache=False,
-            attn_implementation=(
-                "flash_attention_2" if config.flash_attention_2 else None
-            ),
+            attn_implementation=("flash_attention_2" if config.flash_attention_2 else None),
             attention_dropout=config.attention_dropout,
             token=os.getenv("LLAMA2_HF_TOKEN"),
         )
     else:
-        raise NotImplementedError(
-            f"ModelType {config.model_type} is not implemented yet!"
-        )
+        raise NotImplementedError(f"ModelType {config.model_type} is not implemented yet!")
 
 
-def get_tokenizer(
-    model_id, special_tokens=None, truncation_side="left", padding_side="left"
-):
+def get_tokenizer(model_id, special_tokens=None, truncation_side="left", padding_side="left"):
     """Load and configure tokenizer with special tokens.
 
     Parameters
@@ -150,9 +144,7 @@ def to_openai_api_messages(system_message, classifier_message, messages):
     ret = [{"role": "system", "content": system_message}]
     for i, turn in enumerate(messages):
         if i % 2 == 0:
-            ret.append(
-                {"role": "user", "content": classifier_message.format(question=turn)}
-            )
+            ret.append({"role": "user", "content": classifier_message.format(question=turn)})
         else:
             ret.append({"role": "assistant", "content": turn})
     return ret

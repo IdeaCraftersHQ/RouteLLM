@@ -9,6 +9,7 @@ mapping, and the `python -m routellm.pairing` explain surface.
 The models.dev catalog is never fetched: every test patches
 `routellm.pairing._fetch_catalog` with a fake list of records.
 """
+
 import json
 import logging
 import subprocess
@@ -242,9 +243,7 @@ def test_terms_are_anded(registry, catalog, cache_dir):
     assert resolve_pairing(registry, selector) == "cloud_cheap"
 
 
-def test_candidate_without_a_catalog_record_fails_a_catalog_term(
-    registry, catalog, cache_dir
-):
+def test_candidate_without_a_catalog_record_fails_a_catalog_term(registry, catalog, cache_dir):
     # local_fast/local_big map to no models.dev provider, so they drop
     # out the moment a catalog term is present even though they carry
     # the tag.
@@ -377,9 +376,7 @@ def test_unsupported_catalog_term_rejected_whatever_its_value(
         resolve_pairing(registry, selector)
 
 
-def test_tag_terms_are_stripped_before_the_catalog_parser(
-    registry, no_catalog, cache_dir
-):
+def test_tag_terms_are_stripped_before_the_catalog_parser(registry, no_catalog, cache_dir):
     # `tag` is not a key hop.aim knows; it must never reach parse_query.
     selector = Selector(select="tag:local tag:local")
     assert resolve_pairing(registry, selector) == "local_big"
@@ -414,16 +411,12 @@ def test_resolved_registry_still_validates(catalog, cache_dir):
     registry.revalidate()
 
 
-def test_controller_resolves_selectors_at_construction(
-    catalog, cache_dir, monkeypatch
-):
+def test_controller_resolves_selectors_at_construction(catalog, cache_dir, monkeypatch):
     import routellm.controller
     from routellm.caching import CacheConfig
     from routellm.controller import Controller
 
-    monkeypatch.setitem(
-        routellm.controller.ROUTER_CLS, "hi", lambda **kw: _StubRouter()
-    )
+    monkeypatch.setitem(routellm.controller.ROUTER_CLS, "hi", lambda **kw: _StubRouter())
     registry = _tiered({"select": "tag:cloud"}, {"select": "tag:local"})
 
     Controller(
@@ -460,29 +453,21 @@ def test_candidate_table_logged_at_info(registry, catalog, cache_dir, caplog):
 # ---------------------------------------------------------------------------
 
 
-def test_catalog_unavailable_with_a_tag_only_policy_passes(
-    registry, no_catalog, cache_dir
-):
+def test_catalog_unavailable_with_a_tag_only_policy_passes(registry, no_catalog, cache_dir):
     assert resolve_pairing(registry, Selector(select="tag:cloud")) == "cloud_strong"
 
 
-def test_catalog_unavailable_with_a_catalog_term_raises(
-    registry, no_catalog, cache_dir
-):
+def test_catalog_unavailable_with_a_catalog_term_raises(registry, no_catalog, cache_dir):
     with pytest.raises(CatalogUnavailable):
         resolve_pairing(registry, Selector(select="tool_call:true"))
 
 
 def test_fresh_snapshot_is_used_without_fetching(registry, no_catalog, cache_dir):
     pairing.write_snapshot(cache_dir, FAKE_CATALOG, fetched_at=time.time())
-    assert resolve_pairing(registry, Selector(select="tool_call:true")) == (
-        "cloud_strong"
-    )
+    assert resolve_pairing(registry, Selector(select="tool_call:true")) == ("cloud_strong")
 
 
-def test_stale_snapshot_is_used_with_a_warning(
-    registry, no_catalog, cache_dir, caplog
-):
+def test_stale_snapshot_is_used_with_a_warning(registry, no_catalog, cache_dir, caplog):
     stale = time.time() - (pairing.CATALOG_TTL_SECONDS + 60)
     pairing.write_snapshot(cache_dir, FAKE_CATALOG, fetched_at=stale)
 
@@ -507,9 +492,7 @@ def test_successful_fetch_writes_the_snapshot(registry, catalog, cache_dir):
 # ---------------------------------------------------------------------------
 
 
-def test_fetch_gives_up_at_the_timeout_without_waiting_for_the_worker(
-    monkeypatch, cache_dir
-):
+def test_fetch_gives_up_at_the_timeout_without_waiting_for_the_worker(monkeypatch, cache_dir):
     """A hung fetch must not hold startup past the timeout.
 
     The worker sleeps far longer than the timeout; the call has to
@@ -606,9 +589,7 @@ def test_an_openrouter_endpoint_satisfies_a_catalog_term(catalog, cache_dir):
         }
     )
 
-    assert resolve_pairing(registry, Selector(select="tool_call:true")) == (
-        "via_openrouter"
-    )
+    assert resolve_pairing(registry, Selector(select="tool_call:true")) == ("via_openrouter")
 
 
 def test_a_cohere_endpoint_satisfies_a_catalog_term(catalog, cache_dir):

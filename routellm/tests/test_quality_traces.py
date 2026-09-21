@@ -22,9 +22,7 @@ def _response(text: str = "hi") -> dict:
 
 
 def _manager(tmp_path, **kwargs) -> QualityManager:
-    config = FineTuneConfig(
-        enabled=True, trace_dir=str(tmp_path / "traces"), **kwargs
-    )
+    config = FineTuneConfig(enabled=True, trace_dir=str(tmp_path / "traces"), **kwargs)
     return QualityManager(fine_tune_config=config)
 
 
@@ -52,9 +50,7 @@ def test_trace_has_every_fit_required_field(tmp_path):
         session_id="sess-1",
     )
 
-    records = TraceIngester().load_batch(
-        [manager.fine_tune_config.trace_dir]
-    ).to_trace_records()
+    records = TraceIngester().load_batch([manager.fine_tune_config.trace_dir]).to_trace_records()
     assert len(records) == 1
     record = records[0]
     assert record.prompt == "what is 2+2"
@@ -109,9 +105,7 @@ def test_old_top_level_fields_are_unchanged(tmp_path):
 
 def test_disabled_writes_nothing(tmp_path):
     directory = tmp_path / "traces"
-    manager = QualityManager(
-        fine_tune_config=FineTuneConfig(trace_dir=str(directory))
-    )
+    manager = QualityManager(fine_tune_config=FineTuneConfig(trace_dir=str(directory)))
     manager.record_trace("hello", "m1", _response())
     assert not directory.exists()
 

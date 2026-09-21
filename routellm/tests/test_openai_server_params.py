@@ -6,6 +6,7 @@ its own subprocess, setting `sys.argv` before the import and driving the
 app through `TestClient`, with litellm's `acompletion` patched so
 nothing leaves the machine and the call's kwargs come back as JSON.
 """
+
 import json
 import subprocess
 import sys
@@ -101,9 +102,7 @@ def test_unset_sampling_params_are_not_forwarded(tmp_path, flat_config):
     payload = _run(
         tmp_path,
         ["x", "--config", str(flat_config), "--routers", "random"],
-        _POST.format(
-            body='{"model": "default", "messages": [{"role": "user", "content": "hi"}]}'
-        ),
+        _POST.format(body='{"model": "default", "messages": [{"role": "user", "content": "hi"}]}'),
     )
 
     for field in (
@@ -188,9 +187,7 @@ def test_the_routed_endpoint_model_replaces_the_tier_name(tmp_path, flat_config)
     payload = _run(
         tmp_path,
         ["x", "--config", str(flat_config), "--routers", "random"],
-        _POST.format(
-            body='{"model": "default", "messages": [{"role": "user", "content": "hi"}]}'
-        ),
+        _POST.format(body='{"model": "default", "messages": [{"role": "user", "content": "hi"}]}'),
     )
 
     assert payload["values"]["model"] in ("m_big", "m_small")
@@ -203,9 +200,7 @@ def test_stream_is_forwarded_only_when_the_client_set_it(tmp_path, flat_config):
     unset = _run(
         tmp_path,
         ["x", "--config", str(flat_config), "--routers", "random"],
-        _POST.format(
-            body='{"model": "default", "messages": [{"role": "user", "content": "hi"}]}'
-        ),
+        _POST.format(body='{"model": "default", "messages": [{"role": "user", "content": "hi"}]}'),
     )
     assert "stream" not in unset["seen"]
 

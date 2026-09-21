@@ -22,6 +22,7 @@ class ModelPair:
     weak : str
         Name of the weaker/cheaper model.
     """
+
     strong: str
     weak: str
 
@@ -34,7 +35,7 @@ class Middleware(Protocol):
     tier the request should enter.
     """
 
-    def get_model_pair(self, prompt: str) -> 'ModelPair':
+    def get_model_pair(self, prompt: str) -> "ModelPair":
         """Get a model pair based on the prompt.
 
         Parameters

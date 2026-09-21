@@ -219,9 +219,7 @@ def test_no_capability_block_anywhere_means_no_refusal_ever(hi_router):
 def test_selectors_without_capability_terms_pick_what_they_picked(catalog):
     registry = EndpointRegistry.from_config(BARE_CONFIG)
 
-    ranked = [
-        name for name, _ in rank_candidates(registry, Selector(select="tag:local"))
-    ]
+    ranked = [name for name, _ in rank_candidates(registry, Selector(select="tag:local"))]
 
     assert set(ranked) == {"frontier_local", "local_fast"}
 

@@ -38,9 +38,7 @@ if __name__ == "__main__":
         choices=list(ROUTER_CLS.keys()),
     )
     parser.add_argument("--strong-model-pct", type=float)
-    parser.add_argument(
-        "--task", type=str, choices=["generate", "calibrate"], default="calibrate"
-    )
+    parser.add_argument("--task", type=str, choices=["generate", "calibrate"], default="calibrate")
     args = parser.parse_args()
 
     if args.task == "generate":

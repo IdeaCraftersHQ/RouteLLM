@@ -114,8 +114,7 @@ def _resolve_credentials() -> tuple[Optional[str], Optional[str]]:
     base_url, api_key = endpoint.credentials(env_base, env_key)
     if api_key is None:
         logger.debug(
-            "endpoint %s carries no credential and none is in the "
-            "environment",
+            "endpoint %s carries no credential and none is in the environment",
             EMBEDDING_ENDPOINT,
         )
 

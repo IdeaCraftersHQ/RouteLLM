@@ -6,6 +6,7 @@ exclusively by a server that asked for payments: an unconfigured server
 has to keep litellm's own session, its own code path and its own
 latency.
 """
+
 import litellm
 import pytest
 
@@ -52,9 +53,7 @@ def test_provider_with_wallet_key_installs_a_paying_session():
     from x402.http.clients.httpx import x402AsyncTransport
 
     litellm.aclient_session = None
-    gateway = maybe_install_payment_session(
-        provider="x402", wallet_key="0x" + "11" * 32
-    )
+    gateway = maybe_install_payment_session(provider="x402", wallet_key="0x" + "11" * 32)
 
     assert isinstance(gateway, X402Adapter)
     assert litellm.aclient_session is not None

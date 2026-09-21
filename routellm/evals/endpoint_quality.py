@@ -109,8 +109,10 @@ def _score_endpoint(controller, name: str, limit: int) -> tuple[float, int]:
             continue
 
         scored += 1
-        if benchmark.check(answer, expected) if hasattr(benchmark, "check") else (
-            str(expected).strip() in str(answer)
+        if (
+            benchmark.check(answer, expected)
+            if hasattr(benchmark, "check")
+            else (str(expected).strip() in str(answer))
         ):
             correct += 1
 
@@ -131,9 +133,7 @@ def _prompts(benchmark, limit: int):
         yield getattr(row, "prompt", ""), getattr(row, "answer", "")
 
 
-def _sidecar(
-    scores: dict[str, tuple[float, int]], limit: int
-) -> dict[str, Any]:
+def _sidecar(scores: dict[str, tuple[float, int]], limit: int) -> dict[str, Any]:
     """Return the sidecar payload for a run's raw scores."""
     return {
         "version": 1,

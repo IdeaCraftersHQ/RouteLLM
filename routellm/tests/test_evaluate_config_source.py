@@ -7,14 +7,13 @@ environment that lacks them. The source is read as text and parsed
 with `ast` instead, mirroring how `calibrate_threshold.py` was already
 converted to `load_config(explicit=args.config).data`.
 """
+
 from __future__ import annotations
 
 import ast
 from pathlib import Path
 
-EVALUATE_PY = (
-    Path(__file__).resolve().parents[1] / "evals" / "evaluate.py"
-)
+EVALUATE_PY = Path(__file__).resolve().parents[1] / "evals" / "evaluate.py"
 
 
 def _source() -> str:

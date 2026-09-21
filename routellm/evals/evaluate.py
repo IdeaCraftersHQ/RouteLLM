@@ -27,9 +27,9 @@ def generate_results(
 ):
     plt.figure(figsize=(6, 5))
     for method in df_router_result["method"].unique():
-        df_per_method = df_router_result[
-            df_router_result["method"] == method
-        ].sort_values(by=["strong_percentage"])
+        df_per_method = df_router_result[df_router_result["method"] == method].sort_values(
+            by=["strong_percentage"]
+        )
 
         plt.plot(
             df_per_method["strong_percentage"],
@@ -81,9 +81,9 @@ def generate_results(
     plt.savefig(file_name, bbox_inches="tight")
 
     def pct_call_metric(row):
-        df_per_method = df_router_result[
-            df_router_result["method"] == row["method"]
-        ].sort_values(by=["strong_percentage"])
+        df_per_method = df_router_result[df_router_result["method"] == row["method"]].sort_values(
+            by=["strong_percentage"]
+        )
         pct_calls = []
 
         for pct in [0.2, 0.5, 0.8]:
@@ -97,17 +97,15 @@ def generate_results(
         return pd.Series(pct_calls)
 
     def auc_metric(row):
-        df_per_method = df_router_result[
-            df_router_result["method"] == row["method"]
-        ].sort_values(by=["strong_percentage"])
-        return np.trapz(
-            df_per_method["accuracy"], df_per_method["strong_percentage"] / 100
+        df_per_method = df_router_result[df_router_result["method"] == row["method"]].sort_values(
+            by=["strong_percentage"]
         )
+        return np.trapz(df_per_method["accuracy"], df_per_method["strong_percentage"] / 100)
 
     def apgr_metric(row):
-        df_per_method = df_router_result[
-            df_router_result["method"] == row["method"]
-        ].sort_values(by=["strong_percentage"])
+        df_per_method = df_router_result[df_router_result["method"] == row["method"]].sort_values(
+            by=["strong_percentage"]
+        )
 
         weak_auc = np.zeros([len(df_per_method)], dtype=float)
         weak_auc.fill(weak_accuracy)
@@ -120,9 +118,7 @@ def generate_results(
         return (row["AUC"] - weak_auc) / (strong_auc - weak_auc)
 
     metrics = pd.DataFrame({"method": df_router_result["method"].unique()})
-    metrics[["20% qual", "50% qual", "80% qual"]] = metrics.apply(
-        pct_call_metric, axis=1
-    )
+    metrics[["20% qual", "50% qual", "80% qual"]] = metrics.apply(pct_call_metric, axis=1)
     metrics["AUC"] = metrics.apply(auc_metric, axis=1)
     metrics["APGR"] = metrics.apply(apgr_metric, axis=1)
     metrics = metrics.sort_values(by=["APGR"], ascending=False)
@@ -132,11 +128,7 @@ def generate_results(
 
 
 def pretty_print_results(threshold, accuracy, model_counts, total):
-    header = (
-        "=" * 15
-        + f" {router} with threshold {threshold} on {args.benchmark} "
-        + "=" * 15
-    )
+    header = "=" * 15 + f" {router} with threshold {threshold} on {args.benchmark} " + "=" * 15
     print("\n" + header)
     print("Average accuracy: {:.3f}".format(accuracy))
     print(f"Model counts: {', '.join([f'{k}: {v}' for k, v in model_counts.items()])}")
@@ -149,9 +141,7 @@ def pretty_print_results(threshold, accuracy, model_counts, total):
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="Evaluate routers on various benchmarks."
-    )
+    parser = argparse.ArgumentParser(description="Evaluate routers on various benchmarks.")
     parser.add_argument(
         "--routers",
         nargs="+",
@@ -244,18 +234,14 @@ if __name__ == "__main__":
                     router_results.append(
                         {
                             "threshold": threshold,
-                            "strong_percentage": model_counts[
-                                controller.model_pair.strong
-                            ]
+                            "strong_percentage": model_counts[controller.model_pair.strong]
                             / total
                             * 100,
                             "accuracy": accuracy,
                         }
                     )
             router_results_df = (
-                pd.DataFrame(router_results)
-                .groupby(["strong_percentage"], as_index=False)
-                .mean()
+                pd.DataFrame(router_results).groupby(["strong_percentage"], as_index=False).mean()
             )
             router_results_df["method"] = str(router)
             all_results = pd.concat([all_results, router_results_df])
@@ -270,9 +256,7 @@ if __name__ == "__main__":
                 result = {
                     "method": str(router),
                     "threshold": threshold,
-                    "strong_percentage": model_counts[controller.model_pair.strong]
-                    / total
-                    * 100,
+                    "strong_percentage": model_counts[controller.model_pair.strong] / total * 100,
                     "accuracy": accuracy,
                 }
                 router_results.append(result)
