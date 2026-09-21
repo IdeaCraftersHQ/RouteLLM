@@ -928,6 +928,11 @@ def apply_sidecar(registry, sidecar: Sidecar, override: bool = True) -> int:
 
     for name, measured in sidecar.endpoints.items():
         if name not in registry.names():
+            logger.warning(
+                "quality sidecar names %r, which is not a configured "
+                "endpoint; ignored",
+                name,
+            )
             continue
         endpoint = registry.get(name)
         current = endpoint.quality
@@ -953,6 +958,7 @@ def apply_sidecar(registry, sidecar: Sidecar, override: bool = True) -> int:
             continue
 
         endpoint.quality = measured.quality
+        endpoint.quality_measured = True
         changed += 1
         logger.info(
             "quality: %s %s -> %s (n=%s, from the sidecar)",

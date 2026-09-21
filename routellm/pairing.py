@@ -760,14 +760,6 @@ def rank_candidates(
         if filter_ is not None and not _record_matches(record, filter_):
             continue
 
-        candidates.append(
-            Candidate(
-                name=name,
-                endpoint=endpoint,
-                record=record,
-                capabilities=capabilities,
-            )
-        )
         measured = None
         if area is not None:
             measured = (getattr(registry, "area_quality", {}) or {}).get(
@@ -779,6 +771,7 @@ def rank_candidates(
                 name=name,
                 endpoint=endpoint,
                 record=record,
+                capabilities=capabilities,
                 effective_quality=(
                     measured if measured is not None else endpoint.quality
                 ),

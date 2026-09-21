@@ -1,10 +1,14 @@
 """Tests for measured quality: the sidecar a config references.
 
 Covers `quality_from:` on the config, its resolution relative to the
-config file rather than the CWD, the precedence that keeps a hand-set
-`quality:` winning over a measurement, the warning for a sidecar naming
-an endpoint the registry does not carry, the error for a missing file,
-and the shape the evals harness writes.
+config file rather than the CWD, the precedence that lets the measured
+sidecar beat a hand-set `quality:` unless `quality_from_override:
+false` says otherwise, the warning for a sidecar naming an endpoint the
+registry does not carry, the error for a missing file, and the shape
+the evals harness writes.
+
+The merge runs inside `EndpointRegistry.from_config`, so these build a
+registry from a config dict rather than calling any one consumer of it.
 
 Not one of these makes a network call: the harness's benchmark and its
 completion are patched.
@@ -71,13 +75,62 @@ def test_sidecar_fills_missing_quality(tmp_path):
     assert registry.get("local_server").quality == 78
 
 
-def test_explicit_quality_beats_the_sidecar(tmp_path):
+def test_sidecar_beats_an_explicit_quality_by_default(tmp_path):
+    """The default: a measurement replaces a hand-written guess.
+
+    No `quality_from_override:` key at all, which is the same thing as
+    setting it true.
+    """
     config = {
         "endpoints": {
             "cloud_strong": {"model": "gpt-4o", "quality": 42},
             "local_server": {"model": "ollama_chat/qwen3:8b"},
         },
         "quality_from": "quality.yaml",
+    }
+    path = _write(tmp_path, config)
+
+    registry = EndpointRegistry.from_config(
+        yaml.safe_load(path.read_text()), config_path=path
+    )
+
+    assert registry.get("cloud_strong").quality == 91
+    assert registry.get("local_server").quality == 78
+
+
+def test_quality_from_override_true_beats_an_explicit_quality(tmp_path):
+    """Spelling the default out explicitly reads the same."""
+    config = {
+        "endpoints": {
+            "cloud_strong": {"model": "gpt-4o", "quality": 42},
+            "local_server": {"model": "ollama_chat/qwen3:8b"},
+        },
+        "quality_from": "quality.yaml",
+        "quality_from_override": True,
+    }
+    path = _write(tmp_path, config)
+
+    registry = EndpointRegistry.from_config(
+        yaml.safe_load(path.read_text()), config_path=path
+    )
+
+    assert registry.get("cloud_strong").quality == 91
+
+
+def test_explicit_quality_wins_when_override_is_false(tmp_path):
+    """`quality_from_override: false` flips the precedence back.
+
+    An endpoint that set its own number keeps it; one that set none is
+    still filled from the sidecar, so turning the flip on does not turn
+    the measurement off.
+    """
+    config = {
+        "endpoints": {
+            "cloud_strong": {"model": "gpt-4o", "quality": 42},
+            "local_server": {"model": "ollama_chat/qwen3:8b"},
+        },
+        "quality_from": "quality.yaml",
+        "quality_from_override": False,
     }
     path = _write(tmp_path, config)
 
@@ -106,15 +159,24 @@ def test_quality_from_resolves_relative_to_the_config_file(tmp_path):
 
 
 def test_missing_sidecar_file_raises_naming_the_path(tmp_path):
+    """A named sidecar that is not there is fatal, not a shrug.
+
+    `load_sidecar` reports it as FileNotFoundError, and `from_config`
+    lets that out unwrapped: a config naming a file it cannot read is
+    an operator error, and the message names both the path and the key
+    that asked for it.
+    """
     config = {**CONFIG, "quality_from": "absent.yaml"}
     path = _write(tmp_path, config, sidecar=None)
 
-    with pytest.raises(ValueError) as excinfo:
+    with pytest.raises(FileNotFoundError) as excinfo:
         EndpointRegistry.from_config(
             yaml.safe_load(path.read_text()), config_path=path
         )
 
-    assert str(tmp_path / "absent.yaml") in str(excinfo.value)
+    message = str(excinfo.value)
+    assert str(tmp_path / "absent.yaml") in message
+    assert "quality_from" in message
 
 
 def test_unknown_endpoint_in_the_sidecar_warns_and_is_ignored(tmp_path, caplog):
@@ -173,9 +235,19 @@ def test_load_sidecar_reads_the_documented_shape(tmp_path):
     path = tmp_path / "quality.yaml"
     path.write_text(yaml.safe_dump(SIDECAR))
 
-    scores = load_sidecar(path)
+    sidecar = load_sidecar(path)
 
-    assert scores == {"cloud_strong": 91, "local_server": 78}
+    assert sidecar.version == 1
+    assert sidecar.generated_at == "2026-09-21T10:00:00Z"
+    assert sidecar.min_samples == 50
+    assert sidecar.transform == "linear"
+    assert sidecar.source == "evals"
+    assert set(sidecar.endpoints) == {"cloud_strong", "local_server"}
+    assert sidecar.endpoints["cloud_strong"].quality == 91
+    assert sidecar.endpoints["cloud_strong"].n == 50
+    assert sidecar.endpoints["cloud_strong"].by_area == {}
+    assert sidecar.endpoints["local_server"].quality == 78
+    assert sidecar.endpoints["local_server"].n == 50
 
 
 def test_harness_writes_the_sidecar_shape(tmp_path, monkeypatch):
@@ -242,6 +314,14 @@ def test_harness_rejects_an_endpoint_the_config_does_not_carry(tmp_path):
 
 
 def test_matrix_marks_quality_measured_or_manual(tmp_path):
+    """The matrix says where each number came from.
+
+    `quality_from_override: false` is what makes a table carrying both
+    kinds at once: `cloud_strong` keeps the 42 an operator typed, and
+    `local_server`, which typed none, is filled from the sidecar. Under
+    the default the sidecar would win both cells and there would be no
+    manual number left to label.
+    """
     from routellm.pairing import _capability_matrix
 
     config = {
@@ -250,6 +330,7 @@ def test_matrix_marks_quality_measured_or_manual(tmp_path):
             "local_server": {"model": "ollama_chat/qwen3:8b"},
         },
         "quality_from": "quality.yaml",
+        "quality_from_override": False,
     }
     path = _write(tmp_path, config)
     registry = EndpointRegistry.from_config(
@@ -285,6 +366,9 @@ def test_the_explain_cli_resolves_quality_from_against_the_config(
             "local_server": {"model": "ollama_chat/qwen3:8b"},
         },
         "quality_from": "quality.yaml",
+        # As in the matrix test: keeps one manual number next to one
+        # measured one, so the table proves the sidecar was read at all.
+        "quality_from_override": False,
     }
     path = _write(tmp_path, config)
 
