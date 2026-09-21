@@ -311,21 +311,34 @@ def build_router_config(file_config: Optional[dict]) -> Optional[dict]:
     return router_config or None
 
 
+def payable_bases_for(endpoints, default_base):
+    """Return the base URLs this server's config authorised to charge.
+
+    The scope is read off the registry the server actually routes on,
+    so `pay: true` cannot mean one thing to routing and another to the
+    wallet. Only endpoints carrying that flag contribute; a config that
+    sets it nowhere authorises nothing, and the installed session signs
+    no payment at all.
+
+    Parameters
+    ----------
+    endpoints : EndpointRegistry
+        The registry built from the merged config.
+    default_base : str or None
+        The server's `--base-url`, used by a payable endpoint that
+        names no `api_base` of its own.
+
+    Returns
+    -------
+    list[str]
+        The authorised base URLs, empty when no endpoint asked to pay.
+    """
+    return endpoints.payable_bases(default_base=default_base)
+
+
 @asynccontextmanager
 async def lifespan(app):
     global CONTROLLER
-
-    # Paying a 402 needs the challenge headers, the body and a replay of
-    # the request, none of which survive litellm's exception mapper. So
-    # the gateway is installed underneath litellm, on its shared async
-    # session, and only when a provider and a wallet key are both
-    # present -- otherwise litellm keeps its own client untouched.
-    from routellm.payment.transport import maybe_install_payment_session
-
-    gateway = maybe_install_payment_session(
-        provider=args.payment_provider,
-        wallet_key=os.environ.get(args.wallet_key_env or "ROUTELLM_WALLET_KEY", ""),
-    )
 
     # The config is discovered, not named: system, user, project, then
     # ROUTELLM_CONFIG and `--config`, each merged onto the last. The
@@ -363,6 +376,24 @@ async def lifespan(app):
     strong_model, weak_model = args.strong_model, args.weak_model
     if not strong_model and not endpoints.has_tier("default"):
         strong_model, weak_model = legacy_pair()
+
+    # Paying a 402 needs the challenge headers, the body and a replay of
+    # the request, none of which survive litellm's exception mapper. So
+    # the gateway is installed underneath litellm, on its shared async
+    # session, and only when a provider and a wallet key are both
+    # present -- otherwise litellm keeps its own client untouched.
+    #
+    # That session is process-global, so the flag alone would make every
+    # upstream payable. It is installed after the registry is built
+    # precisely so the scope can come from the config: only the base
+    # URLs of endpoints carrying `pay: true`, and nothing when none do.
+    from routellm.payment.transport import maybe_install_payment_session
+
+    gateway = maybe_install_payment_session(
+        provider=args.payment_provider,
+        wallet_key=os.environ.get(args.wallet_key_env or "ROUTELLM_WALLET_KEY", ""),
+        payable_bases=payable_bases_for(endpoints, args.base_url),
+    )
 
     CONTROLLER = Controller(
         routers=args.routers,

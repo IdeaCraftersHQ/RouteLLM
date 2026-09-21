@@ -21,6 +21,20 @@ Credentials are never stored: `api_key_env` names an environment
 variable that is read at call time, so a config loads on a machine
 that holds none of the keys.
 
+An endpoint may also be authorised to charge the configured wallet::
+
+    endpoints:
+      metered:
+        model: openai/some-metered-model
+        api_base: https://metered.example.com/v1
+        pay: true
+
+`pay:` is False everywhere unless written, and enabling a payment
+provider does not change that: the provider supplies a wallet, this
+names who may spend it. A 402 from any other endpoint is returned
+unpaid, which matters because litellm's HTTP session is process-global
+and would otherwise put every upstream in front of the wallet.
+
 A tier names a strong/weak pair whose sides may themselves be tiers, so
 a request addressed to a tier walks a tree, one router call per level::
 
@@ -51,7 +65,7 @@ import os
 import re
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, StrictBool, field_validator
 
 from routellm.capabilities import Capabilities
 
@@ -138,6 +152,13 @@ class Endpoint(BaseModel):
         Whether `quality` came from a `quality_from:` sidecar rather
         than from this endpoint's own `quality:`. Read only by the
         `--capabilities` matrix, which marks each score accordingly.
+    pay : bool
+        Whether this endpoint is authorised to charge the configured
+        wallet. Default False: an endpoint that says nothing about
+        payment never has a payment signed for it, however
+        well-formed the 402 it answers with. Enabling a payment
+        provider supplies a wallet; this is what names who may spend
+        it.
     """
 
     name: str
@@ -150,6 +171,7 @@ class Endpoint(BaseModel):
     capabilities: Optional[Capabilities] = None
     strict: bool = False
     quality_measured: bool = False
+    pay: StrictBool = False
 
     @field_validator("name")
     @classmethod
@@ -585,6 +607,50 @@ class EndpointRegistry:
     def has_tier(self, name: str) -> bool:
         """Return whether `name` is a configured tier."""
         return name in self._tiers
+
+    def payable_bases(self, default_base: Optional[str] = None) -> list[str]:
+        """Return the base URLs the configured endpoints may be charged on.
+
+        Only endpoints carrying `pay: true` contribute, so an endpoint
+        that says nothing about payment never appears here and never
+        has a payment signed for it. A payable endpoint setting no
+        `api_base` is reached at `default_base`, which is therefore
+        what gets authorised for it; when there is no default either,
+        it contributes nothing rather than an empty authorisation
+        nobody could read.
+
+        A raw model name resolved through the registry's passthrough is
+        never payable: it carries no `pay` flag, because no config line
+        ever named it.
+
+        Parameters
+        ----------
+        default_base : str, optional
+            The controller's own base URL, used by any payable endpoint
+            that sets none of its own.
+
+        Returns
+        -------
+        list[str]
+            The distinct base URLs, in configuration order. Empty when
+            no endpoint asked to pay, which authorises nothing.
+        """
+        bases: list[str] = []
+        for endpoint in self._endpoints.values():
+            if not endpoint.pay:
+                continue
+            base = endpoint.api_base or default_base
+            if not base:
+                logger.warning(
+                    "endpoint %r is marked payable but has no api_base and "
+                    "there is no default one, so nothing is authorised for "
+                    "it and a 402 from it will not be paid",
+                    endpoint.name,
+                )
+                continue
+            if base not in bases:
+                bases.append(base)
+        return bases
 
     def get_tier(self, name: str) -> Tier:
         """Return the tier registered under `name`.

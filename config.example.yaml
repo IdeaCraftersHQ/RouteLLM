@@ -27,12 +27,29 @@ mf:
 # model-name grammar. Credentials are never written here; `api_key_env`
 # names an environment variable read at call time, so this file loads on
 # a machine holding none of the keys.
+#
+# `pay: true` authorises an endpoint to charge the wallet behind
+# `--payment-provider x402`. It is off everywhere by default, and the
+# flag supplies a wallet rather than naming anyone allowed to spend it:
+# a 402 from an endpoint that did not ask for this is returned unpaid,
+# however well-formed the challenge. The authorisation covers that
+# endpoint's `api_base` -- its origin and path prefix -- so anything
+# else the process talks to stays unpayable even though litellm's HTTP
+# session is shared.
 endpoints:
   cloud_strong:
     model: gpt-4o
     api_key_env: OPENAI_API_KEY
     tags: [cloud, tools]
     quality: 90
+
+  # A metered upstream that answers 402 and is meant to be paid.
+  # Commented out: the sample should authorise nothing by default.
+  #
+  # metered:
+  #   model: openai/some-metered-model
+  #   api_base: https://metered.example.com/v1
+  #   pay: true
 
   # Ollama over the ssh tunnel. models.dev lists no ollama models, so
   # this endpoint is a tag-only candidate for selectors: it satisfies
