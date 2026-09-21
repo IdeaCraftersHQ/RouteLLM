@@ -48,25 +48,41 @@ _fake_routers_mod.ROUTER_CLS = {"random": lambda **kw: _FakeRandomRouter()}
 sys.modules["routellm.routers.routers"] = _fake_routers_mod
 
 # ---------------------------------------------------------------------------
-# Stub x402 package so X402Adapter tests run without the real SDK installed.
-# PaymentRequired just needs to be constructable with **kwargs.
+# x402: prefer the real SDK, stub it only when it is genuinely absent.
+#
+# The package is a declared dependency (x402[evm]), and it owns the wire
+# format -- header names, base64 encoding, version detection. A stub that
+# shadows it unconditionally means the protocol tests assert against this
+# file rather than against the protocol, which hides exactly the defects
+# those tests exist to catch. So the stub is now a fallback for an
+# environment without the extra installed, not the default.
 # ---------------------------------------------------------------------------
 
-class _FakePaymentRequired:
-    def __init__(self, **kwargs):
-        self.__dict__.update(kwargs)
+def _x402_is_installed() -> bool:
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec("x402.http") is not None
+    except (ImportError, ValueError):
+        return False
 
 
-_x402_schemas = _stub("x402.schemas")
-_x402_schemas.PaymentRequired = _FakePaymentRequired
+if not _x402_is_installed():
 
-_x402_server = _stub("x402.server")
-_x402_server.verify_payment = MagicMock(return_value=True)
+    class _FakePaymentRequired:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
 
-_x402_pkg = _stub("x402")
-_x402_pkg.schemas = _x402_schemas
-_x402_pkg.server = _x402_server
+    _x402_schemas = _stub("x402.schemas")
+    _x402_schemas.PaymentRequired = _FakePaymentRequired
 
-sys.modules.setdefault("x402", _x402_pkg)
-sys.modules["x402.schemas"] = _x402_schemas
-sys.modules["x402.server"] = _x402_server
+    _x402_server = _stub("x402.server")
+    _x402_server.verify_payment = MagicMock(return_value=True)
+
+    _x402_pkg = _stub("x402")
+    _x402_pkg.schemas = _x402_schemas
+    _x402_pkg.server = _x402_server
+
+    sys.modules.setdefault("x402", _x402_pkg)
+    sys.modules["x402.schemas"] = _x402_schemas
+    sys.modules["x402.server"] = _x402_server
