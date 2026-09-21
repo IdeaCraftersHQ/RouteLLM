@@ -21,7 +21,7 @@ from importlib.metadata import entry_points
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from routellm.routers.base import Router  # noqa: F401
+    from routellm.routers.base import Router
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +185,7 @@ def discover_routers(group=ENTRY_POINT_GROUP):
 
         try:
             register_router(entry_point.name, entry_point.load())
-        except Exception as exc:  # noqa: BLE001 — a broken plugin must not break import
+        except Exception as exc:
             reason = f"{type(exc).__name__}: {exc}"
             discovery_failures[entry_point.name] = reason
             logger.warning("failed to load router entry point %r: %s", entry_point.name, reason)

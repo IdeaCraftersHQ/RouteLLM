@@ -6,7 +6,6 @@ therefore the only handle on its area, and the mapping is explicit in
 config rather than inferred.
 """
 
-
 import pytest
 
 from routellm.endpoints import Endpoint, EndpointRegistry, Selector, Tier

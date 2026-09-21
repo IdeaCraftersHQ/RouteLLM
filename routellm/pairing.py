@@ -316,9 +316,7 @@ def snapshot_path() -> Path:
     return Path(base) / "routellm" / "models_dev.json"
 
 
-def write_snapshot(
-    path: Path, records: list[ModelRecord], fetched_at: float | None = None
-) -> None:
+def write_snapshot(path: Path, records: list[ModelRecord], fetched_at: float | None = None) -> None:
     """Write `records` to `path` with a fetch timestamp.
 
     Parameters

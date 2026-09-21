@@ -73,9 +73,7 @@ def legacy_pair() -> tuple[str, str]:
     return LEGACY_STRONG, LEGACY_WEAK
 
 
-def build_registry(
-    file_config: dict | None, config_path: str | None = None
-) -> EndpointRegistry:
+def build_registry(file_config: dict | None, config_path: str | None = None) -> EndpointRegistry:
     """Build the endpoint registry the server routes against.
 
     The merged config is the single source for endpoints and tiers, and
@@ -516,7 +514,9 @@ class UsageInfo(BaseModel):
 class ChatCompletionRequest(BaseModel):
     # OpenAI fields: https://platform.openai.com/docs/api-reference/chat/create
     model: str
-    messages: str | list[dict[str, str]] | list[dict[str, str | list[dict[str, str | dict[str, str]]]]]
+    messages: (
+        str | list[dict[str, str]] | list[dict[str, str | list[dict[str, str | dict[str, str]]]]]
+    )
     # Every optional field defaults to None so an unset one stays unset.
     # A default value here would be manufactured into the litellm call,
     # and a provider that does not accept the parameter rejects the whole
