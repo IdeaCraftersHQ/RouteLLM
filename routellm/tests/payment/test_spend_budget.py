@@ -179,6 +179,12 @@ def test_the_refusal_names_the_budget_and_both_amounts():
     assert "$0.005" in refusal  # requested
     assert "$0.01" in refusal  # the budget as written
 
+    # The figure and the knob have to sit together. Stating the total
+    # without naming what set it leaves an operator knowing the number
+    # and not where to change it, so the budget is quoted as the value
+    # of `--payment-budget` rather than as a bare amount.
+    assert "$0.01 set by --payment-budget" in refusal
+
 
 def test_a_malformed_budget_is_refused_when_it_is_built():
     """A budget nobody can parse must not be silently dropped.
@@ -207,26 +213,130 @@ def test_a_budget_naming_an_asset_is_refused():
 
 @pytest.mark.asyncio
 async def test_concurrent_debits_cannot_both_take_the_last_of_the_budget():
-    """Check-and-debit is one step, so the remainder never goes negative.
+    """Check and debit are one step, so the remainder never goes negative.
 
-    A sequential test passes against a racy implementation and proves
-    nothing, so these genuinely overlap: each coroutine reads, yields
-    to the loop, then writes. Against a read-then-write with a gap in
-    the middle, both see the full remainder and both spend it.
+    Merely running two coroutines proves nothing: `debit` never
+    awaits, so under a single event loop it cannot be interrupted no
+    matter how many callers race it, and a ledger that read the
+    remainder outside its lock would still pass.
+
+    The interleaving therefore has to be forced from inside the
+    critical section. Patching `parse_cap` -- which `debit` calls
+    between reading the remainder and writing it back -- lets the
+    second caller in at exactly the moment a split check-and-debit
+    would be wrong. Both then see the same remainder and both spend
+    it, unless the two steps are genuinely one.
     """
+    import threading
+
+    from routellm.payment import limits as limits_module
     from routellm.payment.limits import PaymentBudget
 
     budget = PaymentBudget("$0.01")
 
-    async def spend():
-        # Yielding first maximises the overlap between the debits.
-        await asyncio.sleep(0)
-        return budget.debit("$0.006")
+    real_parse = limits_module.parse_cap
+    entered = threading.Event()
+    release = threading.Event()
+    first = True
 
-    first, second = await asyncio.gather(spend(), spend())
+    def slow_parse(value):
+        nonlocal first
+        if first:
+            first = False
+            # Hold the first debit open between its read and its
+            # write, and let the second one run into it.
+            entered.set()
+            release.wait(timeout=5)
+        return real_parse(value)
+
+    limits_module.parse_cap = slow_parse
+    try:
+        results = []
+
+        def spend():
+            results.append(budget.debit("$0.006"))
+
+        a = threading.Thread(target=spend)
+        a.start()
+        entered.wait(timeout=5)
+
+        b = threading.Thread(target=spend)
+        b.start()
+        # The second caller is now either blocked on the lock (correct)
+        # or already past a stale read (racy). Let the first finish.
+        release.set()
+        a.join(timeout=5)
+        b.join(timeout=5)
+    finally:
+        limits_module.parse_cap = real_parse
+        release.set()
 
     # Together they ask $0.012 against $0.01, so exactly one wins.
-    assert [first, second].count(None) == 1
+    assert results.count(None) == 1
+    assert budget.remaining == "$0.004"
+
+
+def test_a_debit_is_visible_the_moment_its_caller_is_told_it_succeeded():
+    """The write lands before the lock is released, not after.
+
+    A ledger that decided under the lock and then wrote outside it
+    would admit two payments that only one remainder covers: each
+    decides against a remainder the other has not yet reduced.
+
+    `parse_cap` is the last call a debit makes while still deciding,
+    so holding the first caller there and running the second to
+    completion reproduces exactly that ordering. Under a correct
+    ledger the second blocks on the lock; under a split one it decides
+    against a stale remainder and both succeed.
+    """
+    import threading
+
+    from routellm.payment import limits as limits_module
+    from routellm.payment.limits import PaymentBudget
+
+    budget = PaymentBudget("$0.01")
+
+    real_parse = limits_module.parse_cap
+    deciding = threading.Event()
+    go = threading.Event()
+    armed = [True]
+
+    def slow_parse(value):
+        if armed[0]:
+            armed[0] = False
+            parsed = real_parse(value)
+            # Decided but not yet written: let the other caller run
+            # the whole way through from here.
+            deciding.set()
+            go.wait(timeout=5)
+            return parsed
+        return real_parse(value)
+
+    results = []
+
+    def spend():
+        results.append(budget.debit("$0.006"))
+
+    limits_module.parse_cap = slow_parse
+    try:
+        first = threading.Thread(target=spend)
+        first.start()
+        deciding.wait(timeout=5)
+
+        second = threading.Thread(target=spend)
+        second.start()
+        # Give the second caller time to finish if nothing excludes it.
+        second.join(timeout=2)
+        go.set()
+        first.join(timeout=5)
+        second.join(timeout=5)
+    finally:
+        limits_module.parse_cap = real_parse
+        go.set()
+
+    # $0.012 asked against $0.01: exactly one may be admitted, and the
+    # remainder must never go negative.
+    assert results.count(None) == 1
     assert budget.remaining == "$0.004"
 
 
@@ -253,19 +363,45 @@ def test_concurrent_debits_across_threads_never_overspend():
 
     An `asyncio.Lock` would bind to one loop and exclude nothing
     between threads, so the ledger has to hold under plain threading
-    too.
+    too. Every thread is released from one barrier, so the debits
+    genuinely overlap rather than queueing behind each other.
     """
+    import threading
     from concurrent.futures import ThreadPoolExecutor
 
     from routellm.payment.limits import PaymentBudget
 
     budget = PaymentBudget("$0.10")
+    start = threading.Barrier(32)
 
-    with ThreadPoolExecutor(max_workers=16) as pool:
-        results = list(pool.map(lambda _: budget.debit("$0.01"), range(50)))
+    def spend(_):
+        start.wait(timeout=5)
+        return budget.debit("$0.01")
 
+    with ThreadPoolExecutor(max_workers=32) as pool:
+        results = list(pool.map(spend, range(32)))
+
+    # $0.10 buys exactly ten payments of $0.01 and no more.
     assert results.count(None) == 10
     assert budget.remaining == "$0"
+
+
+def test_the_ledger_refuses_to_be_built_on_a_loop_bound_primitive():
+    """An `asyncio.Lock` would silently stop excluding off its own loop.
+
+    The ledger is reached from the sync path, which is on no loop at
+    all, and from whichever loop a caller happens to drive
+    `acompletion` with. A primitive created on one loop does not
+    exclude callers on another, so the mutex has to be a plain
+    threading one.
+    """
+    import asyncio as _asyncio
+
+    from routellm.payment.limits import PaymentBudget
+
+    budget = PaymentBudget("$0.01")
+
+    assert not isinstance(budget._lock, _asyncio.Lock)
 
 
 def test_the_ledger_holds_across_separate_event_loops():
@@ -716,6 +852,164 @@ async def test_no_budget_leaves_the_controller_seam_paying_as_before():
         "paid answer"
     )
     assert gateway.caps == [("$0.002", "endpoint")]
+
+
+@pytest.mark.asyncio
+async def test_a_402_that_was_never_paid_does_not_consume_the_budget():
+    """A 402 coming back means nothing was signed, so nothing was spent.
+
+    The payment cycle can decline for reasons of its own -- the SDK
+    gives up, or the retry is refused again -- and the response is the
+    402 the caller would have seen without a wallet. Keeping the
+    reservation would let such an upstream drain the budget without
+    ever being paid.
+    """
+    from routellm.payment.limits import PaymentBudget, PaymentLimits
+    from routellm.payment.transport import install_payment_session
+    from routellm.payment.x402 import X402Adapter
+
+    class NeverAccepts(httpx.AsyncBaseTransport):
+        """Answers 402 even once a proof arrives."""
+
+        def __init__(self):
+            self.seen = 0
+
+        async def handle_async_request(self, request):
+            self.seen += 1
+            body = challenge(str(request.url), CHEAP)
+            return httpx.Response(
+                402,
+                headers={
+                    "PAYMENT-REQUIRED": base64.b64encode(
+                        json.dumps(body).encode()
+                    ).decode()
+                },
+                json=body,
+                request=request,
+            )
+
+    provider = NeverAccepts()
+    adapter = X402Adapter(private_key=TEST_KEY, networks=["base-sepolia"])
+    budget = PaymentBudget("$0.01")
+
+    session = install_payment_session(
+        adapter,
+        transport=provider,
+        payable_bases=[AUTHORISED],
+        limits=PaymentLimits(global_cap="$0.001"),
+        budget=budget,
+    )
+    async with session:
+        response = await session.post(
+            f"{AUTHORISED}/chat/completions", json={"messages": []}
+        )
+
+    assert response.status_code == 402
+    # The signature was never accepted, so the budget is untouched and
+    # the next request still has the whole of it.
+    assert budget.remaining == "$0.01"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_payment_at_the_controller_seam_is_refunded():
+    """`pay` raising means nothing was signed, so nothing was spent.
+
+    Without the refund a gateway failing repeatedly -- a wallet with
+    no funds, an unreachable facilitator -- would exhaust the budget
+    having paid nobody, and later legitimate payments would be refused
+    for spend that never happened.
+    """
+    from routellm.payment.limits import PaymentBudget, PaymentLimits
+
+    class FailingGateway:
+        """A gateway whose payments always raise."""
+
+        def __init__(self):
+            self.attempts = 0
+
+        async def pay(self, challenge):
+            self.attempts += 1
+            raise RuntimeError("facilitator unreachable")
+
+        @property
+        def networks(self):
+            return ["base"]
+
+        @property
+        def name(self):
+            return "mock"
+
+    budget = PaymentBudget("$0.01")
+    gateway = FailingGateway()
+    controller = controller_with(
+        gateway,
+        CONFIG,
+        weak="cheap",
+        limits=PaymentLimits(global_cap="$0.01"),
+        budget=budget,
+    )
+
+    async def call(extra_headers):
+        raise refusal()
+
+    for _ in range(10):
+        with pytest.raises(Exception):
+            await controller._request_with_payment(call, endpoint="cheap")
+
+    assert gateway.attempts == 10
+    # Ten failed attempts at $0.002 would have spent $0.02 -- twice the
+    # budget -- had the reservations been kept.
+    assert budget.remaining == "$0.01"
+
+
+def test_a_budget_refusal_reads_differently_from_a_cap_refusal():
+    """The two refusals must not be confusable.
+
+    A cap refusal names a limit that could be raised for this one
+    call; an exhausted budget is the whole allowance for the process
+    gone. An operator reading the wrong one turns the wrong knob, so
+    each has to name its own.
+    """
+    from routellm.payment.limits import PaymentBudget, refusal_message
+
+    cap_refusal = refusal_message("$0.01", "global", Exception("too dear"))
+
+    budget = PaymentBudget("$0.01")
+    budget.debit("$0.009")
+    budget_refusal = budget.debit("$0.005")
+
+    # The budget refusal names its own knob and not the cap's.
+    assert "--payment-budget" in budget_refusal
+    assert "--max-payment" not in budget_refusal
+
+    # And the cap refusal does not claim a budget is exhausted.
+    assert "--max-payment" in cap_refusal
+    assert "budget" not in cap_refusal.lower()
+
+
+def test_an_uncapped_payment_cannot_be_counted_against_a_budget():
+    """With a budget set, a payment carrying no cap has no figure to debit.
+
+    Admitting it would let an unbounded payment through a layer whose
+    whole job is to bound the total, and debiting zero would record it
+    as free. Refusing says which knob makes it countable.
+    """
+    from routellm.payment.limits import PaymentBudget
+
+    budget = PaymentBudget("$0.01")
+
+    refusal = budget.debit(None)
+
+    assert refusal is not None
+    assert "--max-payment" in refusal
+    assert budget.remaining == "$0.01"
+
+
+def test_an_unset_budget_still_admits_an_uncapped_payment():
+    """With no budget there is nothing to count against, so nothing changes."""
+    from routellm.payment.limits import PaymentBudget
+
+    assert PaymentBudget().debit(None) is None
 
 
 # ---------------------------------------------------------------------
