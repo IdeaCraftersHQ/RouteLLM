@@ -1217,17 +1217,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     return 0
 
 
-def _registry_from(config_path: str) -> tuple[EndpointRegistry, list[str]]:
+def _registry_from(
+    config_path: Optional[str] = None,
+) -> tuple[EndpointRegistry, list[str]]:
     """Build a registry from a YAML config with its selectors resolved.
 
     A tier's capabilities are the union over the leaves it actually
     reaches, so the selectors have to be resolved first: an unresolved
     side names no endpoint and the tier's whole row would read unknown.
     """
-    import yaml
-
-    with open(config_path) as handle:
-        config = yaml.safe_load(handle) or {}
+    config = load_config(explicit=config_path).data
 
     registry = EndpointRegistry.from_config(config, config_path=config_path)
     selects = [
