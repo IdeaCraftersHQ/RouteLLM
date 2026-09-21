@@ -1,6 +1,0 @@
-{
-  "source": "https://github.com/gemini-cli-extensions/conductor",
-  "type": "github-release",
-  "autoUpdate": true,
-  "releaseTag": "conductor-v0.3.1"
-}
