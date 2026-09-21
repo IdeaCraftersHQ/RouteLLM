@@ -13,16 +13,33 @@ class PaymentChallenge:
 
     Attributes
     ----------
+    The wire fields (`headers`, `body`, `resource_url`) carry the 402
+    response exactly as the server sent it. A gateway parses the
+    challenge out of those with its own protocol library, which is the
+    only way the amount, asset and payee can be the server's rather than
+    this process's guess. The descriptive fields above them are a
+    summary for logging and for gateways that do not speak x402.
+
+    Attributes
+    ----------
     scheme : str
         Payment scheme (e.g., "x402").
     network : str
         Blockchain network ("base", "ethereum", etc).
     amount : str
-        Amount to pay as decimal string.
+        Amount to pay as decimal string. Empty when only the server's
+        own challenge states the price.
     currency : str
-        Currency code (e.g., "USDC").
+        Currency code (e.g., "USDC"). Empty when only the server's own
+        challenge names the asset.
     payload : dict, optional
         Additional payment metadata (default empty).
+    headers : dict, optional
+        Response headers from the 402, lowercased (default empty).
+    body : bytes, optional
+        Raw response body from the 402 (default empty).
+    resource_url : str, optional
+        URL of the request that was refused (default empty).
     """
 
     scheme: str
@@ -30,6 +47,9 @@ class PaymentChallenge:
     amount: str
     currency: str
     payload: dict[str, Any] = field(default_factory=dict)
+    headers: dict[str, str] = field(default_factory=dict)
+    body: bytes = b""
+    resource_url: str = ""
 
 
 @dataclass
@@ -50,6 +70,16 @@ class PaymentReceipt:
         Unix timestamp of payment.
     resource : str, optional
         Resource identifier paid for (default "").
+    header_name : str, optional
+        Header the retry must carry the proof on. The name is part of
+        the protocol version the server chose -- x402 v2 reads
+        PAYMENT-SIGNATURE and v1 reads the legacy X-PAYMENT -- so the
+        gateway that read the challenge reports it rather than letting
+        the caller assume one (default "X-PAYMENT").
+    header_value : str, optional
+        Encoded proof of payment for that header. Empty means the caller
+        should fall back to `tx_hash`, which suits gateways whose proof
+        is just an identifier (default "").
     """
 
     tx_hash: str
@@ -58,3 +88,17 @@ class PaymentReceipt:
     currency: str
     paid_at: int
     resource: str = ""
+    header_name: str = "X-PAYMENT"
+    header_value: str = ""
+
+    @property
+    def proof(self) -> str:
+        """Value to send on `header_name`.
+
+        Returns
+        -------
+        str
+            The encoded payload when the gateway produced one, else the
+            transaction hash.
+        """
+        return self.header_value or self.tx_hash
