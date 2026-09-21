@@ -133,24 +133,90 @@ class RubricScorer:
         # fit's RewardFn is `(context, advice, output)`. routellm gives
         # no advice, so the middle argument is empty.
         value = float(self._reward_fn(context.get("prompt", ""), "", output))
+        # fit's RubricJudgeReward matches case-insensitively by
+        # default, so the breakdown has to as well: a breakdown that
+        # disagrees with the score it explains is worse than none.
         breakdown = {
             pattern: weight
             for pattern, weight in self._patterns
-            if re.search(pattern, output or "")
+            if re.search(pattern, output or "", re.IGNORECASE)
         }
         return Reward(score=value, breakdown=breakdown, metadata={"scorer": "rubric"})
 
 
 def _build_rubric(path: str):
-    """Build a `RubricScorer` from a `{patterns: [[regex, weight]]}` file."""
+    """Build a `RubricScorer` from a `{patterns: [[regex, weight]]}` file.
+
+    Every way the file can be wrong is reported as a ValueError naming
+    the path, so a typo in a rubric reaches the operator as a sentence
+    rather than a traceback.
+
+    Parameters
+    ----------
+    path : str
+        The rubric YAML.
+
+    Returns
+    -------
+    RubricScorer
+        The scorer.
+
+    Raises
+    ------
+    ValueError
+        If the file is missing, unreadable, not a mapping, carries no
+        usable `patterns:`, or a pattern is not a `[regex, weight]`
+        pair.
+    RuntimeError
+        If fit is not installed.
+    """
     import yaml
 
-    reward_fn = _import_fit("fit.training.reward_fn")
-    with open(path) as handle:
-        spec = yaml.safe_load(handle) or {}
+    if not os.path.exists(path):
+        raise ValueError(
+            f"No rubric file at {path}. A rubric is a YAML mapping with "
+            "a `patterns:` list of [regex, weight] pairs."
+        )
 
-    raw = spec.get("patterns") or []
-    patterns = [(str(pattern), float(weight)) for pattern, weight in raw]
+    try:
+        with open(path) as handle:
+            spec = yaml.safe_load(handle)
+    except (OSError, yaml.YAMLError) as exc:
+        raise ValueError(f"Unreadable rubric at {path}: {exc}") from exc
+
+    if not isinstance(spec, dict):
+        raise ValueError(
+            f"Malformed rubric at {path}: expected a mapping with a "
+            f"`patterns:` key, found {type(spec).__name__}."
+        )
+
+    raw = spec.get("patterns")
+    if not raw:
+        raise ValueError(
+            f"Rubric at {path} has no `patterns:`. Without patterns "
+            "every output scores 0.0, which measures nothing."
+        )
+
+    patterns = []
+    for entry in raw:
+        try:
+            pattern, weight = entry
+            patterns.append((str(pattern), float(weight)))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Malformed pattern {entry!r} in rubric {path}: each "
+                f"entry is a [regex, weight] pair ({exc})."
+            ) from exc
+
+    for pattern, _ in patterns:
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise ValueError(
+                f"Invalid regex {pattern!r} in rubric {path}: {exc}"
+            ) from exc
+
+    reward_fn = _import_fit("fit.training.reward_fn")
     return RubricScorer(reward_fn.RubricJudgeReward(patterns), patterns)
 
 
@@ -204,8 +270,40 @@ def build_scorer(spec: str, allow_llm: bool = False, trace_count: int = 0):
                 f"Scorer spec {spec!r} is malformed; module: wants "
                 "module:pkg.mod:factory"
             )
-        module = importlib.import_module(module_name)
-        return getattr(module, factory_name)()
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError as exc:
+            raise ValueError(
+                f"Scorer spec {spec!r} names module {module_name!r}, "
+                f"which cannot be imported ({exc}). It must be on the "
+                "Python path of this process."
+            ) from exc
+
+        try:
+            factory = getattr(module, factory_name)
+        except AttributeError as exc:
+            raise ValueError(
+                f"Scorer spec {spec!r} names {factory_name!r}, which "
+                f"module {module_name!r} does not define."
+            ) from exc
+
+        try:
+            scorer = factory()
+        except Exception as exc:
+            raise ValueError(
+                f"Scorer spec {spec!r}: calling "
+                f"{module_name}:{factory_name}() raised "
+                f"{type(exc).__name__}: {exc}. A factory takes no "
+                "arguments and returns the scorer."
+            ) from exc
+
+        if not hasattr(scorer, "score"):
+            raise ValueError(
+                f"Scorer spec {spec!r}: {module_name}:{factory_name} "
+                f"returned {type(scorer).__name__}, which has no "
+                "`score(output, context)`."
+            )
+        return scorer
 
     if kind == "judge":
         if not allow_llm:
@@ -600,15 +698,63 @@ def load_scores(path: str) -> list:
 
 
 def _areas_from_config(path: str) -> dict:
-    """Invert a config's `areas:` map into tier name to area name."""
+    """Invert a config's `areas:` map into tier name to area name.
+
+    Parameters
+    ----------
+    path : str
+        A routellm config YAML. Only its `areas:` key is read.
+
+    Returns
+    -------
+    dict[str, str]
+        Tier name to area name. Empty when the config has no `areas:`,
+        which is not an error: the sidecar then keys `by_area` on the
+        raw tier names.
+
+    Raises
+    ------
+    FileNotFoundError
+        If there is no file at `path`, naming the flag that asked.
+    ValueError
+        If the file is unreadable or is not a mapping.
+    """
     import yaml
 
-    with open(path) as handle:
-        config = yaml.safe_load(handle) or {}
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"No config file at {path} (given as --config, read only "
+            "for its `areas:` map)"
+        )
+
+    try:
+        with open(path) as handle:
+            config = yaml.safe_load(handle) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise ValueError(f"Unreadable config at {path}: {exc}") from exc
+
+    if not isinstance(config, dict):
+        raise ValueError(
+            f"Malformed config at {path}: expected a mapping, found "
+            f"{type(config).__name__}"
+        )
+
+    areas = config.get("areas") or {}
+    if not areas:
+        logger.warning(
+            "config %s has no `areas:`; by_area will be keyed on the "
+            "raw tier names",
+            path,
+        )
 
     inverted: dict = {}
-    for area, tiers in (config.get("areas") or {}).items():
+    for area, tiers in areas.items():
         for tier in tiers or []:
+            if tier in inverted and inverted[tier] != area:
+                raise ValueError(
+                    f"Tier {tier!r} is in two areas in {path}, "
+                    f"{inverted[tier]!r} and {area!r}."
+                )
             inverted[tier] = area
     return inverted
 

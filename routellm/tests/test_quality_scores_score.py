@@ -226,3 +226,247 @@ def constant_scorer():
 
 def null_scorer():
     return _NullScorer()
+
+
+def test_the_rubric_breakdown_agrees_with_the_score(tmp_path):
+    """fit matches case-insensitively, so the breakdown must too."""
+    pytest.importorskip("fit")
+
+    rubric = tmp_path / "rubric.yaml"
+    rubric.write_text('patterns:\n  - ["\\\\bfirst\\\\b", 1.0]\n')
+
+    scorer = build_scorer(f"rubric:{rubric}")
+    reward = scorer.score("First, read the spec", {})
+
+    assert reward.score == pytest.approx(1.0)
+    assert reward.breakdown == {r"\bfirst\b": 1.0}
+
+
+# ---------------------------------------------------------------------------
+# The command line itself
+#
+# Every test above calls the functions behind the CLI. These drive
+# `main(argv)` the way a shell does, because a flag that parses but
+# never reaches the function it names passes every test above.
+# ---------------------------------------------------------------------------
+
+
+def _cli(*argv) -> int:
+    from routellm.quality_scores import main
+
+    return main(list(argv))
+
+
+def _traces_dir(tmp_path, count=4):
+    return _write(
+        tmp_path / "traces",
+        *[_trace(f"trace-{i}", output="hi") for i in range(count)],
+    )
+
+
+def test_cli_score_writes_the_file_it_was_given(tmp_path):
+    traces = _traces_dir(tmp_path)
+    out = tmp_path / "elsewhere" / "scores.jsonl"
+
+    code = _cli(
+        "score",
+        "--traces", str(traces),
+        "--scorer", f"module:{__name__}:constant_scorer",
+        "--out", str(out),
+    )
+
+    assert code == 0
+    assert len(_rows(out)) == 4
+
+
+def test_cli_score_defaults_out_beside_the_traces(tmp_path):
+    traces = _traces_dir(tmp_path)
+
+    assert _cli(
+        "score",
+        "--traces", str(traces),
+        "--scorer", f"module:{__name__}:constant_scorer",
+    ) == 0
+    assert len(_rows(tmp_path / "scores.jsonl")) == 4
+
+
+def test_cli_limit_actually_limits(tmp_path):
+    traces = _traces_dir(tmp_path)
+    out = tmp_path / "scores.jsonl"
+
+    assert _cli(
+        "score",
+        "--traces", str(traces),
+        "--scorer", f"module:{__name__}:constant_scorer",
+        "--out", str(out),
+        "--limit", "2",
+    ) == 0
+    assert len(_rows(out)) == 2
+
+
+def test_cli_rescore_flag_changes_the_row_count(tmp_path):
+    traces = _traces_dir(tmp_path, count=2)
+    out = tmp_path / "scores.jsonl"
+    argv = [
+        "score",
+        "--traces", str(traces),
+        "--scorer", f"module:{__name__}:constant_scorer",
+        "--out", str(out),
+    ]
+
+    assert _cli(*argv) == 0
+    assert len(_rows(out)) == 2
+
+    # Without the flag the second run is a no-op; with it, every trace
+    # is scored again.
+    assert _cli(*argv) == 0
+    assert len(_rows(out)) == 2
+
+    assert _cli(*argv, "--rescore") == 0
+    assert len(_rows(out)) == 4
+
+
+def test_cli_missing_traces_dir_exits_nonzero_naming_it(tmp_path, capsys):
+    missing = tmp_path / "nope"
+
+    code = _cli(
+        "score",
+        "--traces", str(missing),
+        "--scorer", f"module:{__name__}:constant_scorer",
+        "--out", str(tmp_path / "s.jsonl"),
+    )
+
+    assert code == 1
+    assert str(missing) in capsys.readouterr().err
+
+
+def test_cli_unknown_scorer_exits_nonzero_listing_the_forms(tmp_path, capsys):
+    code = _cli(
+        "score",
+        "--traces", str(_traces_dir(tmp_path)),
+        "--scorer", "nonsense:x",
+        "--out", str(tmp_path / "s.jsonl"),
+    )
+
+    assert code == 1
+    err = capsys.readouterr().err
+    for form in ("composite:", "rubric:", "module:", "judge:"):
+        assert form in err
+
+
+def test_cli_judge_without_allow_llm_exits_nonzero(tmp_path, capsys):
+    code = _cli(
+        "score",
+        "--traces", str(_traces_dir(tmp_path)),
+        "--scorer", "judge:some-model",
+        "--out", str(tmp_path / "s.jsonl"),
+    )
+
+    assert code == 1
+    assert "--allow-llm" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "spec, needle",
+    [
+        ("rubric:/definitely/not/here.yaml", "/definitely/not/here.yaml"),
+        ("module:no.such.module:factory", "no.such.module"),
+        ("module:json:not_a_name", "not_a_name"),
+        ("module:json:JSONDecoder", "score"),
+    ],
+)
+def test_cli_a_broken_scorer_spec_names_the_offending_input(
+    tmp_path, capsys, spec, needle
+):
+    """Every bad spec is a sentence and an exit code, never a traceback."""
+    code = _cli(
+        "score",
+        "--traces", str(_traces_dir(tmp_path)),
+        "--scorer", spec,
+        "--out", str(tmp_path / "s.jsonl"),
+    )
+
+    assert code == 1
+    assert needle in capsys.readouterr().err
+
+
+def test_cli_a_malformed_rubric_names_the_file(tmp_path, capsys):
+    pytest.importorskip("fit")
+
+    rubric = tmp_path / "rubric.yaml"
+    rubric.write_text("just a string\n")
+
+    code = _cli(
+        "score",
+        "--traces", str(_traces_dir(tmp_path)),
+        "--scorer", f"rubric:{rubric}",
+        "--out", str(tmp_path / "s.jsonl"),
+    )
+
+    assert code == 1
+    assert str(rubric) in capsys.readouterr().err
+
+
+def test_cli_a_rubric_with_a_bad_regex_names_the_pattern(tmp_path, capsys):
+    rubric = tmp_path / "rubric.yaml"
+    rubric.write_text('patterns:\n  - ["[unclosed", 1.0]\n')
+
+    code = _cli(
+        "score",
+        "--traces", str(_traces_dir(tmp_path)),
+        "--scorer", f"rubric:{rubric}",
+        "--out", str(tmp_path / "s.jsonl"),
+    )
+
+    assert code == 1
+    assert "[unclosed" in capsys.readouterr().err
+
+
+def test_cli_a_missing_required_flag_exits_two(tmp_path):
+    """argparse's own exit, kept distinct from our exit 1."""
+    with pytest.raises(SystemExit) as excinfo:
+        _cli("score", "--traces", str(tmp_path))
+
+    assert excinfo.value.code == 2
+
+
+def test_cli_no_subcommand_exits_two():
+    with pytest.raises(SystemExit) as excinfo:
+        _cli()
+
+    assert excinfo.value.code == 2
+
+
+def test_cli_allow_llm_lets_a_judge_spec_through(tmp_path, monkeypatch):
+    """The refusal test only proves the default; this proves the flag.
+
+    fit's judge is replaced with a local stand-in, so the flag is
+    exercised without any spec that would actually call an LLM.
+    """
+    import routellm.quality_scores as module
+
+    built = {}
+    real = module.build_scorer
+
+    def _spy(spec, allow_llm=False, trace_count=0):
+        built["allow_llm"] = allow_llm
+        if spec.startswith("judge:"):
+            if not allow_llm:
+                return real(spec, allow_llm=allow_llm, trace_count=trace_count)
+            return _ConstantScorer()
+        return real(spec, allow_llm=allow_llm, trace_count=trace_count)
+
+    monkeypatch.setattr(module, "build_scorer", _spy)
+
+    traces = _traces_dir(tmp_path, count=2)
+    out = tmp_path / "scores.jsonl"
+
+    assert _cli(
+        "score",
+        "--traces", str(traces),
+        "--scorer", "judge:some-model",
+        "--out", str(out),
+        "--allow-llm",
+    ) == 0
+    assert built["allow_llm"] is True
+    assert len(_rows(out)) == 2
