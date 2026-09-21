@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from routellm.config import load_config
+from routellm.capabilities import Capabilities, side_capabilities, union
 from routellm.controller import Controller, RoutingError
 from routellm.endpoints import Endpoint, EndpointRegistry, Tier
 from routellm.hints import TYPESAFE_INSTALL_HINT
@@ -477,7 +478,8 @@ async def list_models():
     JSONResponse
         An OpenAI model list, `data` sorted by id.
     """
-    ids = set(CONTROLLER.endpoints.tier_names())
+    tier_names = set(CONTROLLER.endpoints.tier_names())
+    ids = set(tier_names)
     ids.update(
         f"router-{name}-{CONTROLLER.default_threshold}"
         for name in CONTROLLER.routers
@@ -492,11 +494,66 @@ async def list_models():
                     "object": "model",
                     "created": SERVER_START,
                     "owned_by": "routellm",
+                    "routellm": _routellm_extension(model_id, tier_names),
                 }
                 for model_id in sorted(ids)
             ],
         }
     )
+
+
+def _routellm_extension(model_id: str, tier_names: set) -> dict:
+    """Return the additive `routellm` object for one model entry.
+
+    A tier id carries the union of what every reachable leaf can do,
+    read from the controller's cached index, plus the keys no leaf
+    knows. A `router-<name>-<thr>` id carries `kind: router`, and the
+    flat pair's capabilities when the controller has one.
+
+    The standard OpenAI keys keep their exact values and order; this
+    extension is purely additive, and unknown keys are ignored by every
+    OpenAI client.
+
+    Parameters
+    ----------
+    model_id : str
+        The id this entry lists.
+    tier_names : set[str]
+        Every configured tier name.
+
+    Returns
+    -------
+    dict
+        The extension object.
+    """
+    if model_id in tier_names:
+        caps = CONTROLLER._tier_caps.get(model_id, Capabilities())
+        return {
+            "kind": "tier",
+            "capabilities": caps.model_dump(exclude_none=True),
+            "unknown": caps.unknown_fields(),
+        }
+
+    extension = {"kind": "router"}
+
+    pair = CONTROLLER.default_model_pair
+    if pair is not None:
+        caps = union(
+            [
+                side_capabilities(
+                    str(side),
+                    CONTROLLER.endpoints,
+                    CONTROLLER._tier_caps,
+                    CONTROLLER._catalog_records,
+                )
+                for side in (pair.strong, pair.weak)
+                if side is not None
+            ]
+        )
+        extension["capabilities"] = caps.model_dump(exclude_none=True)
+        extension["unknown"] = caps.unknown_fields()
+
+    return extension
 
 
 @app.get("/health")
