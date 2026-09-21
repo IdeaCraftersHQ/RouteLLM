@@ -132,8 +132,10 @@ class PaymentScope:
         return False
 
 
-def scoped_payment_transport(scope: PaymentScope, client, transport=None):
-    """Build an x402 transport that only pays inside `scope`.
+def scoped_payment_transport(
+    scope: PaymentScope, client, transport=None, limits=None
+):
+    """Build an x402 transport that only pays inside `scope`, and only so much.
 
     The result is an `x402AsyncTransport`, so everything that already
     reads litellm's session -- and the SDK's own retry markers, version
@@ -153,22 +155,71 @@ def scoped_payment_transport(scope: PaymentScope, client, transport=None):
 
     Parameters
     ----------
+    The amount is bounded the same way, and for the same reason the
+    scope exists: one session serves every upstream, so the cap has to
+    be chosen per request from its URL rather than fixed on the client
+    once. The SDK enforces it -- `set_spend_controls` takes the cap as
+    a money string and resolves it against the scheme's own default
+    asset, which is the only place the asset's decimals are known --
+    and its refusal is restated in terms of the limit that refused.
+
+    Passing no cap leaves the SDK's default spend controls untouched.
+    `spend_controls=False` would read as "nothing configured" and
+    remove the only ceiling an unconfigured deployment has.
+
+    Parameters
+    ----------
     scope : PaymentScope
         The base URLs a payment may be signed for.
     client : x402Client or x402HTTPClient
         Payment client the SDK transport signs with.
     transport : httpx.AsyncBaseTransport, optional
         Transport that actually reaches the provider.
+    limits : PaymentLimits, optional
+        Per-payment caps. None caps nothing of ours.
 
     Returns
     -------
     x402AsyncTransport
-        A payment transport gated on `scope`.
+        A payment transport gated on `scope` and on `limits`.
     """
-    from x402.http.clients.httpx import x402AsyncTransport
+    from x402.http.clients.httpx import PaymentError, x402AsyncTransport
+
+    def _signing_client():
+        """Return the object `set_spend_controls` lives on.
+
+        `x402AsyncTransport` accepts either an `x402Client` or the
+        `x402HTTPClient` wrapping one, and spend controls belong to
+        the inner client in both cases.
+        """
+        return getattr(client, "_client", client)
 
     class _ScopedX402Transport(x402AsyncTransport):
-        """An x402 transport that declines to look at unpayable URLs."""
+        """An x402 transport that declines unpayable URLs and over-cap prices."""
+
+        def _limits_probe(self, url):
+            """Return the cap this transport would enforce for `url`.
+
+            The cap is chosen per request inside `handle_async_request`,
+            so there is otherwise nothing on the installed session to
+            read it off. A caller checking that the process-global
+            session really carries the operator's limits needs to ask
+            without sending a request and paying one.
+
+            Parameters
+            ----------
+            url : str
+                A request URL.
+
+            Returns
+            -------
+            list
+                `[cap, source]`, or `[None, None]` when nothing of
+                ours caps it.
+            """
+            if limits is None:
+                return [None, None]
+            return list(limits.effective(url))
 
         async def handle_async_request(
             self, request: httpx.Request
@@ -184,16 +235,42 @@ def scoped_payment_transport(scope: PaymentScope, client, transport=None):
             -------
             httpx.Response
                 The response, settled and replayed when the URL is
-                payable and the server asked for payment.
-            """
-            if scope.allows(request.url):
-                return await super().handle_async_request(request)
+                payable, the price is within the limit, and the server
+                asked for payment.
 
-            logger.debug(
-                "not payable: %s is outside the configured payment scope, "
-                "so a 402 from it is returned unpaid",
-                request.url,
-            )
-            return await self._transport.handle_async_request(request)
+            Raises
+            ------
+            PaymentError
+                When the challenge is above the effective cap. The
+                message names which limit refused it.
+            """
+            if not scope.allows(request.url):
+                logger.debug(
+                    "not payable: %s is outside the configured payment "
+                    "scope, so a 402 from it is returned unpaid",
+                    request.url,
+                )
+                return await self._transport.handle_async_request(request)
+
+            cap, source = (None, None)
+            if limits is not None:
+                cap, source = limits.effective(request.url)
+
+            if cap is not None:
+                # Chosen per request: the session is shared, so a cap
+                # installed once would bind whichever endpoint happened
+                # to be configured last.
+                _signing_client().set_spend_controls(
+                    {"max_amount_per_payment": cap}
+                )
+
+            try:
+                return await super().handle_async_request(request)
+            except PaymentError as exc:
+                if cap is None or "max_amount_per_payment" not in str(exc):
+                    raise
+                from routellm.payment.limits import refusal_message
+
+                raise PaymentError(refusal_message(cap, source, exc)) from exc
 
     return _ScopedX402Transport(client, transport)
