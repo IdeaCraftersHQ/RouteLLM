@@ -11,9 +11,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import psutil
-import yaml
 from pandarallel import pandarallel
 
+from routellm.config import load_config
 from routellm.controller import Controller
 from routellm.evals.benchmarks import GSM8K, MMLU, MTBench
 from routellm.evals.mmlu.domains import ALL_MMLU_DOMAINS
@@ -192,7 +192,16 @@ if __name__ == "__main__":
         type=str,
         default="mistralai/Mixtral-8x7B-Instruct-v0.1",
     )
-    parser.add_argument("--config", type=str, default=None)
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help=(
+            "Explicit config file, merged last over the discovered chain "
+            "(system, user, project, ROUTELLM_CONFIG). Run "
+            "`python -m routellm.config paths` to see the chain."
+        ),
+    )
     parser.add_argument("--num-results", type=int, default=10)
     parser.add_argument("--random-iters", type=int, default=10)
 
@@ -202,7 +211,7 @@ if __name__ == "__main__":
     pandarallel.initialize(progress_bar=True, nb_workers=args.parallel)
     controller = Controller(
         routers=args.routers,
-        config=yaml.safe_load(open(args.config, "r")) if args.config else None,
+        config=load_config(explicit=args.config).data,
         strong_model=args.strong_model,
         weak_model=args.weak_model,
         progress_bar=True,
