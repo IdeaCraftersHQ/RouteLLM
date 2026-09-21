@@ -584,7 +584,7 @@ python -m routellm.config paths   # every searched location, lowest first, [used
 python -m routellm.config show    # the effective merged config, each top-level key commented with its origin
 ```
 
-`paths` and `show` also take `--format json`. All three honour `--config` and `ROUTELLM_CONFIG`. `python -m routellm.pairing` with no `--config` explains the discovered config the same way.
+`paths` and `show` also take `--format json`. All three honour `--config` and `ROUTELLM_CONFIG`. `python -m routellm.pairing` with no `--config` explains the discovered config the same way. `--format json` on `paths` lists only the entries that actually resolved to a path — an absent project layer has no marker to name, so it is left out rather than represented with a synthetic project line; the text output is where `[absent] project` is always shown for a stable six-layer read.
 
 A project-local `.routellm.yaml` is gitignored: real configuration belongs outside the repo. `config.example.yaml` and `examples/multitier.yaml` are samples to copy from, never the instance config.
 
