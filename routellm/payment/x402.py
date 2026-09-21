@@ -17,10 +17,12 @@ class X402Adapter(PaymentGateway):
     challenges. Requires x402[evm] installed and ROUTELLM_WALLET_PRIVATE_KEY set.
 
     Internal flow for pay():
-    1. Construct x402.schemas.PaymentRequired from challenge.payload
-    2. Register EVM signer mechanism on the x402Client
-    3. Call x402HTTPClient.create_payment_payload(payment_required)
-    4. Map signed PaymentPayload back to RouteLLM PaymentReceipt
+    1. Register EVM signer mechanisms on the x402Client
+    2. Hand the raw 402 headers and body to
+       x402HTTPClient.handle_402_response, which detects the protocol
+       version, decodes the server's PaymentRequired, signs it, and
+       returns the retry header under its version-correct name
+    3. Map the encoded payload back to a RouteLLM PaymentReceipt
     """
 
     def __init__(
@@ -56,41 +58,98 @@ class X402Adapter(PaymentGateway):
     def networks(self) -> list[str]:
         return self._networks
 
+    # Legacy v1 network names mapped to the CAIP-2 identifiers v2 uses.
+    _CAIP2 = {
+        "base": "eip155:8453",
+        "base-sepolia": "eip155:84532",
+        "ethereum": "eip155:1",
+        "polygon": "eip155:137",
+        "avalanche": "eip155:43114",
+    }
+
     def _build_client(self):
-        """Build and return a configured x402HTTPClient with EVM signer registered."""
+        """Build an x402HTTPClient with the wallet registered for both versions.
+
+        `register_exact_evm_client` is the package's own registration
+        helper, and it registers the scheme twice: once under the CAIP-2
+        networks v2 addresses, and once under the legacy names v1 uses.
+        Registering only the v2 side -- as a hand-rolled loop over
+        `client.register` does -- leaves a v1 challenge with no scheme to
+        match, so the payment fails after the challenge parses cleanly.
+
+        Returns
+        -------
+        x402HTTPClient
+            Client able to sign for either protocol version.
+        """
         from eth_account import Account
         from x402.client import x402Client
         from x402.http.x402_http_client import x402HTTPClient
-        from x402.mechanisms.evm.exact import ExactEvmScheme
+        from x402.mechanisms.evm.exact import register_exact_evm_client
+        from x402.mechanisms.evm.signers import EthAccountSigner
 
-        account = Account.from_key(self._private_key)
+        # EthAccountSigner satisfies the SDK's ClientEvmSigner protocol:
+        # it exposes the wallet `address` and `sign_typed_data`. A bare
+        # signing function does not, and the SDK fails on `.address`
+        # partway through building the authorization.
+        signer = EthAccountSigner(Account.from_key(self._private_key))
 
-        async def signer(message: bytes) -> bytes:
-            signed = account.sign_message(message)
-            return signed.signature
+        networks = [self._CAIP2[n] for n in self._networks if n in self._CAIP2]
 
         client = x402Client()
-        network_map = {
-            "base": "eip155:8453",
-            "ethereum": "eip155:1",
-            "polygon": "eip155:137",
-        }
-        for net in self._networks:
-            caip2 = network_map.get(net)
-            if caip2:
-                client.register(caip2, ExactEvmScheme(signer=signer))
+        register_exact_evm_client(client, signer, networks=networks or None)
 
         return x402HTTPClient(client)
 
     async def pay(self, challenge: PaymentChallenge) -> PaymentReceipt:
-        """Fulfill a 402 payment challenge using the x402 SDK."""
-        from x402.schemas import PaymentRequired
+        """Fulfill a 402 payment challenge using the x402 SDK.
+
+        The challenge is decoded from the server's own 402 response.
+        `handle_402_response` detects the protocol version from what the
+        server sent -- a base64 PAYMENT-REQUIRED header for v2, a JSON
+        body for v1 -- decodes the PaymentRequired, signs it with the
+        configured wallet, and returns the retry header already named
+        for that version. Choosing the version here instead would make
+        the client's configuration override the server's protocol.
+
+        Parameters
+        ----------
+        challenge : PaymentChallenge
+            Challenge carrying the raw 402 headers, body and URL.
+
+        Returns
+        -------
+        PaymentReceipt
+            Receipt whose `header_name` and `header_value` are the
+            header the retry must carry.
+
+        Raises
+        ------
+        ValueError
+            If the challenge carries no x402 data to parse.
+        """
+        if not challenge.headers and not challenge.body:
+            raise ValueError(
+                "the 402 response carried no x402 payment challenge to sign: "
+                "no PAYMENT-REQUIRED header and no body"
+            )
 
         http_client = self._build_client()
-        payment_required = PaymentRequired(**challenge.payload)
-        payload = await http_client.create_payment_payload(payment_required)
+        payment_headers, payload = await http_client.handle_402_response(
+            headers=challenge.headers,
+            body=challenge.body or None,
+            request_url=challenge.resource_url,
+        )
 
-        tx_hash = getattr(payload, "transaction_hash", None) or str(payload)
+        if not payment_headers:
+            raise ValueError("the x402 client produced no payment header")
+
+        header_name, header_value = next(iter(payment_headers.items()))
+
+        # The proof of payment is the encoded payload, never a repr of
+        # the object: a signed PaymentPayload has no transaction hash,
+        # because nothing has settled on chain yet at this point.
+        tx_hash = getattr(payload, "transaction_hash", None) or header_value
 
         return PaymentReceipt(
             tx_hash=tx_hash,
@@ -98,7 +157,9 @@ class X402Adapter(PaymentGateway):
             amount=challenge.amount,
             currency=challenge.currency,
             paid_at=int(time.time()),
-            resource=challenge.payload.get("resource", ""),
+            resource=challenge.resource_url or challenge.payload.get("resource", ""),
+            header_name=header_name,
+            header_value=header_value,
         )
 
     async def verify(self, receipt: PaymentReceipt) -> bool:
