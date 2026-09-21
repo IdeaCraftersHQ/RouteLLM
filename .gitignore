@@ -168,6 +168,8 @@ cython_debug/
 
 # Project-local RouteLLM config (the project layer of the config chain).
 # Real configuration lives outside the repo; config.example.yaml and
-# examples/*.yaml are samples, not the instance config.
-/.routellm.yaml
-/routellm.yaml
+# examples/*.yaml are samples, not the instance config. Unanchored: the
+# chain's walk-up finds a marker in any ancestor directory, not just the
+# repo root, so both names must be ignored everywhere.
+.routellm.yaml
+routellm.yaml

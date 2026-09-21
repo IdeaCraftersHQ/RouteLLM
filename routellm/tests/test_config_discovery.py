@@ -131,20 +131,18 @@ def test_walk_up_stops_at_home(env):
     assert "project" not in sources(cfg.config_paths())
 
 
-def test_walk_up_stops_at_a_symlinked_home(env):
+def test_walk_up_stops_at_a_symlinked_home(env, monkeypatch):
     """A symlinked `$HOME` is still the boundary, resolved on both sides.
 
     macOS ships `/tmp` as a symlink to `/private/tmp`, so an unresolved
     comparison silently reads `$HOME/.routellm.yaml` as a project file.
     """
-    import os
-
     link = env.home.parent / "home-link"
     link.symlink_to(env.home)
     env.write(env.home / ".routellm.yaml", {"a": "home"})
     marker = env.write(env.project / ".routellm.yaml", {"a": "project"})
 
-    os.environ["HOME"] = str(link)
+    monkeypatch.setenv("HOME", str(link))
 
     found = cfg._project_file(env.project.resolve())
 

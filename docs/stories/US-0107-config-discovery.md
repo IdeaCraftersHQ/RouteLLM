@@ -65,7 +65,9 @@ names the variable or the flag.
    lowest first, each marked `[used]` or `[absent]`.
 5. `python -m routellm.config show` prints the effective merged config
    with a comment per top-level key naming the file that set it.
-6. `paths` and `show` both take `--format json`.
+6. `paths` and `show` both take `--format json`; for `paths`, the JSON
+   array holds only the entries that resolved to a real path, with no
+   synthetic project line when no marker was found.
 7. `python -m routellm.pairing` with no `--config` explains the
    discovered config.
 8. A project-local `.routellm.yaml` is gitignored, so it is never
