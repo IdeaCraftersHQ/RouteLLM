@@ -383,9 +383,13 @@ class EndpointRegistry:
         every other top-level key is left to its own owner.
 
         `quality_from:` names a measured-quality sidecar, resolved
-        relative to the CONFIG FILE rather than the CWD. It fills
-        `quality` only for an endpoint that sets none: a hand-set
-        number always wins over a measurement.
+        relative to the CONFIG FILE rather than the CWD. The sidecar
+        WINS over a hand-written `quality:`, because it is measured and
+        the YAML number is a guess someone typed once; set
+        `quality_from_override: false` to flip that, so an explicit
+        number survives and the sidecar only fills endpoints that set
+        none. Either way an endpoint the sidecar does not name keeps
+        exactly the ordering it has today.
 
         Parameters
         ----------
@@ -406,8 +410,12 @@ class EndpointRegistry:
         ------
         ValueError
             If any endpoint or tier is malformed, the tier graph fails
-            validation, or `quality_from:` names a file that is not
-            there.
+            validation, or the sidecar is malformed or written by a
+            version this code does not read.
+        FileNotFoundError
+            If `quality_from:` names a file that is not there. The
+            message names the config key, so the fix is readable from
+            the error alone.
         """
         config = config or {}
 
