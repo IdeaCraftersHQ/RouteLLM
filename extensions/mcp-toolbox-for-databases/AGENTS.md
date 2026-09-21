@@ -1,1 +1,0 @@
-/var/folders/x6/lrc3lbzd1gs0wvmn_z_t76780000gn/T/gemini-extensionZG5Hz9/GEMINI.md
