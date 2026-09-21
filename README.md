@@ -332,12 +332,16 @@ Many OpenAI clients probe the model list before their first request. The server 
 ```
 > curl -s localhost:6060/v1/models
 {"object":"list","data":[
-  {"id":"default","object":"model","created":1758326400,"owned_by":"routellm"},
-  {"id":"premium","object":"model","created":1758326400,"owned_by":"routellm"},
-  {"id":"router-mf-0.5","object":"model","created":1758326400,"owned_by":"routellm"}]}
+  {"id":"default","object":"model","created":1758326400,"owned_by":"routellm",
+   "routellm":{"kind":"tier","capabilities":{"vision":true,"tools":true,"context":262144},
+               "unknown":["reasoning","max_output"]}},
+  {"id":"router-mf-0.5","object":"model","created":1758326400,"owned_by":"routellm",
+   "routellm":{"kind":"router"}}]}
 ```
 
 `created` is the moment the process came up: the listing is derived from the config, so it does not change while the server runs.
+
+Each entry carries an additive `routellm` object. For a tier id it holds the union of what every reachable leaf can do plus `unknown`, the keys no reachable leaf knows; for a `router-<name>-<thr>` id it holds `kind: router`, plus the flat pair's capabilities when the controller carries one. The standard OpenAI keys keep their exact values and order, and unknown keys are ignored by every OpenAI client.
 
 ### Selectors
 
@@ -352,7 +356,9 @@ tiers:
     weak: {select: "tag:local", order: cost_asc}
 ```
 
-`select` is a space-separated list of terms, all ANDed. A `tag:<label>` term is answered locally from the endpoint's own `tags`; every other `key:value` term is a models.dev fact. Bare free text is rejected — a policy says what a model *is*, never what its name looks like. `order` picks the winner among the matches, one of `cost_asc`, `cost_desc`, `quality_asc`, `quality_desc` (default), `context_desc`.
+`select` is a space-separated list of terms, all ANDed. A `tag:<label>` term is answered locally from the endpoint's own `tags`; a capability term is answered from the merged [capabilities](#capabilities); every other `key:value` term is a models.dev fact. Bare free text is rejected — a policy says what a model *is*, never what its name looks like. `order` picks the winner among the matches, one of `cost_asc`, `cost_desc`, `quality_asc`, `quality_desc` (default), `context_desc`, `max_output_desc`.
+
+The capability terms are `vision:true`, `tools:true`, `structured_output:true`, `reasoning:true`, `open_weights:true`, `context:>=N`, `context:<=N`, `max_output:>=N`, `max_output:<=N`, and `input:image`. `tools` is an alias of the catalog's `tool_call`: both spellings work and mean the same thing, because both are answered from `Capabilities.tools`, which already merged the catalog's value. A range term needs its comparison — a bare `context:200000` is an error naming the term and showing `context:>=200000`, because "exactly this context window" is never what an operator means.
 
 Selectors need the optional `pairing` extra. Endpoints models.dev does not list, such as anything served by Ollama, are tag-only candidates: they satisfy `tag:` terms and fail every catalog term. Explain a pick without starting a server:
 
@@ -366,6 +372,75 @@ python -m routellm.pairing --config config.example.yaml
 ```
 
 Every selector is resolved to an endpoint name before the tier graph is validated a second time, so nothing downstream ever sees one.
+
+### Capabilities
+
+Routing picks on difficulty and on policy; capabilities add *fitness*. A request carrying an image should never be sent to a text-only model, and the first sign of trouble should not be a provider error after the tokens were spent.
+
+Any endpoint may state what it can do:
+
+```yaml
+endpoints:
+  local_server:
+    model: openai/qwen3-coder
+    api_base: http://127.0.0.1:11800/v1
+    capabilities:
+      vision: false
+      tools: true
+      structured_output: true
+      reasoning: false
+      context: 262144
+      max_output: 32768
+      modalities_in: [text]
+    strict: false
+```
+
+Three sources fill the record, highest precedence first: the explicit `capabilities:` block, the deprecated capability tags, then the [models.dev](https://models.dev) record the pairing path already fetches. Tags sit *between* the block and the catalog because a hand-written capability tag on a catalogued model is nearly always a correction to a catalog the operator found wrong, and an operator who wants to override a tag has the block.
+
+An omitted field is `null`, which means **not known** — a different answer from `false`, which means known not to. Nothing is inferred: a field is filled only by a source that states it.
+
+The tags `tools`, `vision` and `long_context` still populate the block for one more release, logging one deprecation warning per alias per process (`long_context` sets `context: 200000`, a floor an operator asserts rather than a measurement). Tags themselves are not deprecated: they keep their governance, performance and expertise meaning and stay selectable with `tag:`.
+
+#### The two opposite defaults for unknown
+
+At **selection** time — resolving a selector at startup — an unknown capability **fails** its term. An endpoint that has not declared `vision` does not satisfy `vision:true` and is dropped. Startup is where an operator can see the gap and fix it, `--capabilities` prints exactly which endpoint is unknown on which key, and silently selecting a model that might not do the job is worse than a clear "no candidate matched".
+
+At **request** time — checking a side before its router runs — an unknown capability **serves**, and the assumption is logged once per endpoint and requirement at INFO. `strict: false` is the default, so a config that declares nothing about any of its endpoints keeps routing exactly as it always did. `strict: true` on an endpoint flips it: unknown means no, for an endpoint you would rather refuse than surprise.
+
+Both defaults are deliberate. Read together: *at startup, prove it; at request time, assume it unless told otherwise.*
+
+#### What a request needs
+
+Four facts are read off the request and nothing else: `vision` from an `image_url` or `input_image` part in some message's content, `tools` from a non-empty `tools` or `functions`, `structured_output` from a `response_format` of `json_schema` or `json_object`, and `context_needed` from the prompt's token count plus `max_tokens`. `stream`, `n`, `temperature`, `seed` and the rest never affect routing.
+
+`context` is judged only when both the count and the endpoint's window are known: the count is an estimate, and it never refuses a request whose endpoint declares no context window.
+
+#### Three outcomes
+
+Each level of the tier walk checks both its sides before running its router:
+
+- **Both sides can serve it** — unchanged, the router decides as always.
+- **Exactly one can** — it is taken with **no router call**, and the path entry carries `capability_forced: "strong"` or `"weak"` and `capability_requirement: "<name>"`, the requirement the *other* side failed. `win_rate` is `null`; every other path key keeps its usual value.
+- **Neither can** — a `RoutingError`, which the server returns as a 400 with a JSON body, before any upstream request is made:
+
+```json
+{"object": "error",
+ "message": "Tier 'coding' has no side that can serve this request: vision. Configured sides: cloud_strong (vision), local_fast (vision)."}
+```
+
+A tier-valued side passes when **any** reachable leaf passes; that union is computed once at startup, bottom-up, and cached. Flat pairs get the same check — the legacy pair, a traffic rule's pair, a middleware's pair. A fallback sibling that cannot serve the request is dropped from the chain, because falling back to a model that cannot take the request turns one provider error into two.
+
+A request carrying no images, no tools and no `response_format` demands nothing, so every side passes and the path is byte-identical to what it was before capabilities existed.
+
+#### Seeing the picture
+
+```
+python -m routellm.pairing --config config.yaml --capabilities
+```
+
+prints one row per endpoint over `vision`, `tools`, `structured_output`, `reasoning`, `context`, `max_output`, rendered `yes` / `no` / `?`; then one row per tier with its union and a `via` column naming the leaf that supplied each `yes`; then an `Unknown:` block listing the keys each endpoint cannot answer; and finally the capability terms your own selectors use that some endpoint is unknown on — those are the endpoints a selector drops without saying so.
+
+Add `--explain` to print the selector tables too, selectors first. There is deliberately no `python -m routellm.capabilities`: this command already loads the YAML, builds the registry and resolves the selectors, which is everything the matrix needs, and a second entry point would duplicate all of it and drift from it.
 
 ### Intents
 

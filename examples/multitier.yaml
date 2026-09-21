@@ -23,15 +23,28 @@
 #               `jur:us` or `jur:ca`.
 #   performance `fast` or `slow`.
 #   expertise   `coder`, `writer`, `designer`, `general`.
-#   capability  `tools`, `vision`, `long_context` -- written only for
-#               endpoints models.dev holds no record of, because for
-#               every other endpoint the catalog answers the same
-#               question and a hand-written tag would drift from it.
-#               In practice that is the models served by a local
-#               runtime: Ollama and our own OpenAI-compatible
-#               server. Every hosted vendor here is in the catalog.
-#               `vision` is in the vocabulary but on no endpoint
-#               below: none of the unlisted ones takes images.
+# The fourth axis is no longer a tag. Capability is now the typed
+# `capabilities:` block on an endpoint:
+#
+#   capability  a `capabilities:` block stating what the endpoint can
+#               do -- `vision`, `tools`, `structured_output`,
+#               `reasoning`, `open_weights`, `context`, `max_output`,
+#               `modalities_in`. Written only for endpoints models.dev
+#               holds no record of, because for every other endpoint
+#               the catalog answers the same question and a hand-
+#               written value would drift from it. In practice that is
+#               the models served by a local runtime: Ollama and our
+#               own OpenAI-compatible server. Every hosted vendor here
+#               is in the catalog. An omitted field means "not known",
+#               which is different from `false`: at request time an
+#               unknown capability serves by default, and `strict: true`
+#               on an endpoint flips that to a refusal.
+#
+#               The tags `tools`, `vision` and `long_context` still
+#               populate the block for one more release, with a
+#               deprecation warning each. Every other tag -- governance,
+#               performance, expertise -- keeps its meaning and stays
+#               selectable with `tag:`.
 #
 # Governance tiers select on the reach tags: `private` takes `tag:local`
 # on both sides and never leaves our own hardware; `vpn` takes `tag:vpn`
@@ -48,12 +61,19 @@
 # selectors actually pick before trusting them:
 #
 #   python -m routellm.pairing --config examples/multitier.yaml
+#
+# and check what each endpoint is known to be able to do, and which
+# selector terms some endpoint cannot answer:
+#
+#   python -m routellm.pairing --config examples/multitier.yaml --capabilities
 
 endpoints:
 
   # --- cloud, direct APIs: reach `cloud`, jurisdiction US -------------
-  # models.dev holds a record for each, so they carry no capability
-  # tags: `tool_call:true` in a selector is answered from the catalog.
+  # models.dev holds a record for each, so they carry no `capabilities:`
+  # block: `tool_call:true` or `vision:true` in a selector is answered
+  # from the catalog, which stays current without anyone editing this
+  # file.
 
   anthropic_strong:
     model: anthropic/claude-sonnet-5
@@ -115,7 +135,13 @@ endpoints:
   #
   # bedrock_strong:
   #   model: bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0
-  #   tags: [vpn, "jur:us", slow, general, writer, tools, long_context]
+  #   tags: [vpn, "jur:us", slow, general, writer]
+  #   capabilities:
+  #     vision: true
+  #     tools: true
+  #     structured_output: true
+  #     context: 200000
+  #     max_output: 64000
   #   extra:
   #     aws_region_name: us-east-1
   #   # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION_NAME
@@ -129,7 +155,13 @@ endpoints:
   # Reachable on this box directly and from elsewhere over tailscale.
   # models.dev lists neither an Ollama model nor an OpenAI-compatible
   # server's own ids, so every endpoint here is a tag-only candidate and
-  # carries its capability tags and a manual `quality` by hand.
+  # states its own `capabilities:` block and a manual `quality` by hand.
+  #
+  # The `context` and `max_output` numbers below are the ones these
+  # placeholder models happen to report. REPLACE THEM with what your own
+  # server reports -- `/v1/models` on an OpenAI-compatible server, or
+  # `ollama show <model>` -- because a selector's `context:>=N` and the
+  # request-time context check both believe what is written here.
 
   # An OpenAI-compatible server of our own. The `openai/` prefix routes
   # any such server through litellm; the model id must match what the
@@ -139,7 +171,15 @@ endpoints:
     model: openai/<your-local-server-model-id>
     api_base: http://127.0.0.1:11800/v1
     api_key_env: LOCAL_SERVER_API_KEY
-    tags: [local, vpn, "jur:ca", slow, general, tools, long_context]
+    tags: [local, vpn, "jur:ca", slow, general]
+    capabilities:
+      vision: false
+      tools: true
+      structured_output: true
+      reasoning: false
+      context: 262144
+      max_output: 32768
+      modalities_in: [text]
     quality: 90
 
   # Ollama over an ssh tunnel, on your tunnel port. Never the default
@@ -150,20 +190,63 @@ endpoints:
   ollama_coder:
     model: ollama_chat/<your-coder-model>
     api_base: http://127.0.0.1:11500
-    tags: [local, vpn, "jur:ca", slow, coder, tools]
+    tags: [local, vpn, "jur:ca", slow, coder]
+    capabilities:
+      vision: false
+      tools: true
+      structured_output: true
+      context: 131072
+      max_output: 16384
+      modalities_in: [text]
     quality: 80
 
   ollama_coder_fast:
     model: ollama_chat/<your-small-coder-model>
     api_base: http://127.0.0.1:11500
-    tags: [local, vpn, "jur:ca", fast, coder, tools]
+    tags: [local, vpn, "jur:ca", fast, coder]
+    capabilities:
+      vision: false
+      tools: true
+      structured_output: true
+      context: 32768
+      max_output: 8192
+      modalities_in: [text]
     quality: 70
 
   ollama_general_fast:
     model: ollama_chat/<your-small-model>
     api_base: http://127.0.0.1:11500
     tags: [local, vpn, "jur:ca", fast, general]
+    capabilities:
+      vision: false
+      tools: false
+      structured_output: false
+      context: 32768
+      max_output: 4096
+      modalities_in: [text]
     quality: 60
+
+  # A vision-capable local model, and the one endpoint here that sets
+  # `strict: true`. Strict means an unknown capability REFUSES a request
+  # that needs it, instead of serving it and hoping. Want it on an
+  # endpoint whose failures are expensive or invisible -- a model behind
+  # a paid proxy, or one whose errors surface as plausible-looking
+  # nonsense rather than a 400. Everywhere else the default `strict:
+  # false` is right: unknown serves, and the request that reveals the
+  # gap costs one provider error, not a refusal for every request.
+  ollama_vision:
+    model: ollama_chat/<your-vision-model>
+    api_base: http://127.0.0.1:11500
+    tags: [local, vpn, "jur:ca", fast, designer]
+    strict: true
+    capabilities:
+      vision: true
+      tools: false
+      structured_output: false
+      context: 128000
+      max_output: 8192
+      modalities_in: [text, image]
+    quality: 72
 
   # --- cloud-proxied through the local runtime -----------------------
   # Served by the same Ollama host but answered by the vendor's cloud,
@@ -174,19 +257,43 @@ endpoints:
   ollama_cloud_flash:
     model: ollama_chat/<your-cloud-fast-model>
     api_base: http://127.0.0.1:11500
-    tags: [cloud, "jur:us", fast, general, tools, long_context]
+    tags: [cloud, "jur:us", fast, general]
+    capabilities:
+      vision: true
+      tools: true
+      structured_output: true
+      reasoning: false
+      context: 1000000
+      max_output: 65536
+      modalities_in: [text, image]
     quality: 76
 
   ollama_cloud_pro:
     model: ollama_chat/<your-cloud-strong-model>
     api_base: http://127.0.0.1:11500
-    tags: [cloud, "jur:us", slow, general, tools, long_context]
+    tags: [cloud, "jur:us", slow, general]
+    capabilities:
+      vision: true
+      tools: true
+      structured_output: true
+      reasoning: true
+      context: 262144
+      max_output: 65536
+      modalities_in: [text, image]
     quality: 88
 
   ollama_cloud_kimi:
     model: ollama_chat/<your-cloud-writer-model>
     api_base: http://127.0.0.1:11500
-    tags: [cloud, "jur:us", slow, writer, tools, long_context]
+    tags: [cloud, "jur:us", slow, writer]
+    capabilities:
+      vision: false
+      tools: true
+      structured_output: true
+      reasoning: true
+      context: 262144
+      max_output: 32768
+      modalities_in: [text]
     quality: 86
 
   # --- the router's own embedding endpoint ---------------------------
@@ -263,6 +370,24 @@ tiers:
   design_fast:
     strong: {select: "tag:fast tag:designer", order: cost_asc}
     weak: {select: "tag:fast tag:general tag:local", order: cost_asc}
+
+  # --- capability terms ----------------------------------------------
+  # A tier that selects on what an endpoint can DO rather than on a tag
+  # someone wrote. `vision:true` and `context:>=N` resolve against the
+  # merged capabilities, so a local endpoint with an explicit block
+  # competes on equal footing with a catalogued one -- which is the
+  # whole point of the typed block.
+  #
+  # At SELECTION time an unknown capability FAILS its term, the
+  # opposite of the request-time default: startup is where an operator
+  # can see the gap and fix it, and `--capabilities` prints exactly
+  # which endpoint is unknown on which key. So an endpoint that has not
+  # declared `vision` is dropped here silently, by design.
+  vision:
+    router: jev
+    threshold: 0.4
+    strong: {select: "vision:true context:>=200000", order: quality_desc}
+    weak: {select: "vision:true", order: max_output_desc}
 
   # --- governance ----------------------------------------------------
   # `private` never leaves our hardware: both sides take `tag:local`, so
