@@ -30,7 +30,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def install_payment_session(gateway, transport=None, payable_bases=None):
+def install_payment_session(
+    gateway, transport=None, payable_bases=None, limits=None
+):
     """Route litellm's async requests through `gateway`'s paying client.
 
     Parameters
@@ -44,6 +46,14 @@ def install_payment_session(gateway, transport=None, payable_bases=None):
         authorises nothing, so every 402 comes back unpaid. None leaves
         the session unscoped and is only for a caller that has already
         narrowed the client to a single upstream.
+    limits : PaymentLimits, optional
+        How much a single payment may be, process-wide and per base
+        URL. Set onto `gateway` rather than passed alongside it: the
+        gateway pays at two seams -- this session, and its own `pay`
+        for the 402s litellm turns into exceptions -- and one cap has
+        to bind both. Two places to hold it is two places to forget
+        it. None caps nothing of ours, which leaves the SDK's own
+        default per-payment ceiling standing.
 
     Returns
     -------
@@ -58,13 +68,16 @@ def install_payment_session(gateway, transport=None, payable_bases=None):
 
         scope = PaymentScope(payable_bases)
 
+    if limits is not None:
+        gateway.limits = limits
+
     session = gateway.build_session(transport=transport, scope=scope)
     litellm.aclient_session = session
     return session
 
 
 def maybe_install_payment_session(
-    provider, wallet_key, networks=None, payable_bases=()
+    provider, wallet_key, networks=None, payable_bases=(), limits=None
 ):
     """Install the paying session only when payment was actually asked for.
 
@@ -89,6 +102,9 @@ def maybe_install_payment_session(
     payable_bases : iterable[str], optional
         Base URLs of the endpoints the operator authorised to charge.
         Empty by default, which authorises nothing.
+    limits : PaymentLimits, optional
+        Per-payment caps, from `--max-payment` and the endpoints'
+        `max_payment:`. None leaves the SDK's own default standing.
 
     Returns
     -------
@@ -101,7 +117,9 @@ def maybe_install_payment_session(
     from routellm.payment.x402 import X402Adapter
 
     gateway = X402Adapter(private_key=wallet_key, networks=networks)
-    install_payment_session(gateway, payable_bases=payable_bases)
+    install_payment_session(
+        gateway, payable_bases=payable_bases, limits=limits
+    )
 
     bases = list(payable_bases or ())
     if bases:

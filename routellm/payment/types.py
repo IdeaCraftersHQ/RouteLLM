@@ -40,6 +40,19 @@ class PaymentChallenge:
         Raw response body from the 402 (default empty).
     resource_url : str, optional
         URL of the request that was refused (default empty).
+    max_amount : str, optional
+        The most this one payment may be, as human money ("$0.01").
+        The cap belongs to the payment rather than to the gateway: one
+        wallet serves every endpoint, and each endpoint may be capped
+        differently, so the caller that knows which endpoint it is
+        paying states the figure here. None means the caller set no
+        cap, which leaves the gateway's own default standing -- never
+        that the payment is unbounded (default None).
+    cap_source : str, optional
+        Which limit `max_amount` came from, `"global"` or
+        `"endpoint"`. Carried so a refusal can name the knob that
+        would change it; with two layers, "payment refused" alone
+        leaves an operator guessing (default None).
     """
 
     scheme: str
@@ -50,6 +63,8 @@ class PaymentChallenge:
     headers: dict[str, str] = field(default_factory=dict)
     body: bytes = b""
     resource_url: str = ""
+    max_amount: str | None = None
+    cap_source: str | None = None
 
 
 @dataclass

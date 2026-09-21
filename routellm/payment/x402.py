@@ -29,6 +29,7 @@ class X402Adapter(PaymentGateway):
         self,
         private_key: str | None = None,
         networks: list[str] | None = None,
+        limits=None,
     ):
         """Initialize x402 payment adapter.
 
@@ -39,9 +40,25 @@ class X402Adapter(PaymentGateway):
             uses ROUTELLM_WALLET_PRIVATE_KEY environment variable.
         networks : list[str], optional
             Supported EVM networks (default ["base", "ethereum", "polygon"]).
+        limits : PaymentLimits, optional
+            How much a single payment may be. Carried so a session
+            built from this adapter is capped the same way the
+            controller's own retry is. None caps nothing of ours,
+            leaving the SDK's own per-payment default standing.
         """
         self._private_key = private_key or os.environ.get("ROUTELLM_WALLET_PRIVATE_KEY", "")
         self._networks = networks or ["base", "ethereum", "polygon"]
+        self._limits = limits
+
+    @property
+    def limits(self):
+        """How much a single payment may be, or None for the SDK default."""
+        return self._limits
+
+    @limits.setter
+    def limits(self, value):
+        """Set the caps binding every seam this adapter pays at."""
+        self._limits = value
 
     @property
     def name(self) -> str:
@@ -128,16 +145,21 @@ class X402Adapter(PaymentGateway):
             unscoped, which is only ever right for a caller that has
             already narrowed the client to one upstream.
 
+        The cap is the adapter's own `limits`, never a separate
+        argument: this adapter also pays at the controller's seam, via
+        `pay`, and one cap has to bind both.
+
         Returns
         -------
         httpx.AsyncClient
             Client whose requests pay and retry on a 402, within the
-            scope when one was given.
+            scope and under the cap when either was given.
         """
         import httpx
         from x402.http.clients.httpx import x402AsyncTransport
 
         client = self._build_client()
+        limits = self._limits
 
         if scope is None:
             return httpx.AsyncClient(
@@ -147,7 +169,9 @@ class X402Adapter(PaymentGateway):
         from routellm.payment.scope import scoped_payment_transport
 
         return httpx.AsyncClient(
-            transport=scoped_payment_transport(scope, client, transport)
+            transport=scoped_payment_transport(
+                scope, client, transport, limits=limits
+            )
         )
 
     async def pay(self, challenge: PaymentChallenge) -> PaymentReceipt:
@@ -172,10 +196,18 @@ class X402Adapter(PaymentGateway):
             Receipt whose `header_name` and `header_value` are the
             header the retry must carry.
 
+        A cap the challenge carries is installed on the client that
+        signs it. This seam builds its own client per payment, so a
+        cap held only on the session would not reach it -- and this
+        seam runs precisely when the session's transport declined.
+
         Raises
         ------
         ValueError
             If the challenge carries no x402 data to parse.
+        PaymentError
+            If the amount exceeds the cap the challenge carries. The
+            message names which limit refused it.
         """
         if not challenge.headers and not challenge.body:
             raise ValueError(
@@ -184,11 +216,31 @@ class X402Adapter(PaymentGateway):
             )
 
         http_client = self._build_client()
-        payment_headers, payload = await http_client.handle_402_response(
-            headers=challenge.headers,
-            body=challenge.body or None,
-            request_url=challenge.resource_url,
-        )
+
+        cap, source = challenge.max_amount, challenge.cap_source
+        if cap is None and self._limits is not None:
+            cap, source = self._limits.effective(challenge.resource_url)
+        if cap is not None:
+            # The SDK converts this money string against the scheme's
+            # own default asset, which is the only place the asset's
+            # decimals are known. Comparing it to the atomic amount
+            # here would be that conversion hand-rolled.
+            http_client._client.set_spend_controls(
+                {"max_amount_per_payment": cap}
+            )
+
+        try:
+            payment_headers, payload = await http_client.handle_402_response(
+                headers=challenge.headers,
+                body=challenge.body or None,
+                request_url=challenge.resource_url,
+            )
+        except Exception as exc:
+            if cap is None or "max_amount_per_payment" not in str(exc):
+                raise
+            from routellm.payment.limits import refusal_message
+
+            raise type(exc)(refusal_message(cap, source, exc)) from exc
 
         if not payment_headers:
             raise ValueError("the x402 client produced no payment header")
