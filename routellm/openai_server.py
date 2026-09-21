@@ -372,6 +372,43 @@ def payment_limits_for(endpoints, max_payment, default_base):
     )
 
 
+def payment_budget_for(payment_budget):
+    """Return the cumulative spend ledger this server will enforce.
+
+    A per-payment cap bounds one payment. It says nothing about how
+    many payments there are, so any number of requests each under the
+    cap spend a multiple of it. `--payment-budget` is the total, and
+    one ledger serves both seams a payment can be authorised at.
+
+    What it counts is the *authorised* amount, never a settled one:
+    nothing has settled on chain at signing, so a provider that
+    challenges but never settles still consumes budget. The count
+    therefore under-spends rather than over-spends.
+
+    It is process-wide and held in memory, exactly as `--max-payment`
+    is. A restart clears it and the whole budget is available again.
+
+    Parameters
+    ----------
+    payment_budget : str or None
+        The `--payment-budget` total, as written. None means the
+        operator set none, which leaves the total unbounded and per-
+        payment caps as the only limit. That is not the same as "$0",
+        which is a deliberate budget of nothing.
+
+    Returns
+    -------
+    PaymentBudget or None
+        The ledger, or None when no budget was set.
+    """
+    if payment_budget is None:
+        return None
+
+    from routellm.payment.limits import PaymentBudget
+
+    return PaymentBudget(payment_budget)
+
+
 @asynccontextmanager
 async def lifespan(app):
     global CONTROLLER
@@ -436,11 +473,16 @@ async def lifespan(app):
         endpoints, max_payment=args.max_payment, default_base=args.base_url
     )
 
+    # One ledger, built here and handed to both seams. Two would be
+    # two budgets, and the process would spend twice what was allowed.
+    budget = payment_budget_for(args.payment_budget)
+
     gateway = maybe_install_payment_session(
         provider=args.payment_provider,
         wallet_key=os.environ.get(args.wallet_key_env or "ROUTELLM_WALLET_KEY", ""),
         payable_bases=payable_bases_for(endpoints, args.base_url),
         limits=limits,
+        budget=budget,
     )
 
     CONTROLLER = Controller(
@@ -454,6 +496,7 @@ async def lifespan(app):
         progress_bar=True,
         payment_gateway=gateway,
         payment_limits=limits,
+        payment_budget=budget,
         default_router=args.routers[0] if args.routers else None,
         default_threshold=args.default_threshold,
         middleware=[intents] if intents else None,
@@ -766,6 +809,18 @@ parser.add_argument(
     "--wallet-key-env",
     default="ROUTELLM_WALLET_KEY",
     help="Env var holding wallet private key",
+)
+parser.add_argument(
+    "--payment-budget",
+    default=None,
+    help=(
+        "Total this process may spend across every payment, as money "
+        "(e.g. \"$1.00\"). A per-payment limit bounds one payment; this "
+        "bounds their sum. It counts the amount each payment is authorised "
+        "to spend, which is conservative: a challenge that never settles "
+        "still consumes budget. Held in memory, so a restart clears it. "
+        "Unset means no cumulative limit; \"$0\" means spend nothing."
+    ),
 )
 parser.add_argument(
     "--max-payment",

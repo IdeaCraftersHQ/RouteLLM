@@ -723,45 +723,104 @@ async def test_no_budget_leaves_the_controller_seam_paying_as_before():
 # ---------------------------------------------------------------------
 
 
+def in_server(argv, body):
+    """Run `body` against a freshly imported server with `argv` on the line.
+
+    `routellm.openai_server` parses `sys.argv` at import, so a flag can
+    only be pinned in a subprocess with it actually on the command
+    line. Testing a helper the server never calls with the real flag
+    would pin nothing.
+    """
+    import subprocess
+    import sys
+    import textwrap
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[3]
+    script = textwrap.dedent(
+        f"""
+        import json, sys
+        sys.argv = {argv!r}
+        import routellm.openai_server as server
+        """
+    ) + textwrap.dedent(body)
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        cwd=repo_root,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
 def test_the_server_builds_a_budget_from_the_flag():
     """`--payment-budget` is where the figure is actually written."""
-    from routellm import openai_server as server
+    seen = in_server(
+        ["openai_server", "--payment-budget", "$0.25"],
+        """
+        budget = server.payment_budget_for(server.args.payment_budget)
+        print(json.dumps({"remaining": budget.remaining}))
+        """,
+    )
 
-    budget = server.payment_budget_for("$0.25")
-
-    assert budget is not None
-    assert budget.remaining == "$0.25"
+    assert seen["remaining"] == "$0.25"
 
 
 def test_the_server_builds_no_budget_when_the_flag_is_absent():
     """Unset is not zero, and must not become a budget of nothing."""
-    from routellm import openai_server as server
+    seen = in_server(
+        ["openai_server"],
+        """
+        budget = server.payment_budget_for(server.args.payment_budget)
+        print(json.dumps({"budget": budget}))
+        """,
+    )
 
-    assert server.payment_budget_for(None) is None
+    assert seen["budget"] is None
 
 
 def test_the_server_accepts_a_zero_budget_as_a_real_one():
-    """Zero is a deliberate 'spend nothing', distinct from unset."""
-    from routellm import openai_server as server
+    """Zero is a deliberate 'spend nothing', distinct from unset.
 
-    budget = server.payment_budget_for("$0")
+    The two must not collapse: unset leaves the total unbounded, while
+    "$0" refuses the first payment.
+    """
+    seen = in_server(
+        ["openai_server", "--payment-budget", "$0"],
+        """
+        budget = server.payment_budget_for(server.args.payment_budget)
+        print(json.dumps({
+            "remaining": budget.remaining,
+            "refuses": budget.debit("$0.000001") is not None,
+        }))
+        """,
+    )
 
-    assert budget is not None
-    assert budget.remaining == "$0"
+    assert seen["remaining"] == "$0"
+    assert seen["refuses"] is True
 
 
 def test_the_flag_exists_and_defaults_to_unset():
     """A budget the CLI cannot express is a budget nobody can set."""
-    from routellm import openai_server as server
+    seen = in_server(
+        ["openai_server"],
+        """
+        actions = {
+            option: action
+            for action in server.parser._actions
+            for option in action.option_strings
+        }
+        print(json.dumps({
+            "present": "--payment-budget" in actions,
+            "default": actions["--payment-budget"].default,
+        }))
+        """,
+    )
 
-    actions = {
-        option: action
-        for action in server.parser._actions
-        for option in action.option_strings
-    }
-
-    assert "--payment-budget" in actions
-    assert actions["--payment-budget"].default is None
+    assert seen["present"] is True
+    assert seen["default"] is None
 
 
 def test_the_server_hands_one_budget_to_both_seams():
