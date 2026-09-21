@@ -33,6 +33,7 @@ from aps story 004.
 ### Quality
 - [US-0007](US-0007-canary-testing.md) — canary testing
 - [US-0008](US-0008-trace-collection.md) — trace collection for fine-tuning
+- [US-0106](US-0106-traces-to-quality.md) — traces to measured quality
 
 ### Server
 - [US-0010](US-0010-openai-compatible-server.md) — OpenAI-compatible server

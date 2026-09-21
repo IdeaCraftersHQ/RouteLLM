@@ -418,3 +418,19 @@ def _record_for(model):
         if (record.provider, record.id) == key:
             return record
     return None
+def test_every_area_names_existing_tiers(config):
+    """The example's `areas:` block groups tiers it actually defines."""
+    registry = EndpointRegistry.from_config(config)
+    areas = config.get("areas") or {}
+
+    assert areas, "the example should ship an `areas:` block"
+    for area, tiers in areas.items():
+        assert tiers, f"area {area!r} names no tier"
+        for tier in tiers:
+            assert registry.has_tier(tier), f"area {area!r} -> {tier!r}"
+
+    # from_config is what rejects a missing tier or a tier in two
+    # areas, so a load that survives it proves the block is coherent.
+    assert registry.areas
+    for tier, area in registry.areas.items():
+        assert tier in areas[area]
