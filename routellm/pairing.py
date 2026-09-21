@@ -33,10 +33,13 @@ where `asyncio.run` is not allowed. The result is snapshotted under
 fetch falls back to a stale snapshot with a warning, and only a policy
 that actually needs a catalog term fails when neither is available.
 
-The pick is explainable without a server::
+The pick is explainable without a server, and the same command prints
+the capability matrix, which is why there is deliberately no
+`python -m routellm.capabilities`::
 
     python -m routellm.pairing            # the discovered config
     python -m routellm.pairing --config config.yaml
+    python -m routellm.pairing --config config.yaml --capabilities
 """
 
 import argparse
@@ -54,6 +57,7 @@ from typing import Any, Optional
 from routellm.config import ConfigError, load_config
 from routellm.capabilities import (
     CAPABILITY_KEYS,
+    build_tier_index,
     RANGE_KEYS,
     Capabilities,
     CapabilityQuery,
@@ -911,6 +915,173 @@ def resolve_registry_pairings(registry: EndpointRegistry) -> None:
 # ---------------------------------------------------------------------------
 
 
+#: Columns the capability matrix prints, in order.
+_MATRIX_COLUMNS = (
+    "vision",
+    "tools",
+    "structured_output",
+    "reasoning",
+    "context",
+    "max_output",
+)
+
+
+def _cell(value) -> str:
+    """Render one capability value as `yes`, `no`, `?`, or a number."""
+    if value is None:
+        return "?"
+    if value is True:
+        return "yes"
+    if value is False:
+        return "no"
+    return str(value)
+
+
+def _capability_matrix(
+    registry: EndpointRegistry, selects: Optional[list[str]] = None
+) -> str:
+    """Return the capability matrix for a registry, as fixed-width text.
+
+    One row per endpoint, then one row per tier carrying the union over
+    its reachable leaves and a `via` column naming the leaf that
+    supplied each yes. Then an "Unknown:" block, one line per endpoint
+    listing the keys it cannot answer, and a final line naming the
+    capability terms the config's own selectors use that some endpoint
+    is unknown on: those are the endpoints a selector silently drops,
+    which is the actionable part.
+
+    Unknown renders `?`, never `no`: "not known" and "known false" are
+    different answers, and collapsing them would hide exactly the gap
+    this table exists to show.
+
+    Parameters
+    ----------
+    registry : EndpointRegistry
+        Registry whose endpoints and tiers are tabulated. Its selectors
+        must already be resolved.
+    selects : list[str], optional
+        The `select` expressions the config declares, read before
+        resolution replaced them with names.
+
+    Returns
+    -------
+    str
+        The rendered matrix.
+    """
+    records = records_for_registry(registry)
+    caps_by_name = {
+        name: capabilities_for(registry.get(name), records.get(name))
+        for name in registry.names()
+    }
+    tier_index = build_tier_index(registry, records)
+
+    width = max(
+        [len(name) for name in registry.names()]
+        + [len(name) + len(" (tier)") for name in registry.tier_names()]
+        + [8]
+    )
+    header = "  ".join(
+        [f"{'endpoint':<{width}}"]
+        + [f"{column:>18}" for column in _MATRIX_COLUMNS]
+        + ["via"]
+    )
+    lines = ["Capabilities", header, "-" * len(header)]
+
+    for name in registry.names():
+        caps = caps_by_name[name]
+        cells = [f"{_cell(getattr(caps, column)):>18}" for column in _MATRIX_COLUMNS]
+        lines.append("  ".join([f"{name:<{width}}"] + cells + [""]).rstrip())
+
+    for tier_name in registry.tier_names():
+        caps = tier_index.get(tier_name, Capabilities())
+        cells = [f"{_cell(getattr(caps, column)):>18}" for column in _MATRIX_COLUMNS]
+        via = _via(registry, tier_name, caps_by_name)
+        lines.append(
+            "  ".join([f"{tier_name + ' (tier)':<{width}}"] + cells + [via]).rstrip()
+        )
+
+    lines.append("")
+    lines.append("Unknown:")
+    any_unknown = False
+    for name in registry.names():
+        missing = caps_by_name[name].unknown_fields()
+        if missing:
+            any_unknown = True
+            lines.append(f"  {name}: {', '.join(missing)}")
+    if not any_unknown:
+        lines.append("  (none)")
+
+    risky = _terms_at_risk(selects or [], caps_by_name)
+    lines.append("")
+    if risky:
+        lines.append(
+            "Selector terms some endpoint cannot answer (those endpoints "
+            "are dropped silently): " + ", ".join(risky)
+        )
+    else:
+        lines.append(
+            "Every capability term the selectors use is answered by every "
+            "endpoint."
+        )
+
+    return "\n".join(lines)
+
+
+def _leaves(registry: EndpointRegistry, name: str) -> list[str]:
+    """Return every endpoint name reachable from a tier or endpoint."""
+    if not registry.has_tier(name):
+        return [name]
+
+    tier = registry.get_tier(name)
+    found: list[str] = []
+    for side in (tier.strong, tier.weak):
+        for leaf in _leaves(registry, str(side)):
+            if leaf not in found:
+                found.append(leaf)
+    return found
+
+
+def _via(
+    registry: EndpointRegistry,
+    tier_name: str,
+    caps_by_name: dict[str, Capabilities],
+) -> str:
+    """Return `key=leaf` for each capability a tier gets from one leaf."""
+    parts: list[str] = []
+    leaves = _leaves(registry, tier_name)
+
+    for column in _MATRIX_COLUMNS:
+        for leaf in leaves:
+            caps = caps_by_name.get(leaf)
+            if caps is not None and getattr(caps, column) is True:
+                parts.append(f"{column}={leaf}")
+                break
+
+    return " ".join(parts)
+
+
+def _terms_at_risk(
+    selects: list[str], caps_by_name: dict[str, Capabilities]
+) -> list[str]:
+    """Return the selector terms some endpoint cannot answer.
+
+    An unknown capability fails its term at selection time, so these
+    are exactly the terms that drop candidates without saying so.
+    """
+    wanted: list[str] = []
+    for select in selects:
+        _, capability_terms, _ = _split_terms(select)
+        for key in parse_capability_terms(capability_terms).keys():
+            if key not in wanted:
+                wanted.append(key)
+
+    return [
+        key
+        for key in wanted
+        if any(getattr(caps, key) is None for caps in caps_by_name.values())
+    ]
+
+
 def _explain(config_path: Optional[str] = None) -> str:
     """Return the candidate table and pick for every selector in a config.
 
@@ -977,6 +1148,28 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m routellm.pairing",
         description="Explain how each tier's selectors resolve.",
+        epilog=(
+            "The capability matrix is a flag here rather than a "
+            "`python -m routellm.capabilities` module, which is "
+            "deliberately not a thing: this command already loads the "
+            "YAML, builds the registry, and resolves selectors, which "
+            "is everything the matrix needs. A second entry point "
+            "would duplicate all of it and drift from it."
+        ),
+    )
+    parser.add_argument("--config", required=True, help="Path to the YAML config.")
+    parser.add_argument(
+        "--capabilities",
+        action="store_true",
+        help=(
+            "Print the capability matrix instead of the selector tables. "
+            "With --explain, print both, selectors first."
+        ),
+    )
+    parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="Print the selector tables. Implied when --capabilities is absent.",
     )
     parser.add_argument(
         "--config",
@@ -992,11 +1185,43 @@ def main(argv: Optional[list[str]] = None) -> int:
     logging.basicConfig(level=logging.WARNING)
 
     try:
+        blocks: list[str] = []
+        if args.explain or not args.capabilities:
+            blocks.append(_explain(args.config))
+        if args.capabilities:
+            registry, selects = _registry_from(args.config)
+            blocks.append(_capability_matrix(registry, selects))
+        print("\n\n".join(block for block in blocks if block))
+    except (ValueError, CatalogUnavailable, OSError) as exc:
         print(_explain(args.config))
     except (ValueError, CatalogUnavailable, OSError, ConfigError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
     return 0
+
+
+def _registry_from(config_path: str) -> tuple[EndpointRegistry, list[str]]:
+    """Build a registry from a YAML config with its selectors resolved.
+
+    A tier's capabilities are the union over the leaves it actually
+    reaches, so the selectors have to be resolved first: an unresolved
+    side names no endpoint and the tier's whole row would read unknown.
+    """
+    import yaml
+
+    with open(config_path) as handle:
+        config = yaml.safe_load(handle) or {}
+
+    registry = EndpointRegistry.from_config(config)
+    selects = [
+        side.select
+        for tier in registry.tiers.values()
+        for side in (tier.strong, tier.weak)
+        if isinstance(side, Selector)
+    ]
+    resolve_registry_pairings(registry)
+    registry.revalidate()
+    return registry, selects
 
 
 if __name__ == "__main__":
