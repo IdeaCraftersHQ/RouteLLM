@@ -199,6 +199,52 @@ def test_missing_flag_file_is_reported_not_traced(env):
     assert "--config" in err
 
 
+def test_leading_flag_existing_file_wins_in_path(env):
+    """`--config` before the subcommand still names the explicit file."""
+    env.write(env.user, {"a": 2})
+    explicit = env.write(env.project / "explicit.yaml", {"a": 9})
+
+    code, out, _ = env.run("--config", str(explicit), "path")
+
+    assert code == 0
+    assert out.strip() == str(explicit)
+
+
+def test_trailing_flag_existing_file_wins_in_path(env):
+    """`--config` after the subcommand also names the explicit file."""
+    env.write(env.user, {"a": 2})
+    explicit = env.write(env.project / "explicit.yaml", {"a": 9})
+
+    code, out, _ = env.run("path", "--config", str(explicit))
+
+    assert code == 0
+    assert out.strip() == str(explicit)
+
+
+def test_leading_flag_missing_file_exits_1(env):
+    """A missing file named before the subcommand is reported, not discarded."""
+    missing = env.project / "gone.yaml"
+
+    code, out, err = env.run("--config", str(missing), "show")
+
+    assert code == 1
+    assert out.strip() == ""
+    assert "--config" in err
+    assert str(missing) in err
+
+
+def test_trailing_flag_missing_file_exits_1(env):
+    """A missing file named after the subcommand is reported, not discarded."""
+    missing = env.project / "gone.yaml"
+
+    code, out, err = env.run("show", "--config", str(missing))
+
+    assert code == 1
+    assert out.strip() == ""
+    assert "--config" in err
+    assert str(missing) in err
+
+
 def test_paths_and_show_agree_when_no_project_marker_exists(env):
     """Both surfaces report the project layer, absent, on the same line.
 

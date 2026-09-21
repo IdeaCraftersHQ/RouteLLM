@@ -461,10 +461,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     # before or after the subcommand; argparse otherwise rejects it in
     # the trailing position, which is where an operator naturally types
     # it.
+    # SUPPRESS, not `default=None` or `set_defaults(config=None)`: the
+    # parent parser and every subparser each own a copy of this action
+    # (one per `parents=[common]`), and argparse applies the subparser's
+    # default *after* the parent's, so a real default here would always
+    # clobber a leading `--config` with None. SUPPRESS means the action
+    # sets nothing when absent, so whichever level the flag was actually
+    # given at is the one that lands on the namespace.
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
         "--config",
-        default=None,
+        default=argparse.SUPPRESS,
         help="Explicit config file; the highest-precedence layer.",
     )
 
@@ -490,7 +497,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     try:
         if args.command == "paths":
-            chain = config_paths(explicit=args.config)
+            chain = config_paths(explicit=getattr(args, "config", None))
             if args.format == "json":
                 print(
                     json.dumps(
@@ -510,7 +517,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
 
         if args.command == "path":
-            winner = winning_path(config_paths(explicit=args.config))
+            winner = winning_path(config_paths(explicit=getattr(args, "config", None)))
             if winner is None:
                 print(
                     "no routellm config file on the chain; "
@@ -521,7 +528,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(winner.path)
             return 0
 
-        loaded = load_config(explicit=args.config)
+        loaded = load_config(explicit=getattr(args, "config", None))
         if args.format == "json":
             print(json.dumps(loaded.data, indent=2, default=str))
         else:
