@@ -100,6 +100,7 @@ class Controller:
         progress_bar: bool = False,
         middleware: Optional[List[Middleware]] = None,
         payment_gateway: Optional[PaymentGateway] = None,
+        payment_limits=None,
         resilience_config: Optional[ResilienceConfig] = None,
         cache_config: Optional[CacheConfig] = None,
         traffic_manager: Optional[TrafficManager] = None,
@@ -132,6 +133,11 @@ class Controller:
             Show progress bar during router initialization. Default: False.
         middleware : list[Middleware], optional
             Custom middleware for prompt-based routing override.
+        payment_limits : PaymentLimits, optional
+            How much a single payment may be, process-wide and per
+            endpoint. None caps nothing of ours, which leaves the
+            gateway's own default per-payment ceiling standing --
+            never an unbounded payment.
         payment_gateway : PaymentGateway, optional
             Gateway for 402 payment challenges.
         resilience_config : ResilienceConfig, optional
@@ -204,6 +210,7 @@ class Controller:
         self.progress_bar = progress_bar
         self.middleware = middleware or []
         self.payment_gateway = payment_gateway
+        self.payment_limits = payment_limits
         self.resilience = Resilience(resilience_config)
         self.cache = Cache(cache_config)
         self.traffic_manager = traffic_manager or TrafficManager()
@@ -888,6 +895,60 @@ class Controller:
             return True
         return bool(self.endpoints.resolve(endpoint).pay)
 
+    def _payment_cap(self, endpoint: Optional[str]):
+        """Return the cap binding a payment to `endpoint`, and whose it is.
+
+        Authorisation says who may charge; this says how much.
+
+        The endpoint is known here by name, so its own `max_payment:`
+        is read off it directly rather than looked up by URL. That
+        matters for an endpoint carrying no `api_base`: it has no base
+        URL of its own to key a cap on, and resolving it through the
+        default one would apply a sibling's cap to it.
+
+        The ceiling still clamps: an endpoint cap above
+        `--max-payment` is refused the same way it would be in the
+        transport seam, so the two seams cannot disagree about what
+        the operator allowed.
+
+        Parameters
+        ----------
+        endpoint : str or None
+            The routed endpoint name.
+
+        Returns
+        -------
+        tuple
+            `(cap, source)`, or `(None, None)` when no limit is
+            configured, which leaves the gateway's own default
+            standing rather than removing it.
+        """
+        if self.payment_limits is None or endpoint is None:
+            return None, None
+
+        from routellm.payment.limits import PaymentLimits
+
+        own = self.endpoints.resolve(endpoint).max_payment
+        if own is None:
+            base = self.endpoints.resolve(endpoint).api_base or self.api_base
+            if not base:
+                return (
+                    self.payment_limits.global_cap,
+                    None
+                    if self.payment_limits.global_cap is None
+                    else "global",
+                )
+            return self.payment_limits.effective(base)
+
+        # One synthetic base carrying this endpoint's own cap, so the
+        # min() and the naming are the limits' own rule rather than a
+        # second copy of it here.
+        probe = "https://endpoint.invalid/"
+        return PaymentLimits(
+            global_cap=self.payment_limits.global_cap,
+            per_base={probe: own},
+        ).effective(probe)
+
     async def _request_with_payment(self, call_fn, endpoint=None):
         """Retry a refused call once, carrying proof of payment.
 
@@ -922,6 +983,11 @@ class Controller:
                 )
 
                 headers, body, stated, resource_url = self._extract_402_response(e)
+                # The cap belongs to this payment, not to the gateway:
+                # one wallet serves every endpoint and each may be
+                # capped differently, so the seam that knows which
+                # endpoint it called is the one that states the figure.
+                cap, cap_source = self._payment_cap(endpoint)
                 challenge = PaymentChallenge(
                     scheme=stated.get("scheme") or self.payment_gateway.name,
                     network=stated.get("network")
@@ -932,6 +998,8 @@ class Controller:
                     headers=headers,
                     body=body,
                     resource_url=stated.get("resource") or resource_url,
+                    max_amount=cap,
+                    cap_source=cap_source,
                 )
 
                 receipt = await self.payment_gateway.pay(challenge)
