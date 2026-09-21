@@ -62,3 +62,14 @@ async def test_x402_adapter_pay_calls_sdk():
     assert receipt.resource == "https://llm.example.com/v1/chat"
     assert receipt.header_name == "PAYMENT-SIGNATURE"
     assert receipt.header_value == "c2lnbmVkLXBheWxvYWQ="
+
+
+def test_x402_adapter_carries_no_verify():
+    """The adapter exposes paying only.
+
+    The SDK's verification entry point is a resource-server method
+    taking the payment payload and the server's own requirements, not
+    a receipt. Nothing here can supply those, so the adapter does not
+    pretend to.
+    """
+    assert not hasattr(X402Adapter, "verify")

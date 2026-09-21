@@ -52,21 +52,6 @@ class PaymentGateway(ABC):
             If the challenge carries nothing this gateway can read.
         """
 
-    @abstractmethod
-    async def verify(self, receipt: PaymentReceipt) -> bool:
-        """Verify a receipt is valid (for server-side use).
-
-        Parameters
-        ----------
-        receipt : PaymentReceipt
-            Payment receipt to verify.
-
-        Returns
-        -------
-        bool
-            True if receipt is valid.
-        """
-
     @property
     @abstractmethod
     def networks(self) -> list[str]:

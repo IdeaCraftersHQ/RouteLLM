@@ -161,8 +161,3 @@ class X402Adapter(PaymentGateway):
             header_name=header_name,
             header_value=header_value,
         )
-
-    async def verify(self, receipt: PaymentReceipt) -> bool:
-        """Verify a payment receipt via the x402 facilitator."""
-        from x402.server import verify_payment
-        return await verify_payment(receipt.tx_hash)
