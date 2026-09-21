@@ -7,14 +7,13 @@ not a local re-implementation of it.
 
 import base64
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from routellm.payment.types import PaymentChallenge, PaymentReceipt
 from routellm.payment.x402 import X402Adapter
-
 
 # ---------------------------------------------------------------------------
 # Wire fixtures: what a real x402 server puts on a 402 response.

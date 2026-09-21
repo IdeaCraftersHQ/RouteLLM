@@ -18,7 +18,7 @@ requirements, which is asserted by a test rather than only stated here.
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import litellm
 
@@ -62,7 +62,7 @@ class Requirements:
     vision: bool = False
     tools: bool = False
     structured_output: bool = False
-    context_needed: Optional[int] = None
+    context_needed: int | None = None
 
     def is_empty(self) -> bool:
         """Return whether this request needs nothing in particular.
@@ -84,7 +84,7 @@ class Requirements:
         )
 
 
-def derive(messages: Any, kwargs: dict[str, Any], model: Optional[str]) -> Requirements:
+def derive(messages: Any, kwargs: dict[str, Any], model: str | None) -> Requirements:
     """Read a request's requirements off its messages and kwargs.
 
     Never raises: a hand-rolled client may send message content in
@@ -159,7 +159,7 @@ def _wants_schema(response_format: Any) -> bool:
     return response_format.get("type") in _STRUCTURED_TYPES
 
 
-def _context_needed(messages: Any, kwargs: dict[str, Any], model: Optional[str]) -> Optional[int]:
+def _context_needed(messages: Any, kwargs: dict[str, Any], model: str | None) -> int | None:
     """Return the estimated tokens this request occupies.
 
     The prompt's count plus whatever `max_tokens` reserves for the
@@ -174,7 +174,7 @@ def _context_needed(messages: Any, kwargs: dict[str, Any], model: Optional[str])
     return _count_tokens(messages, model) + reserved
 
 
-def _count_tokens(messages: Any, model: Optional[str]) -> int:
+def _count_tokens(messages: Any, model: str | None) -> int:
     """Return the prompt's token count, falling back to chars over four."""
     global _warned_fallback
 

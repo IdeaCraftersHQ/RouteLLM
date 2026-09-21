@@ -5,10 +5,10 @@ routellm for model routing and middleware operations.
 """
 
 from dataclasses import dataclass
-from typing import Optional, Protocol, TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from routellm.controller import Controller
+    pass
 
 
 @dataclass
@@ -50,7 +50,7 @@ class Middleware(Protocol):
         """
         ...
 
-    def get_tier(self, prompt: str) -> Optional[str]:
+    def get_tier(self, prompt: str) -> str | None:
         """Get the tier this prompt should be routed through.
 
         Optional: the controller looks it up with `getattr`, so a

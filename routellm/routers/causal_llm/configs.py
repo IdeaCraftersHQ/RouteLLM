@@ -5,7 +5,6 @@ for causal language model routing.
 """
 
 from enum import Enum
-from typing import List
 
 from pydantic import BaseModel, ConfigDict
 
@@ -52,7 +51,7 @@ class RouterModelConfig(BaseModel):
     num_outputs: int
 
     # output special tokens (e.g. [[1]], [[2]], etc.) for CAUSAL models
-    special_tokens: List[str] = []
+    special_tokens: list[str] = []
     flash_attention_2: bool = False
     attention_dropout: float = 0.0
 

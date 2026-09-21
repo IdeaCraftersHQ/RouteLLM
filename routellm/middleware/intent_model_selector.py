@@ -5,8 +5,8 @@ Provides middleware for selecting model pairs based on detected user intent.
 
 import json
 import os
-from dataclasses import dataclass, asdict
-from typing import Dict, List, Optional, Tuple, Any
+from dataclasses import dataclass
+from typing import Any
 
 from routellm.types import ModelPair
 
@@ -28,7 +28,7 @@ class IntentModelMapping:
     """
 
     intent: str
-    model_pair: Optional[ModelPair] = None
+    model_pair: ModelPair | None = None
     description: str = ""
 
 
@@ -45,11 +45,11 @@ class IntentModelSelector:
 
     def __init__(
         self,
-        intent_mappings: List[IntentModelMapping],
-        default_model_pair: Optional[ModelPair] = None,
+        intent_mappings: list[IntentModelMapping],
+        default_model_pair: ModelPair | None = None,
         intent_detection_model: str = "gpt-3.5-turbo",
-        intent_detector: Optional[Any] = None,
-        intent_tiers: Optional[Dict[str, str]] = None,
+        intent_detector: Any | None = None,
+        intent_tiers: dict[str, str] | None = None,
     ):
         """Initialize the intent-based model selector.
 
@@ -275,7 +275,7 @@ Respond in JSON format like this:
             print(f"Error analyzing intent confidence: {e}")
             return {"error": str(e), "best_match": "general"}
 
-    def get_model_pair(self, prompt: str) -> Optional[ModelPair]:
+    def get_model_pair(self, prompt: str) -> ModelPair | None:
         """Get the appropriate model pair based on the detected intent.
 
         Parameters
@@ -293,7 +293,7 @@ Respond in JSON format like this:
         intent = self.detect_intent(prompt)
         return self.intent_lookup.get(intent, self.default_model_pair)
 
-    def get_tier(self, prompt: str) -> Optional[str]:
+    def get_tier(self, prompt: str) -> str | None:
         """Get the tier the detected intent asks the request to enter.
 
         Shares `detect_intent`'s cache, so a controller asking for both
@@ -316,7 +316,7 @@ Respond in JSON format like this:
 
         return self.intent_tiers.get(self.detect_intent(prompt))
 
-    def get_available_intents(self) -> List[str]:
+    def get_available_intents(self) -> list[str]:
         """Get a list of all available intents.
 
         Returns
@@ -400,7 +400,7 @@ Respond in JSON format like this:
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"Mappings file not found: {filepath}")
 
-        with open(filepath, "r") as f:
+        with open(filepath) as f:
             config = json.load(f)
 
         # Convert to IntentModelMapping objects. An absent model_pair

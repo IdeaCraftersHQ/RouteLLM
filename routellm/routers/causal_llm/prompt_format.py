@@ -5,7 +5,6 @@ compatible with various causal LLM templates.
 """
 
 import copy
-from typing import Dict, List
 
 from pydantic import BaseModel, validator
 
@@ -81,7 +80,7 @@ class PromptFormat(BaseModel):
         assert value == ""
         return value
 
-    def generate_prompt_turns(self, messages: List[Dict]) -> List[Dict]:
+    def generate_prompt_turns(self, messages: list[dict]) -> list[dict]:
         """Convert OpenAI-style messages to formatted prompt turns.
 
         Parameters
@@ -174,7 +173,7 @@ class PromptFormat(BaseModel):
             prompt.append({"role": "assistant", "content": self.trailing_assistant})
         return prompt
 
-    def generate_prompt(self, messages: List[Dict]) -> str:
+    def generate_prompt(self, messages: list[dict]) -> str:
         """Convert messages to single formatted prompt string.
 
         Applies formatting and concatenates all message contents into a

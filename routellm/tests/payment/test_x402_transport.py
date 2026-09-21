@@ -254,8 +254,8 @@ async def test_completion_pays_below_litellm():
     """
     import litellm
 
-    from routellm.payment.x402 import X402Adapter
     from routellm.payment.transport import install_payment_session
+    from routellm.payment.x402 import X402Adapter
 
     provider = PayingProvider(v2_challenge(), 2)
     adapter = X402Adapter(private_key=TEST_KEY, networks=["base-sepolia"])

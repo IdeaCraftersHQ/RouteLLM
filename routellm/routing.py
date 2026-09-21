@@ -18,7 +18,8 @@ level, recording where that level's router and threshold came from.
 """
 
 import logging
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from routellm.endpoints import EndpointRegistry
 from routellm.types import ModelPair
@@ -36,7 +37,7 @@ def parse_model_name(
     model_name: str,
     registry: EndpointRegistry,
     error_cls: type,
-) -> tuple[Optional[str], Optional[str], Optional[float]]:
+) -> tuple[str | None, str | None, float | None]:
     """Split a model name into a tier, a router, and a threshold.
 
     Parse order: a ':' qualifies a tier with a request-level
@@ -103,7 +104,7 @@ def _parse_router_form(text: str, model_name: str, error_cls: type) -> tuple[str
     return parts[1], threshold
 
 
-def _as_threshold(text: str) -> Optional[float]:
+def _as_threshold(text: str) -> float | None:
     """Return `text` as a threshold in [0, 1], or None when it is not one."""
     try:
         value = float(text)
@@ -123,8 +124,8 @@ def _known_tier(name: str, registry: EndpointRegistry, error_cls: type) -> str:
 
 
 def resolve_level(
-    tier_router: Optional[str],
-    tier_threshold: Optional[float],
+    tier_router: str | None,
+    tier_threshold: float | None,
     inherited: dict[str, Any],
 ) -> dict[str, Any]:
     """Resolve one level's router and threshold, first hit winning.
@@ -187,10 +188,10 @@ def forced_side(
     label: str,
     strong: str,
     weak: str,
-    requirements: Optional[Any],
-    check: Optional[Callable[[str, Any], Optional[str]]],
+    requirements: Any | None,
+    check: Callable[[str, Any], str | None] | None,
     error_cls: type,
-) -> Optional[tuple[str, str, str]]:
+) -> tuple[str, str, str] | None:
     """Return the side capability checking forces, or None for "unchanged".
 
     None means the router decides as it always has: either no
@@ -248,8 +249,8 @@ def resolve_tier(
     registry: EndpointRegistry,
     run_router: Callable[[str, float, str], float],
     *,
-    requirements: Optional[Any] = None,
-    check: Optional[Callable[[str, Any], Optional[str]]] = None,
+    requirements: Any | None = None,
+    check: Callable[[str, Any], str | None] | None = None,
     error_cls: type = ValueError,
 ) -> tuple[str, list[dict[str, Any]]]:
     """Walk the tier tree from `tier_name` down to one endpoint.
@@ -361,8 +362,8 @@ def resolve_tier(
 def sibling_of(
     path: list[dict[str, Any]],
     registry: EndpointRegistry,
-    pair: Optional[ModelPair] = None,
-) -> Optional[tuple[str, str]]:
+    pair: ModelPair | None = None,
+) -> tuple[str, str] | None:
     """Return the fallback endpoint on the other side of the final pick.
 
     The sibling is the side not taken at the level of the final pick. A

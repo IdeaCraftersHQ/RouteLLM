@@ -9,7 +9,6 @@ import json
 
 from datasets import Dataset, load_dataset
 from pandarallel import pandarallel
-from tqdm import tqdm
 
 from routellm.config import load_config
 from routellm.controller import Controller

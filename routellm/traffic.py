@@ -4,11 +4,13 @@ Provides load balancing strategies and traffic rules for distributing
 requests across multiple model endpoints.
 """
 
-import re
-import random
 import logging
-from typing import List, Dict, Any, Optional, Union
+import random
+import re
+from typing import Any
+
 from pydantic import BaseModel
+
 from routellm.types import ModelPair
 
 logger = logging.getLogger(__name__)
@@ -31,8 +33,8 @@ class LoadBalancerEndpoint(BaseModel):
 
     model: str
     weight: float = 1.0
-    api_key: Optional[str] = None
-    api_base: Optional[str] = None
+    api_key: str | None = None
+    api_base: str | None = None
 
 
 class LoadBalancerConfig(BaseModel):
@@ -47,7 +49,7 @@ class LoadBalancerConfig(BaseModel):
     """
 
     strategy: str = "weighted"  # weighted, round-robin
-    endpoints: List[LoadBalancerEndpoint]
+    endpoints: list[LoadBalancerEndpoint]
 
 
 class LoadBalancer:
@@ -104,9 +106,9 @@ class LoadBalancer:
 class TrafficRule(BaseModel):
     """Rule for conditional routing based on request payload."""
 
-    pattern: Optional[str] = None  # Regex pattern for prompt
-    min_tokens: Optional[int] = None
-    max_tokens: Optional[int] = None
+    pattern: str | None = None  # Regex pattern for prompt
+    min_tokens: int | None = None
+    max_tokens: int | None = None
     strong_model: str
     weak_model: str
 
@@ -115,12 +117,12 @@ class TrafficManager:
     """Handles conditional routing and load balancing logic."""
 
     def __init__(
-        self, rules: List[TrafficRule] = None, load_balancers: Dict[str, LoadBalancer] = None
+        self, rules: list[TrafficRule] = None, load_balancers: dict[str, LoadBalancer] = None
     ):
         self.rules = rules or []
         self.load_balancers = load_balancers or {}
 
-    def get_model_pair(self, prompt: str, request_params: Dict[str, Any]) -> Optional[ModelPair]:
+    def get_model_pair(self, prompt: str, request_params: dict[str, Any]) -> ModelPair | None:
         """Check rules to see if we should override the model pair."""
         for rule in self.rules:
             # Check pattern
@@ -141,7 +143,7 @@ class TrafficManager:
 
         return None
 
-    def balance(self, model_name: str) -> tuple[str, Optional[str], Optional[str]]:
+    def balance(self, model_name: str) -> tuple[str, str | None, str | None]:
         """Return (model, api_key, api_base) if a load balancer exists for this model."""
         if model_name in self.load_balancers:
             endpoint = self.load_balancers[model_name].select()

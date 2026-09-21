@@ -4,6 +4,7 @@ Defines payment gateway protocol for handling blockchain-based payments.
 """
 
 from abc import ABC, abstractmethod
+
 from .types import PaymentChallenge, PaymentReceipt
 
 

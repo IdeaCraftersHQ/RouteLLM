@@ -6,11 +6,11 @@ from YAML files, making it easy to define and manage intent mappings.
 """
 
 import os
-import yaml
-from typing import Dict, List, Optional, Any
 
-from routellm.types import ModelPair
+import yaml
+
 from routellm.middleware.intent_model_selector import IntentModelMapping, IntentModelSelector
+from routellm.types import ModelPair
 
 
 def load_intent_config(config_path: str) -> IntentModelSelector:
@@ -38,7 +38,7 @@ def load_intent_config(config_path: str) -> IntentModelSelector:
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
-    with open(config_path, "r") as f:
+    with open(config_path) as f:
         config = yaml.safe_load(f) or {}
 
     # A file naming no default pair belongs to a tier-only selector;

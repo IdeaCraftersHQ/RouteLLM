@@ -25,11 +25,11 @@ logger = logging.getLogger(__name__)
 
 EMBEDDING_ENDPOINT = "embedding"
 
-_registry: Optional[EndpointRegistry] = None
+_registry: EndpointRegistry | None = None
 _client: Optional["openai.OpenAI"] = None
 
 
-def configure_embeddings(registry: Optional[EndpointRegistry]) -> None:
+def configure_embeddings(registry: EndpointRegistry | None) -> None:
     """Set the registry consulted for the `embedding` endpoint.
 
     Called by the controller before it constructs its routers. Does not
@@ -99,7 +99,7 @@ def get_embedding_client() -> "openai.OpenAI":
     return _client
 
 
-def _resolve_credentials() -> tuple[Optional[str], Optional[str]]:
+def _resolve_credentials() -> tuple[str | None, str | None]:
     """Return the `(base_url, api_key)` pair for the embedding client."""
     env_base = os.environ.get("OPENAI_BASE_URL")
     env_key = os.environ.get("OPENAI_API_KEY")

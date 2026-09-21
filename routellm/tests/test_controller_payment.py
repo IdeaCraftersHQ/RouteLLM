@@ -1,8 +1,9 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
 
 from routellm.payment.gateway import PaymentGateway
-from routellm.payment.types import PaymentChallenge, PaymentReceipt
+from routellm.payment.types import PaymentReceipt
 
 
 class MockGateway(PaymentGateway):

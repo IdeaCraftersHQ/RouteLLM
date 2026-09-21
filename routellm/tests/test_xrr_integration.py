@@ -1,14 +1,15 @@
-import pytest
-import os
-import json
 import hashlib
-from typing import Any, Dict
-from unittest.mock import patch, MagicMock
+import json
+import os
+from typing import Any
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 # Import xrr from the provided path (conceptual as it's in a different workspace)
 # In a real environment, we'd ensure xrr is in the PYTHONPATH
 try:
-    from xrr import Session, FileCassette, RECORD, REPLAY
+    from xrr import RECORD, REPLAY, FileCassette, Session
 except ImportError:
     # Mock xrr for demonstration if not available
     class FileCassette:
@@ -37,7 +38,7 @@ except ImportError:
 class XrrLiteLLMAdapter:
     id = "litellm"
 
-    def fingerprint(self, req: Dict[str, Any]) -> str:
+    def fingerprint(self, req: dict[str, Any]) -> str:
         # Fingerprint based on messages and model
         canonical = json.dumps(
             {
@@ -49,13 +50,13 @@ class XrrLiteLLMAdapter:
         )
         return hashlib.sha256(canonical.encode()).hexdigest()[:8]
 
-    def serialize_req(self, req: Dict[str, Any]) -> Dict[str, Any]:
+    def serialize_req(self, req: dict[str, Any]) -> dict[str, Any]:
         return req
 
-    def serialize_resp(self, resp: Any) -> Dict[str, Any]:
+    def serialize_resp(self, resp: Any) -> dict[str, Any]:
         return resp if isinstance(resp, dict) else resp.model_dump()
 
-    def deserialize_resp(self, data: Dict[str, Any]) -> Any:
+    def deserialize_resp(self, data: dict[str, Any]) -> Any:
         # Convert back to ModelResponse if needed, or just return dict
         return data
 

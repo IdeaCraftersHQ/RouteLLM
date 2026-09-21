@@ -1,22 +1,21 @@
-import pytest
 import os
-import json
-import asyncio
 import random
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import numpy as np
-from unittest.mock import MagicMock, AsyncMock, patch
-from routellm.controller import Controller
-from routellm.resilience import ResilienceConfig
+import pytest
+
 from routellm.caching import CacheConfig
+from routellm.controller import Controller
+from routellm.quality import CanaryConfig, FineTuneConfig, QualityManager
+from routellm.resilience import ResilienceConfig
 from routellm.traffic import (
-    TrafficManager,
-    TrafficRule,
     LoadBalancer,
     LoadBalancerConfig,
     LoadBalancerEndpoint,
+    TrafficManager,
+    TrafficRule,
 )
-from routellm.quality import QualityManager, FineTuneConfig, CanaryConfig
-from routellm.types import ModelPair
 
 
 class MockError(Exception):

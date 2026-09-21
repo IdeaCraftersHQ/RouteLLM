@@ -1,11 +1,13 @@
-import pytest
 import os
-from unittest.mock import MagicMock, AsyncMock, patch
-from routellm.controller import Controller
-from routellm.resilience import ResilienceConfig
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
 from routellm.caching import CacheConfig
+from routellm.controller import Controller
+from routellm.quality import CanaryConfig, FineTuneConfig, QualityManager
+from routellm.resilience import ResilienceConfig
 from routellm.traffic import TrafficManager, TrafficRule
-from routellm.quality import QualityManager, FineTuneConfig, CanaryConfig
 
 
 @pytest.fixture

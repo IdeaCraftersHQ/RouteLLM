@@ -8,11 +8,9 @@ Usage:
   python intent_based_routing.py [--test] [--analyze PROMPT] [--save CONFIG] [--load CONFIG]
 """
 
-import sys
-import os
 import argparse
-import json
-from typing import List, Dict, Optional
+import os
+import sys
 
 # Add the parent directory to sys.path to allow imports
 repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -69,7 +67,6 @@ else:
     has_visualization = True
     import matplotlib.pyplot as plt
 
-import pandas as pd
 
 from routellm.controller import Controller, ModelPair
 from routellm.middleware import IntentModelMapping, IntentModelSelector
@@ -412,6 +409,7 @@ def main():
     if args.web:
         try:
             import gradio as gr
+
             from routellm.examples.intent_web_ui import create_web_ui
 
             print(f"Launching web UI on port {args.port}...")

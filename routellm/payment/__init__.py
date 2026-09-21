@@ -6,4 +6,4 @@ Provides HTTP 402 Payment Required protocol and blockchain payment handling.
 from .gateway import PaymentGateway
 from .types import PaymentChallenge, PaymentReceipt
 
-__all__ = ["PaymentGateway", "PaymentChallenge", "PaymentReceipt"]
+__all__ = ["PaymentChallenge", "PaymentGateway", "PaymentReceipt"]

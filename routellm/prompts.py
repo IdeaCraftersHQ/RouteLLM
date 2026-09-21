@@ -22,14 +22,15 @@ dependency.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Mapping, Tuple
+from collections.abc import Mapping
+from typing import Any
 
 import yaml
 
 logger = logging.getLogger(__name__)
 
 
-def resolve(kwarg, file_value, default) -> Tuple[Any, str]:
+def resolve(kwarg, file_value, default) -> tuple[Any, str]:
     """Pick the most specific of a kwarg, a file value and a default.
 
     Parameters
@@ -68,7 +69,7 @@ class PromptFile:
         self.path = path
 
     @classmethod
-    def load(cls, path) -> "PromptFile":
+    def load(cls, path) -> PromptFile:
         """Read and parse a YAML prompt file.
 
         Parameters
@@ -98,7 +99,7 @@ class PromptFile:
             )
         return cls(document, path)
 
-    def section(self, name: str, schema: Mapping[str, type]) -> Dict[str, Any]:
+    def section(self, name: str, schema: Mapping[str, type]) -> dict[str, Any]:
         """Return one section, validated against `schema`.
 
         Parameters

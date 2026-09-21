@@ -11,8 +11,6 @@ and nothing else.
 
 import logging
 
-import pytest
-
 from routellm import requirements
 from routellm.requirements import Requirements, derive
 

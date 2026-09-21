@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-import routellm.pairing as pairing
+from routellm import pairing
 from routellm.endpoints import EndpointRegistry, Selector
 from routellm.pairing import ModelRecord, resolve_registry_pairings
 

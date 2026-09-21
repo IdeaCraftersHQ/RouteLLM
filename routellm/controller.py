@@ -9,11 +9,8 @@ import logging
 import time
 import uuid
 from collections import defaultdict
-from dataclasses import dataclass
-from types import SimpleNamespace
-from typing import Any, List, Optional, Protocol
+from typing import Any
 
-import pandas as pd
 from litellm import acompletion, completion
 from tqdm import tqdm
 
@@ -94,22 +91,22 @@ class Controller:
     def __init__(
         self,
         routers: list[str],
-        strong_model: Optional[str] = None,
-        weak_model: Optional[str] = None,
-        config: Optional[dict[str, dict[str, Any]]] = None,
-        api_base: Optional[str] = None,
-        api_key: Optional[str] = None,
+        strong_model: str | None = None,
+        weak_model: str | None = None,
+        config: dict[str, dict[str, Any]] | None = None,
+        api_base: str | None = None,
+        api_key: str | None = None,
         progress_bar: bool = False,
-        middleware: Optional[List[Middleware]] = None,
-        payment_gateway: Optional[PaymentGateway] = None,
+        middleware: list[Middleware] | None = None,
+        payment_gateway: PaymentGateway | None = None,
         payment_limits=None,
         payment_budget=None,
-        resilience_config: Optional[ResilienceConfig] = None,
-        cache_config: Optional[CacheConfig] = None,
-        traffic_manager: Optional[TrafficManager] = None,
-        quality_manager: Optional[QualityManager] = None,
-        endpoints: Optional[EndpointRegistry] = None,
-        default_router: Optional[str] = None,
+        resilience_config: ResilienceConfig | None = None,
+        cache_config: CacheConfig | None = None,
+        traffic_manager: TrafficManager | None = None,
+        quality_manager: QualityManager | None = None,
+        endpoints: EndpointRegistry | None = None,
+        default_router: str | None = None,
         default_threshold: float = 0.5,
     ):
         """Initialize controller with routers and configuration.
@@ -292,7 +289,7 @@ class Controller:
             )
         return self.default_model_pair
 
-    def _get_model_pair_for_prompt(self, prompt: str) -> Optional[ModelPair]:
+    def _get_model_pair_for_prompt(self, prompt: str) -> ModelPair | None:
         """Get the model pair a middleware asks for, or None."""
         for m in self.middleware:
             pair = m.get_model_pair(prompt)
@@ -300,7 +297,7 @@ class Controller:
                 return pair
         return None
 
-    def _get_tier_for_prompt(self, prompt: str) -> Optional[str]:
+    def _get_tier_for_prompt(self, prompt: str) -> str | None:
         """Get the tier a middleware asks the request to enter, or None.
 
         `get_tier` is optional on the middleware protocol, so it is
@@ -328,8 +325,8 @@ class Controller:
         return None
 
     def _apply_intent_tier(
-        self, prompt: str, tier: Optional[str]
-    ) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        self, prompt: str, tier: str | None
+    ) -> tuple[str | None, str | None, str | None]:
         """Let a middleware choose the tier this request enters.
 
         A tier named by a middleware replaces the addressed one only
@@ -383,7 +380,7 @@ class Controller:
 
     def _parse_model_name(
         self, model_name: str
-    ) -> tuple[Optional[str], Optional[str], Optional[float]]:
+    ) -> tuple[str | None, str | None, float | None]:
         """Split a model name into a tier, a router, and a threshold.
 
         Parameters
@@ -406,7 +403,7 @@ class Controller:
 
     def _run_router(
         self, router: str, threshold: float, prompt: str, pair: ModelPair
-    ) -> tuple[str, Optional[float]]:
+    ) -> tuple[str, float | None]:
         """Run one router over one pair and report what it picked.
 
         Delegates to `Router.route_with_score`, which scores the prompt
@@ -449,7 +446,7 @@ class Controller:
 
         return scored(prompt, threshold, pair)
 
-    def _can_serve(self, name: str, reqs) -> Optional[str]:
+    def _can_serve(self, name: str, reqs) -> str | None:
         """Return the first requirement `name` cannot serve, or None.
 
         A tier reads its cached union and is never strict: a tier is
@@ -466,11 +463,11 @@ class Controller:
         self,
         prompt: str,
         kwargs: dict[str, Any],
-        tier: Optional[str],
-        router: Optional[str],
-        threshold: Optional[float],
+        tier: str | None,
+        router: str | None,
+        threshold: float | None,
         reqs=None,
-    ) -> tuple[str, list[dict[str, Any]], Optional[ModelPair]]:
+    ) -> tuple[str, list[dict[str, Any]], ModelPair | None]:
         """Choose one endpoint for a prompt and record how it was chosen.
 
         A middleware may first name the tier to enter, which replaces
@@ -598,9 +595,9 @@ class Controller:
         self,
         picked: str,
         path: list[dict[str, Any]],
-        pair: Optional[ModelPair],
+        pair: ModelPair | None,
         reqs=None,
-    ) -> tuple[str, list[str], Optional[str], Optional[str]]:
+    ) -> tuple[str, list[str], str | None, str | None]:
         """Build the fallback chain for one request.
 
         Order: the canary when one fires, the picked leaf, then the
@@ -653,8 +650,8 @@ class Controller:
         res,
         path: list[dict[str, Any]],
         used: str,
-        sibling: Optional[str],
-        sibling_reference: Optional[str],
+        sibling: str | None,
+        sibling_reference: str | None,
     ):
         """Log the decision path and attach it to a response.
 
@@ -698,7 +695,7 @@ class Controller:
 
         return res
 
-    def _area_of(self, path: List[dict]) -> Optional[str]:
+    def _area_of(self, path: list[dict]) -> str | None:
         """Return the area of the deepest tier on a decision path.
 
         A flat pair has no tier at all, so the lookup must tolerate a
@@ -723,7 +720,7 @@ class Controller:
 
     def _endpoint_call_params(
         self, model_name: str
-    ) -> tuple[str, Optional[str], Optional[str], dict[str, Any]]:
+    ) -> tuple[str, str | None, str | None, dict[str, Any]]:
         """Turn a model name into the parameters of one litellm call.
 
         The name is resolved through the endpoint registry, its
@@ -865,7 +862,7 @@ class Controller:
 
         return headers, body, decoded, "" if url is None else str(url)
 
-    def _may_pay(self, endpoint: Optional[str]) -> bool:
+    def _may_pay(self, endpoint: str | None) -> bool:
         """Whether `endpoint` is authorised to charge the configured wallet.
 
         This is the second of the two seams a 402 can be paid at. The
@@ -898,7 +895,7 @@ class Controller:
             return True
         return bool(self.endpoints.resolve(endpoint).pay)
 
-    def _payment_cap(self, endpoint: Optional[str]):
+    def _payment_cap(self, endpoint: str | None):
         """Return the cap binding a payment to `endpoint`, and whose it is.
 
         Authorisation says who may charge; this says how much.
@@ -1042,8 +1039,8 @@ class Controller:
     def completion(
         self,
         *,
-        router: Optional[str] = None,
-        threshold: Optional[float] = None,
+        router: str | None = None,
+        threshold: float | None = None,
         **kwargs,
     ):
         """Synchronous completion with intelligent routing.
@@ -1161,7 +1158,7 @@ class Controller:
                 except Exception as e:
                     import logging
 
-                    logging.getLogger(__name__).error(f"Failed to cache response: {str(e)}")
+                    logging.getLogger(__name__).error(f"Failed to cache response: {e!s}")
 
                 # Record trace
                 self.quality_manager.record_trace(
@@ -1182,7 +1179,7 @@ class Controller:
                 import logging
 
                 logging.getLogger(__name__).warning(
-                    f"Model {model_name} failed, trying fallback if available. Error: {str(e)}"
+                    f"Model {model_name} failed, trying fallback if available. Error: {e!s}"
                 )
                 last_err = e
                 continue
@@ -1194,8 +1191,8 @@ class Controller:
     async def acompletion(
         self,
         *,
-        router: Optional[str] = None,
-        threshold: Optional[float] = None,
+        router: str | None = None,
+        threshold: float | None = None,
         **kwargs,
     ):
         tier = None
@@ -1290,7 +1287,7 @@ class Controller:
                 except Exception as e:
                     import logging
 
-                    logging.getLogger(__name__).error(f"Failed to cache response: {str(e)}")
+                    logging.getLogger(__name__).error(f"Failed to cache response: {e!s}")
 
                 # Record trace
                 self.quality_manager.record_trace(
@@ -1311,7 +1308,7 @@ class Controller:
                 import logging
 
                 logging.getLogger(__name__).warning(
-                    f"Model {model_name} failed, trying fallback if available. Error: {str(e)}"
+                    f"Model {model_name} failed, trying fallback if available. Error: {e!s}"
                 )
                 last_err = e
                 continue

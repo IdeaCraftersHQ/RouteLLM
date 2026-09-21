@@ -7,7 +7,6 @@ for specific domains or use cases.
 
 import json
 import os
-from typing import Dict, List, Optional, Union, Any
 
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
@@ -25,10 +24,10 @@ class DomainIntentDetector:
 
     def __init__(
         self,
-        intent_mappings: List[IntentModelMapping],
+        intent_mappings: list[IntentModelMapping],
         embedding_model: str = "text-embedding-ada-002",
         examples_per_intent: int = 5,
-        cache_path: Optional[str] = None,
+        cache_path: str | None = None,
     ):
         """Initialize the domain-specific intent detector.
 
@@ -56,7 +55,7 @@ class DomainIntentDetector:
         if cache_path and os.path.exists(cache_path):
             self._load_cache()
 
-    def add_examples(self, intent: str, examples: List[str]) -> None:
+    def add_examples(self, intent: str, examples: list[str]) -> None:
         """Add examples for a specific intent.
 
         Parameters
@@ -161,7 +160,7 @@ class DomainIntentDetector:
             return
 
         try:
-            with open(self.cache_path, "r") as f:
+            with open(self.cache_path) as f:
                 serializable_cache = json.load(f)
 
             # Convert lists back to numpy arrays
@@ -218,7 +217,7 @@ class DomainIntentDetector:
 
         return max(intent_scores.items(), key=lambda x: x[1])[0]
 
-    def get_intent_confidence(self, prompt: str) -> Dict[str, float]:
+    def get_intent_confidence(self, prompt: str) -> dict[str, float]:
         """Get confidence scores for each intent.
 
         Computes normalized confidence scores for each intent by comparing
@@ -288,7 +287,7 @@ class DomainIntentDetector:
         filepath : str
             Path to load examples from.
         """
-        with open(filepath, "r") as f:
+        with open(filepath) as f:
             examples = json.load(f)
 
         for intent, intent_examples in examples.items():

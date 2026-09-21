@@ -4,16 +4,16 @@ Provides canary testing and fine-tuning data collection utilities to monitor
 and improve router performance.
 """
 
-import random
+import json
 import logging
+import os
+import random
 import secrets
 import time
-import json
-import os
 import uuid
-from typing import List, Dict, Any, Optional
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, model_validator
-from routellm.types import ModelPair
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class CanaryConfig(BaseModel):
     enabled: bool = False
     canary_model: str
     weight: float = 0.05  # 5% traffic
-    contract_path: Optional[str] = None  # Path to Eva contract YAML
+    contract_path: str | None = None  # Path to Eva contract YAML
 
 
 class FineTuneConfig(BaseModel):
@@ -85,12 +85,12 @@ class QualityManager:
 
     def __init__(
         self,
-        canary_config: Optional[CanaryConfig] = None,
-        fine_tune_config: Optional[FineTuneConfig] = None,
+        canary_config: CanaryConfig | None = None,
+        fine_tune_config: FineTuneConfig | None = None,
     ):
         self.canary_config = canary_config or CanaryConfig(canary_model="")
         self.fine_tune_config = fine_tune_config or FineTuneConfig()
-        self._listing: Optional[List[tuple]] = None
+        self._listing: list[tuple] | None = None
         self._listing_at: float = 0.0
         self._capped: set = set()
 
@@ -131,23 +131,23 @@ class QualityManager:
             logger.info(f"Validating canary response against {self.canary_config.contract_path}")
             return True
         except Exception as e:
-            logger.error(f"Canary validation failed: {str(e)}")
+            logger.error(f"Canary validation failed: {e!s}")
             return False
 
     def record_trace(
         self,
         prompt: str,
         routed_model: str,
-        response: Dict[str, Any],
-        metadata: Dict[str, Any] = None,
+        response: dict[str, Any],
+        metadata: dict[str, Any] = None,
         *,
-        path: Optional[List[Dict[str, Any]]] = None,
-        request_model: Optional[str] = None,
-        endpoint: Optional[str] = None,
-        session_id: Optional[str] = None,
-        latency_ms: Optional[int] = None,
-        provider: Optional[str] = None,
-        area: Optional[str] = None,
+        path: list[dict[str, Any]] | None = None,
+        request_model: str | None = None,
+        endpoint: str | None = None,
+        session_id: str | None = None,
+        latency_ms: int | None = None,
+        provider: str | None = None,
+        area: str | None = None,
     ) -> None:
         """Record one routed request as a fit-ingestible trace.
 
@@ -300,7 +300,7 @@ class QualityManager:
             self._listing = listing
             self._listing_at = time.monotonic()
 
-    def _directory_listing(self) -> List[tuple]:
+    def _directory_listing(self) -> list[tuple]:
         """Return `(stem, size, mtime_ns)` per trace, oldest first.
 
         Cached for `_LISTING_TTL_SECONDS` and refreshed after a delete.
@@ -363,7 +363,7 @@ def _extract_output(response: Any) -> str:
     return content or ""
 
 
-def _extract_usage(response: Any) -> Dict[str, int]:
+def _extract_usage(response: Any) -> dict[str, int]:
     """Return the three token counts, each defaulting to 0."""
     usage = response.get("usage") if isinstance(response, dict) else None
     if not isinstance(usage, dict):

@@ -100,7 +100,7 @@ def hi_router(monkeypatch):
 @pytest.fixture(autouse=True)
 def _offline(monkeypatch, tmp_path):
     """Keep every test off the network and out of the real cache."""
-    import routellm.pairing as pairing
+    from routellm import pairing
 
     monkeypatch.setenv(pairing.CATALOG_CACHE_ENV, str(tmp_path / "catalog.json"))
     monkeypatch.setattr(pairing, "_fetch_catalog", lambda: [])

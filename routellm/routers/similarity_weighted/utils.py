@@ -6,7 +6,6 @@ preprocessing battle datasets.
 
 import json
 import math
-import os
 
 import numpy as np
 import pandas as pd

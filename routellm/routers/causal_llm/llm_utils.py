@@ -31,7 +31,7 @@ def load_model_config(yaml_path: str):
     RouterModelConfig
         Parsed model configuration.
     """
-    with open(yaml_path, "r") as file:
+    with open(yaml_path) as file:
         yaml_data = yaml.safe_load(file)
 
     return RouterModelConfig(**yaml_data)

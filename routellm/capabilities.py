@@ -52,10 +52,10 @@ __all__ = [
     "RANGE_KEYS",
     "Capabilities",
     "CapabilityQuery",
-    "capabilities_for",
-    "from_tags",
     "build_tier_index",
+    "capabilities_for",
     "catalog_records",
+    "from_tags",
     "matches",
     "merge",
     "parse_capability_terms",
@@ -121,14 +121,14 @@ class Capabilities(BaseModel):
         Input modalities the endpoint accepts, e.g. `["text", "image"]`.
     """
 
-    vision: Optional[bool] = None
-    tools: Optional[bool] = None
-    structured_output: Optional[bool] = None
-    reasoning: Optional[bool] = None
-    open_weights: Optional[bool] = None
-    context: Optional[int] = None
-    max_output: Optional[int] = None
-    modalities_in: Optional[list[str]] = None
+    vision: bool | None = None
+    tools: bool | None = None
+    structured_output: bool | None = None
+    reasoning: bool | None = None
+    open_weights: bool | None = None
+    context: int | None = None
+    max_output: int | None = None
+    modalities_in: list[str] | None = None
 
     def unknown_fields(self) -> list[str]:
         """Return the capability names this record cannot answer.
@@ -144,9 +144,9 @@ class Capabilities(BaseModel):
 
 
 def merge(
-    explicit: Optional[Capabilities],
+    explicit: Capabilities | None,
     record: Optional["ModelRecord"],
-    tag_derived: Optional[Capabilities],
+    tag_derived: Capabilities | None,
 ) -> Capabilities:
     """Merge the three capability sources, field by field.
 
@@ -185,7 +185,7 @@ def merge(
     return Capabilities(**values)
 
 
-def _from_record(record: Optional["ModelRecord"]) -> Optional[Capabilities]:
+def _from_record(record: Optional["ModelRecord"]) -> Capabilities | None:
     """Flatten a catalog record into capabilities, or None when absent.
 
     The catalog states `tool_call`, `reasoning`, `structured_output`,
@@ -486,7 +486,7 @@ def satisfies(
     reqs: "Requirements",
     strict: bool,
     name: str = "",
-) -> Optional[str]:
+) -> str | None:
     """Return the first requirement a side cannot serve, or None.
 
     UNKNOWN AT REQUEST TIME serves the request: a `None` capability
@@ -607,7 +607,7 @@ def union(parts: list[Capabilities]) -> Capabilities:
 
 
 def build_tier_index(
-    registry, records: Optional[dict[str, "ModelRecord"]] = None
+    registry, records: dict[str, "ModelRecord"] | None = None
 ) -> dict[str, Capabilities]:
     """Return each tier's union over every leaf reachable from it.
 
@@ -657,7 +657,7 @@ def side_capabilities(
     name: str,
     registry,
     tier_index: dict[str, Capabilities],
-    records: Optional[dict[str, "ModelRecord"]] = None,
+    records: dict[str, "ModelRecord"] | None = None,
 ) -> Capabilities:
     """Return the capabilities of one tier side, tier or endpoint.
 
@@ -716,7 +716,7 @@ def catalog_records(registry) -> dict[str, "ModelRecord"]:
 
 
 def usable_sibling(
-    sibling: Optional[str],
+    sibling: str | None,
     reqs: "Requirements",
     check,
 ) -> bool:
