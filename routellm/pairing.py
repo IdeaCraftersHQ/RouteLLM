@@ -1175,7 +1175,6 @@ def main(argv: Optional[list[str]] = None) -> int:
             "would duplicate all of it and drift from it."
         ),
     )
-    parser.add_argument("--config", required=True, help="Path to the YAML config.")
     parser.add_argument(
         "--capabilities",
         action="store_true",
