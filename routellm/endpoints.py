@@ -35,6 +35,22 @@ names who may spend it. A 402 from any other endpoint is returned
 unpaid, which matters because litellm's HTTP session is process-global
 and would otherwise put every upstream in front of the wallet.
 
+That says who may charge, never how much. `--max-payment` sets a
+process-wide ceiling on a single payment, and a payable endpoint may
+lower it further::
+
+    endpoints:
+      metered:
+        model: openai/some-metered-model
+        api_base: https://metered.example.com/v1
+        pay: true
+        max_payment: "$0.01"
+
+The effective cap is the smaller of the two, so `max_payment:` can
+only tighten the ceiling, never raise it. Setting neither leaves the
+payment library's own per-payment default standing, which is not the
+same as leaving a payment unbounded.
+
 A tier names a strong/weak pair whose sides may themselves be tiers, so
 a request addressed to a tier walks a tree, one router call per level::
 
@@ -65,7 +81,13 @@ import os
 import re
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, StrictBool, field_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    StrictBool,
+    field_validator,
+    model_validator,
+)
 
 from routellm.capabilities import Capabilities
 
@@ -159,6 +181,15 @@ class Endpoint(BaseModel):
         well-formed the 402 it answers with. Enabling a payment
         provider supplies a wallet; this is what names who may spend
         it.
+    max_payment : str, optional
+        The most a single payment to this endpoint may be, as human
+        money ("$0.01"). It may only lower the process-wide
+        `--max-payment` ceiling, never raise it, so the effective cap
+        is the smaller of the two. None means this endpoint names no
+        cap of its own and the ceiling alone applies. Requires
+        `pay: true`: a cap on an endpoint that can never spend is at
+        best dead config, and at worst a belief that writing it is
+        what authorises paying.
     """
 
     name: str
@@ -172,6 +203,7 @@ class Endpoint(BaseModel):
     strict: bool = False
     quality_measured: bool = False
     pay: StrictBool = False
+    max_payment: Optional[str] = None
 
     @field_validator("name")
     @classmethod
@@ -189,6 +221,35 @@ class Endpoint(BaseModel):
         if not value.strip():
             raise ValueError("Endpoint model must be a non-empty string")
         return value
+
+    @field_validator("max_payment")
+    @classmethod
+    def _validate_max_payment(cls, value: Optional[str]) -> Optional[str]:
+        """Refuse a cap the payment library could not act on.
+
+        A cap nobody can parse has to fail at load. Dropping it back
+        to None would leave the operator believing a limit is in
+        force, and the first they would hear of it is a payment that
+        went through.
+        """
+        if value is None:
+            return None
+
+        from routellm.payment.limits import parse_cap
+
+        parse_cap(value)
+        return value
+
+    @model_validator(mode="after")
+    def _validate_cap_needs_pay(self) -> "Endpoint":
+        """A cap on an unpayable endpoint cannot mean what it says."""
+        if self.max_payment is not None and not self.pay:
+            raise ValueError(
+                f"endpoint {self.name!r} sets max_payment but not `pay: true`, "
+                "so it can never spend and the cap bounds nothing. Add "
+                "`pay: true` to authorise it, or drop max_payment."
+            )
+        return self
 
     def credentials(
         self,
@@ -651,6 +712,57 @@ class EndpointRegistry:
             if base not in bases:
                 bases.append(base)
         return bases
+
+    def payment_caps(
+        self, default_base: Optional[str] = None
+    ) -> dict[str, str]:
+        """Return each payable endpoint's own cap, keyed on its base URL.
+
+        The scope a payment is enforced against is keyed on base URLs,
+        so the caps have to be too. Only endpoints carrying both
+        `pay: true` and a `max_payment:` contribute; everything else
+        is left to the process-wide ceiling.
+
+        Two payable endpoints may share one base URL, which the scope
+        already collapses into a single authorisation. There is only
+        one cap to enforce for it, so the lowest wins: taking the
+        higher would let one endpoint's config raise the other's
+        limit.
+
+        Parameters
+        ----------
+        default_base : str, optional
+            The controller's own base URL, used by a payable endpoint
+            that sets none of its own, exactly as `payable_bases`
+            does.
+
+        Returns
+        -------
+        dict
+            Base URL to the cap in force for it. Empty when no payable
+            endpoint named one.
+        """
+        from routellm.payment.limits import parse_cap
+
+        caps: dict[str, str] = {}
+        for endpoint in self._endpoints.values():
+            if not endpoint.pay or endpoint.max_payment is None:
+                continue
+            base = endpoint.api_base or default_base
+            if not base:
+                logger.warning(
+                    "endpoint %r sets max_payment but has no api_base and "
+                    "there is no default one, so there is no base URL to "
+                    "enforce the cap on",
+                    endpoint.name,
+                )
+                continue
+            existing = caps.get(base)
+            if existing is None or parse_cap(endpoint.max_payment) < parse_cap(
+                existing
+            ):
+                caps[base] = endpoint.max_payment
+        return caps
 
     def get_tier(self, name: str) -> Tier:
         """Return the tier registered under `name`.
