@@ -315,12 +315,17 @@ def build_router_config(file_config: Optional[dict]) -> Optional[dict]:
 async def lifespan(app):
     global CONTROLLER
 
-    gateway = None
-    if args.payment_provider == "x402":
-        from routellm.payment.x402 import X402Adapter
-        key = os.environ.get(args.wallet_key_env or "ROUTELLM_WALLET_KEY", "")
-        if key:
-            gateway = X402Adapter(private_key=key)
+    # Paying a 402 needs the challenge headers, the body and a replay of
+    # the request, none of which survive litellm's exception mapper. So
+    # the gateway is installed underneath litellm, on its shared async
+    # session, and only when a provider and a wallet key are both
+    # present -- otherwise litellm keeps its own client untouched.
+    from routellm.payment.transport import maybe_install_payment_session
+
+    gateway = maybe_install_payment_session(
+        provider=args.payment_provider,
+        wallet_key=os.environ.get(args.wallet_key_env or "ROUTELLM_WALLET_KEY", ""),
+    )
 
     # The config is discovered, not named: system, user, project, then
     # ROUTELLM_CONFIG and `--config`, each merged onto the last. The
