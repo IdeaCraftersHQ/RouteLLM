@@ -101,6 +101,7 @@ class Controller:
         middleware: Optional[List[Middleware]] = None,
         payment_gateway: Optional[PaymentGateway] = None,
         payment_limits=None,
+        payment_budget=None,
         resilience_config: Optional[ResilienceConfig] = None,
         cache_config: Optional[CacheConfig] = None,
         traffic_manager: Optional[TrafficManager] = None,
@@ -138,6 +139,12 @@ class Controller:
             endpoint. None caps nothing of ours, which leaves the
             gateway's own default per-payment ceiling standing --
             never an unbounded payment.
+        payment_budget : PaymentBudget, optional
+            What the wallet may spend in total, across every payment.
+            A per-payment cap bounds one payment and says nothing
+            about how many there are, so this counts the sum. The same
+            ledger is shared with the session's transport, since both
+            seams draw on one wallet. None leaves the total unbounded.
         payment_gateway : PaymentGateway, optional
             Gateway for 402 payment challenges.
         resilience_config : ResilienceConfig, optional
@@ -211,6 +218,7 @@ class Controller:
         self.middleware = middleware or []
         self.payment_gateway = payment_gateway
         self.payment_limits = payment_limits
+        self.payment_budget = payment_budget
         self.resilience = Resilience(resilience_config)
         self.cache = Cache(cache_config)
         self.traffic_manager = traffic_manager or TrafficManager()
@@ -988,6 +996,18 @@ class Controller:
                 # capped differently, so the seam that knows which
                 # endpoint it called is the one that states the figure.
                 cap, cap_source = self._payment_cap(endpoint)
+
+                # The budget is the sum of what every payment
+                # authorised, and this seam fires exactly when the
+                # transport declined -- so a budget enforced only
+                # there is a budget with a hole in it. Reserved before
+                # signing, because refusing has to happen before a
+                # wallet is authorised.
+                if self.payment_budget:
+                    refused = self.payment_budget.debit(cap)
+                    if refused is not None:
+                        raise RuntimeError(refused) from e
+
                 challenge = PaymentChallenge(
                     scheme=stated.get("scheme") or self.payment_gateway.name,
                     network=stated.get("network")
@@ -1002,7 +1022,17 @@ class Controller:
                     cap_source=cap_source,
                 )
 
-                receipt = await self.payment_gateway.pay(challenge)
+                try:
+                    receipt = await self.payment_gateway.pay(challenge)
+                except BaseException:
+                    # Nothing was signed, so the reservation was never
+                    # spent and goes back. Keeping it would let a
+                    # repeatedly failing payment drain the budget
+                    # without ever paying anyone.
+                    if self.payment_budget:
+                        self.payment_budget.refund(cap)
+                    raise
+
                 # The header name belongs to the protocol version the
                 # server chose, so it travels on the receipt rather than
                 # being assumed here.
