@@ -378,9 +378,7 @@ class Controller:
 
         return chosen, "intent", None
 
-    def _parse_model_name(
-        self, model_name: str
-    ) -> tuple[str | None, str | None, float | None]:
+    def _parse_model_name(self, model_name: str) -> tuple[str | None, str | None, float | None]:
         """Split a model name into a tier, a router, and a threshold.
 
         Parameters

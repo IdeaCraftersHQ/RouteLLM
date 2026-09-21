@@ -24,7 +24,7 @@ from routellm.routers.causal_llm.llm_utils import (
 from routellm.routers.causal_llm.model import CausalLLMClassifier
 from routellm.routers.embeddings import get_embedding_client
 from routellm.routers.matrix_factorization.model import MODEL_IDS, MFModel
-from routellm.routers.registry import (  # noqa: F401
+from routellm.routers.registry import (
     ROUTER_CLS,
     discover_routers,
     register_router,

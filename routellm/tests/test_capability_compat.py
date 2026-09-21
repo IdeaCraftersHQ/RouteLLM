@@ -28,7 +28,7 @@ from routellm.requirements import Requirements
 from routellm.routers.base import Router
 
 # Reuse the example's fixtures rather than copying its fake catalog.
-from routellm.tests.test_examples import (  # noqa: F401
+from routellm.tests.test_examples import (
     EXAMPLE,
     catalog,
     config,

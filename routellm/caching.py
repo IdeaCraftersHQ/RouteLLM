@@ -176,9 +176,7 @@ class Cache:
         conn.close()
         return None
 
-    async def aget(
-        self, prompt: str, model: str, params: dict[str, Any]
-    ) -> dict[str, Any] | None:
+    async def aget(self, prompt: str, model: str, params: dict[str, Any]) -> dict[str, Any] | None:
         """Async wrapper for get().
 
         Parameters
