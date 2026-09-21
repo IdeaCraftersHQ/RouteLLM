@@ -336,6 +336,42 @@ def payable_bases_for(endpoints, default_base):
     return endpoints.payable_bases(default_base=default_base)
 
 
+def payment_limits_for(endpoints, max_payment, default_base):
+    """Return the per-payment caps this server will enforce.
+
+    Two layers meet here. `--max-payment` is a process-wide ceiling no
+    endpoint may exceed, and an endpoint's own `max_payment:` may
+    lower it further but never raise it. They are read off the same
+    registry the server routes on, so a cap cannot mean one thing to
+    routing and another to the wallet.
+
+    Both layers absent leaves the payment library's own per-payment
+    default standing. That is deliberately not the same as disabling
+    spend controls: an unconfigured deployment keeps a ceiling.
+
+    Parameters
+    ----------
+    endpoints : EndpointRegistry
+        The registry built from the merged config.
+    max_payment : str or None
+        The `--max-payment` ceiling, as written.
+    default_base : str or None
+        The server's `--base-url`, used by a payable endpoint that
+        names no `api_base` of its own.
+
+    Returns
+    -------
+    PaymentLimits
+        The caps, ready to hand to the session and the controller.
+    """
+    from routellm.payment.limits import PaymentLimits
+
+    return PaymentLimits(
+        global_cap=max_payment,
+        per_base=endpoints.payment_caps(default_base=default_base),
+    )
+
+
 @asynccontextmanager
 async def lifespan(app):
     global CONTROLLER
@@ -389,10 +425,22 @@ async def lifespan(app):
     # URLs of endpoints carrying `pay: true`, and nothing when none do.
     from routellm.payment.transport import maybe_install_payment_session
 
+    #
+    # Authorisation is only half of it. `pay: true` says who may
+    # charge, never how much, so the same registry also supplies the
+    # per-payment caps -- the `--max-payment` ceiling and each
+    # endpoint's own lower one -- and they go to both seams a 402 can
+    # be paid at: the session's transport here, and the controller's
+    # own retry below.
+    limits = payment_limits_for(
+        endpoints, max_payment=args.max_payment, default_base=args.base_url
+    )
+
     gateway = maybe_install_payment_session(
         provider=args.payment_provider,
         wallet_key=os.environ.get(args.wallet_key_env or "ROUTELLM_WALLET_KEY", ""),
         payable_bases=payable_bases_for(endpoints, args.base_url),
+        limits=limits,
     )
 
     CONTROLLER = Controller(
@@ -405,6 +453,7 @@ async def lifespan(app):
         api_key=args.api_key,
         progress_bar=True,
         payment_gateway=gateway,
+        payment_limits=limits,
         default_router=args.routers[0] if args.routers else None,
         default_threshold=args.default_threshold,
         middleware=[intents] if intents else None,
@@ -717,6 +766,15 @@ parser.add_argument(
     "--wallet-key-env",
     default="ROUTELLM_WALLET_KEY",
     help="Env var holding wallet private key",
+)
+parser.add_argument(
+    "--max-payment",
+    default=None,
+    help=(
+        "Process-wide ceiling on a single payment, as money (e.g. \"$0.01\"). "
+        "No endpoint may exceed it; an endpoint's own `max_payment:` may only "
+        "lower it. Unset keeps the payment library's own default ceiling."
+    ),
 )
 args = parser.parse_args()
 
