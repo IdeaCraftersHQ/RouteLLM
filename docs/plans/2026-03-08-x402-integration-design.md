@@ -133,10 +133,6 @@ class PaymentGateway(ABC):
     async def pay(self, challenge: PaymentChallenge) -> PaymentReceipt:
         """Fulfill a 402 payment challenge. Raises PaymentError on failure."""
 
-    @abstractmethod
-    async def verify(self, receipt: PaymentReceipt) -> bool:
-        """Verify a receipt is valid (for server-side use)."""
-
     @property
     @abstractmethod
     def networks(self) -> list[str]:
@@ -177,9 +173,15 @@ git commit -m "feat(payment): PaymentGateway ABC and types"
 - Create: `routellm/payment/x402.py`
 - Test: `routellm/tests/payment/test_x402_adapter.py`
 
-**Note:** `x402` PyPI is async-first. Uses `x402.client.PaymentClient` for paying
-and `x402.server.verify_payment` for verifying. Wallet keypair loaded from env var
+**Note:** `x402` PyPI is async-first. Paying goes through the HTTP client's
+`handle_402_response`. Wallet keypair loaded from env var
 `ROUTELLM_WALLET_PRIVATE_KEY` (EVM) or delegated to `x402` wallet manager.
+
+**Correction:** this plan originally named `x402.server.verify_payment` and a
+`verify(receipt) -> bool` gateway method. No such module-level function exists;
+the SDK's verification entry point is a resource-server method taking the
+payment payload and the server's own requirements. It is the seller's call, and
+RouteLLM is the buyer here, so the gateway has no `verify`.
 
 **Step 1: Write failing test**
 
@@ -231,15 +233,12 @@ class X402Adapter(PaymentGateway):
         # Map result to PaymentReceipt
         raise NotImplementedError
 
-    async def verify(self, receipt: PaymentReceipt) -> bool:
-        # Delegate to x402.server.verify_payment(receipt.tx_hash, ...)
-        raise NotImplementedError
 ```
 
 **Step 4: Complete impl using `x402` SDK**
 
-> Follow exact x402 PyPI docs: `x402.client.PaymentClient` for outbound,
-> `x402.server.verify_payment` for inbound. Do not re-implement signing.
+> Follow the installed x402 package's own source for the outbound path. Do not
+> re-implement signing, and do not assume an API without reading it.
 
 **Step 5: Run tests — PASS**
 
