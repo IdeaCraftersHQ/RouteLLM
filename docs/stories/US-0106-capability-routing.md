@@ -86,6 +86,13 @@ endpoint flips it.
 - [x] `examples/multitier.yaml` carries no deprecated capability tag,
       every local endpoint declares its block, one endpoint sets
       `strict: true`, and one tier selects on a capability term
+- [x] `quality_from:` names a measured-quality sidecar resolved
+      relative to the config file; an endpoint's own `quality:` always
+      wins over it; an unknown endpoint in the sidecar warns and a
+      missing file errors naming the resolved path
+- [x] `python -m routellm.evals.endpoint_quality` writes that sidecar
+      with `source: evals`, and `--capabilities` marks each score
+      `(measured)` or `(manual)`
 
 ## E2E Tests
 
@@ -173,6 +180,20 @@ endpoint flips it.
 - `routellm/tests/test_capability_surfaces.py::test_matrix_renders_a_known_false_as_no`
 - `routellm/tests/test_capability_surfaces.py::test_matrix_reports_no_unknowns_when_every_block_is_complete`
 - `routellm/tests/test_capability_surfaces.py::test_record_without_modalities_leaves_vision_unknown`
+- `routellm/tests/test_endpoint_quality.py::test_sidecar_fills_missing_quality`
+- `routellm/tests/test_endpoint_quality.py::test_explicit_quality_beats_the_sidecar`
+- `routellm/tests/test_endpoint_quality.py::test_quality_from_resolves_relative_to_the_config_file`
+- `routellm/tests/test_endpoint_quality.py::test_missing_sidecar_file_raises_naming_the_path`
+- `routellm/tests/test_endpoint_quality.py::test_unknown_endpoint_in_the_sidecar_warns_and_is_ignored`
+- `routellm/tests/test_endpoint_quality.py::test_sidecar_quality_orders_a_quality_desc_selector`
+- `routellm/tests/test_endpoint_quality.py::test_a_config_without_quality_from_is_untouched`
+- `routellm/tests/test_endpoint_quality.py::test_load_sidecar_reads_the_documented_shape`
+- `routellm/tests/test_endpoint_quality.py::test_harness_writes_the_sidecar_shape`
+- `routellm/tests/test_endpoint_quality.py::test_harness_rejects_an_endpoint_the_config_does_not_carry`
+- `routellm/tests/test_endpoint_quality.py::test_matrix_marks_quality_measured_or_manual`
+- `routellm/tests/test_endpoint_quality.py::test_the_explain_cli_resolves_quality_from_against_the_config`
+- `routellm/tests/test_endpoint_quality.py::test_the_explain_cli_without_the_matrix_also_resolves_it`
+- `routellm/tests/test_endpoint_quality.py::test_the_server_registry_resolves_quality_from_against_the_config`
 
 ## Breaking changes
 
