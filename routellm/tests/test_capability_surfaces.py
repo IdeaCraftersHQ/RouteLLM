@@ -309,3 +309,32 @@ def test_record_without_modalities_leaves_vision_unknown():
 
     assert caps.vision is None
     assert caps.tools is True
+
+
+def test_explain_failure_reports_to_stderr_instead_of_raising(tmp_path, capsys):
+    """A selector matching nothing must exit 1 with the reason on stderr.
+
+    `_explain` raises ValueError when a selector matches no endpoint.
+    The recovery branch answers that by calling `_explain` again, which
+    raises the identical error, so the error-reporting branch below it
+    is unreachable for ValueError and the command dies with a traceback.
+    """
+    import yaml
+
+    config = dict(MATRIX_CONFIG)
+    config["tiers"] = {
+        "default": {
+            "router": "random",
+            "threshold": 0.5,
+            "strong": {"select": "nonexistent_term:true", "order": "quality_desc"},
+            "weak": "seeing",
+        }
+    }
+    path = tmp_path / "unmatched.yaml"
+    path.write_text(yaml.safe_dump(config))
+
+    assert main(["--config", str(path), "--explain"]) == 1
+
+    captured = capsys.readouterr()
+    # The reason reaches stderr instead of escaping as a traceback.
+    assert "nonexistent_term" in captured.err
