@@ -80,69 +80,83 @@ target-version = "py311"
 # playbook expects. Judgement-call findings (blind except, subprocess
 # without check) are reported but not auto-fixed.
 select = ["E", "F", "I", "UP", "B", "RUF", "PL", "BLE"]
+
+# One array, two sections, and the split is the point: a reader should
+# be able to tell "wrong for this codebase" from "we have not got to
+# it yet" without going digging.
+#
+# PERMANENT entries come first. Each is a rule whose advice is wrong
+# here, and each carries the reason. These are not expected to be
+# fixed, and a new one belongs here only with a reason of that kind.
+#
+# DEBT follows, under its own header, each entry with its count. That
+# section is meant to shrink. Ruff has a single ignore list, so the
+# two cannot be separate keys; the fence is the convention. Counts are
+# from the commit that wrote them and drift as code moves -- `make
+# lint` is what settles an argument, not this comment.
 ignore = [
-	# The suite drives long descriptive test names and tabular fixtures.
-	"E501",
-	"PLR0912",
-	"PLR0913",
-	"PLR0915",
-	"PLR2004",
+	# ---- Permanent: wrong for this codebase ------------------------
+	# The eval benchmarks compare pandas Series with `== True`. On a
+	# Series that is an elementwise mask, not a truth test, and ruff's
+	# suggested `if x:` raises ValueError. Applying the fix would
+	# introduce a bug, so this is not a style choice.
+	"E712",
 	# Heavy and optional dependencies -- torch, the payment SDK, the
 	# training stack -- are imported inside the functions that need
-	# them, deliberately, so importing routellm stays cheap.
+	# them, deliberately, so importing routellm stays cheap. (65)
 	"PLC0415",
-	# The remaining rules below are judgement calls this codebase has
-	# not yet worked through. They are listed explicitly so `make lint`
-	# is green and a NEW violation is visible, rather than hidden in a
-	# backlog of 143. Each should be retired deliberately.
+
+	# ---- Debt: not yet worked through ------------------------------
+	# Listed explicitly so `make lint` is green and a NEW violation is
+	# visible rather than buried. Each should be retired deliberately.
+
+	# Volume rules. PLR2004 alone is 138 findings and churning them
+	# buys nothing; these go last, if ever.
+	"PLR2004",  # 138 magic value in comparison
+	"E501",     # 21 line too long
+	"PLR0913",  # 15 too many arguments
+	"PLR0917",  # 12 too many positional arguments
+
+	# Blind except. 30 sites, and most are deliberate: documented
+	# best-effort boundaries in the payment, trace-recording, cache,
+	# plugin-discovery and provider-fallback paths, where the contract
+	# is that they never fail the caller. Retiring this rule means
+	# making each of those explicit, not narrowing them wholesale.
 	"BLE001",
-	"PLR0917",
-	"E402",
-	"PLW2901",
-	"PLW0603",
-	"RUF012",
-	# Pandas boolean masks: `== True` is meaningful on a Series and the
-	# suggested `if x:` would raise. Not a style choice.
-	"E712",
-	"RUF059",
-	"B017",
-	"RUF005",
-	"F841",
-	"RUF013",
-	"B904",
-	"B008",
-	"PLW0602",
-	"RUF001",
-	"RUF002",
-	"RUF003",
-	"B006",
-	"PLR0904",
-	"PLC0206",
-	"PLW1508",
-	"PLR1704",
-	"E741",
-	"E722",
-	"B025",
-	"B905",
-	"F811",
-	"PLR0911",
-	"RUF015",
-	"F401",
-	"B007",
-	"F402",
-	"RUF043",
-	"UP042",
-	"PLR0914",
-	"PLR0916",
-	"PLW0642",
-	"RUF046",
-	"PLC1901",
+
+	# Structural. Real but each is a refactor, not an edit.
+	"E402",     # 9 module import not at top of file
+	"PLW2901",  # 9 loop variable overwritten
+	"PLW0603",  # 8 global statement
+	"PLR0912",  # 3 too many branches
+	"PLR0915",  # 3 too many statements
+	"PLR0911",  # 2 too many return statements
+
+	# Correctness-adjacent, small, and worth doing next.
+	"RUF012",   # 8 mutable class default
+	"B017",     # 7 assert on bare Exception
+	"RUF059",   # 8 unused unpacked variable
+	"RUF005",   # 6 collection literal concatenation
+	"E741",     # 3 ambiguous variable name
+	"B905",     # 3 zip() without explicit strict=
+	"F811",     # 2 redefinition -- pytest fixture params, false positive
+	"RUF015",   # 2 prefer next(iter(...)) over list slice
+	"B007",     # 2 unused loop control variable
+	"F841",     # 1 unused local, in the payment suite
+	"RUF043",   # 1 pattern passed to re without raw string
+	"UP042",    # 1 class inherits from both str and enum
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Tests re-export fixtures and assert on constants.
-# A property access is the call under test when it must raise.
+# All permanent, for the same kind of reason as the block above: each
+# rule is answering a question the file has already answered.
+#
+#   PLC0415  tests import heavy deps inside the test that needs them
+#   BLE001   a test that asserts on failure catches broadly on purpose
+#   PLW1510  subprocess.run in a test whose returncode is the assertion
+#   B018     `controller.model_pair` inside pytest.raises is a property
+#            access that must raise; it only looks useless (1 site)
 "routellm/tests/*" = ["PLC0415", "BLE001", "PLW1510", "B018"]
 # The fallback loop defines a closure and calls it in the same
-# iteration, so late binding never bites; B023 cannot see that.
+# iteration, so late binding never bites; B023 cannot see that. (9)
 "routellm/controller.py" = ["B023"]
