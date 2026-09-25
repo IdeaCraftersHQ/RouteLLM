@@ -1,0 +1,14 @@
+xrr: '1'
+adapter: litellm
+fingerprint: "84a7876b"
+recorded_at: '2026-09-25T17:52:29Z'
+payload:
+  id: chatcmpl-xrr-fixture
+  object: chat.completion
+  model: gpt-4
+  choices:
+  - index: 0
+    finish_reason: stop
+    message:
+      role: assistant
+      content: hello there
