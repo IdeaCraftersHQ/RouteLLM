@@ -338,12 +338,10 @@ def main():
     if args.test or args.analyze:
         try:
             # Check if torch is available before trying to initialize the controller
-            try:
-                import torch
+            import importlib.util
 
-                torch_available = True
-            except ImportError:
-                torch_available = False
+            torch_available = importlib.util.find_spec("torch") is not None
+            if not torch_available:
                 print("Warning: PyTorch is not installed. Some routers may not work.")
                 print("To install PyTorch, run: pip install torch")
 
@@ -372,7 +370,7 @@ def main():
 
     # Analyze a specific prompt if requested
     if args.analyze:
-        result = analyze_prompt_confidence(args.analyze, args.visualize)
+        analyze_prompt_confidence(args.analyze, args.visualize)
 
         if controller_available:
             try:
@@ -408,8 +406,6 @@ def main():
     # Launch web UI if requested
     if args.web:
         try:
-            import gradio as gr
-
             from routellm.examples.intent_web_ui import create_web_ui
 
             print(f"Launching web UI on port {args.port}...")

@@ -18,10 +18,6 @@ without the heavy ML stack.
 import inspect
 import logging
 from importlib.metadata import entry_points
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from routellm.routers.base import Router
 
 logger = logging.getLogger(__name__)
 

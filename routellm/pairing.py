@@ -567,11 +567,11 @@ def _record_matches(record: ModelRecord | None, filter_) -> bool:
     if record is None:
         return False
 
-    for field, value in (
+    for attr, value in (
         ("tool_call", filter_.tool_call),
         ("reasoning", filter_.reasoning),
     ):
-        if value is not None and getattr(record, field) != value:
+        if value is not None and getattr(record, attr) != value:
             return False
 
     if filter_.provider and record.provider != filter_.provider:

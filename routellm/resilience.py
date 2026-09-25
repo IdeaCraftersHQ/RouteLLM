@@ -46,7 +46,7 @@ class CircuitBreaker:
         fail_max: int = 5,
         fail_rate: float = 0.5,
         fail_wait_ms: int = 5000,
-        fail_codes: list[int] = None,
+        fail_codes: list[int] | None = None,
         rate_interval_ms: int = 60000,
         rate_minimum: int = 10,
     ):

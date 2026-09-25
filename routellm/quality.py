@@ -139,7 +139,7 @@ class QualityManager:
         prompt: str,
         routed_model: str,
         response: dict[str, Any],
-        metadata: dict[str, Any] = None,
+        metadata: dict[str, Any] | None = None,
         *,
         path: list[dict[str, Any]] | None = None,
         request_model: str | None = None,
