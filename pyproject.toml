@@ -36,7 +36,13 @@ dev = [
 	# deliberately NOT a core dependency: it requires Python >=3.12
 	# while this package supports >=3.11, so putting it in `dependencies`
 	# would raise the floor for every consumer to buy a test fixture.
-	"hop-top-xrr @ git+https://github.com/hop-top/poly-xrr.git#subdirectory=py",
+	#
+	# The marker is load-bearing, not decoration. Without it a resolver
+	# must satisfy the extra across this package's whole declared range,
+	# finds 3.11 incompatible with xrr's floor, and fails outright --
+	# `make test` cannot even build an environment. With it, 3.11 simply
+	# resolves without xrr and those tests skip.
+	"hop-top-xrr @ git+https://github.com/hop-top/poly-xrr.git#subdirectory=py ; python_version >= '3.12'",
 ]
 # A direct-URL dependency is rejected by PyPI, so this extra blocks an
 # upload of the package. Replace it with a version pin once hop-top-aim
