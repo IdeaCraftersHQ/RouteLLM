@@ -1,3 +1,4 @@
+import hashlib
 import os
 import random
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -37,6 +38,39 @@ class SimpleRouter:
 
     def route(self, prompt, threshold, routed_pair):
         return routed_pair.strong
+
+
+def _fake_embedding(self, text: str) -> np.ndarray:
+    """Deterministic stand-in for the live embedding call.
+
+    Hashes the text into a fixed unit-ish vector. Distinct prompts get
+    distinct vectors, and the same prompt always gets the same one, which
+    is all the cache's cosine comparison needs.
+    """
+    digest = hashlib.sha256(text.encode()).digest()
+    return np.frombuffer(digest[:16], dtype=np.uint8).astype(np.float32)
+
+
+@pytest.fixture(autouse=True)
+def _offline_embeddings(monkeypatch):
+    """Keep the semantic cache off the network.
+
+    The controller fixture enables `semantic_enabled`, so every cache
+    lookup in this module calls `Cache._get_embedding`, which asks
+    litellm to embed the prompt -- a real HTTPS request to the embedding
+    provider. Three of the four scenarios here do not care about semantic
+    matching at all; they only ever wanted the exact-match cache. For
+    them the live call was pure interference, and it was actively
+    misleading: the exhaustion scenario failed its lookup before
+    `acompletion` was ever reached, so `assert ... == 4` was asserting on
+    a connection error rather than on retry behaviour.
+
+    Substituting a deterministic embedder keeps the semantic path itself
+    exercised -- the code under test is unchanged and still hashes,
+    stores and cosine-compares vectors -- while making the result depend
+    on this repo instead of on a reachable endpoint.
+    """
+    monkeypatch.setattr("routellm.caching.Cache._get_embedding", _fake_embedding)
 
 
 @pytest.fixture(scope="function")
