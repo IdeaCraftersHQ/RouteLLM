@@ -19,11 +19,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-# xrr is a declared dev dependency (see the `dev` extra). It is imported
-# unconditionally and on purpose: the previous version of this file fell
-# back to an inline fake whose replay returned a hardcoded string, so the
-# test passed without the real library ever running. A skip states the
-# truth; a fake green does not.
+# xrr is a declared dev dependency (see the `dev` extra), so in a correctly
+# provisioned environment this import always succeeds. When it genuinely
+# cannot, these tests SKIP.
+#
+# What they must never do is silently substitute a stand-in. The previous
+# version of this file caught ImportError and fell back to an inline fake
+# whose replay returned a hardcoded string -- so the suite stayed green
+# with the real library never running. A skip states the truth; a fake
+# green does not.
 xrr = pytest.importorskip(
     "xrr",
     reason="xrr is not installed -- install the dev extra: pip install -e '.[dev]'",
