@@ -6,6 +6,7 @@ difficulty prediction datasets.
 
 import abc
 import os
+import pickle
 from collections import Counter
 
 import numpy as np
@@ -47,16 +48,36 @@ class Benchmark(abc.ABC):
         pass
 
 
+def _load_cache(cache_path):
+    """Return a benchmark's cached score table, or empty on a cold start.
+
+    The cache is an optional `.npy` holding a single dict. Absent,
+    truncated and wrong-shaped files are all cold starts; anything the
+    loader itself gets wrong, and KeyboardInterrupt, still propagate.
+
+    Parameters
+    ----------
+    cache_path : str
+        Path to the `.npy` cache file.
+
+    Returns
+    -------
+    dict
+        The cached table, or an empty dict.
+    """
+    try:
+        return np.load(cache_path, allow_pickle=True).item()
+    except (OSError, pickle.UnpicklingError, ValueError):
+        return {}
+
+
 class MMLU(Benchmark):
     def __init__(self, domains, routed_pair, overwrite_cache):
         self.routed_pair = routed_pair
         self.overwrite_cache = overwrite_cache
         self.cache_path = f"{CURRENT_DIR}/mmlu/cache.npy"
 
-        try:
-            self.cache = np.load(self.cache_path, allow_pickle=True).item()
-        except:
-            self.cache = {}
+        self.cache = _load_cache(self.cache_path)
 
         all_data = pd.DataFrame()
         for domain in tqdm(domains, desc="Loading domain data"):
@@ -155,11 +176,9 @@ class MTBench(Benchmark):
         self.overwrite_cache = overwrite_cache
         self.cache_path = f"{CURRENT_DIR}/mt_bench/cache.npy"
 
-        try:
-            self.cache = np.load(self.cache_path, allow_pickle=True).item()
-        except:
+        self.cache = _load_cache(self.cache_path)
+        if not self.cache:
             print("Error loading MT Bench cache, starting fresh.")
-            self.cache = {}
 
     def evaluate(self, controller, router, num_results, overwrite_router_cache):
         if router not in self.cache or router in self.overwrite_cache or overwrite_router_cache:
@@ -281,10 +300,7 @@ class GSM8K(Benchmark):
         self.overwrite_cache = overwrite_cache
         self.cache_path = f"{CURRENT_DIR}/gsm8k/cache.npy"
 
-        try:
-            self.cache = np.load(self.cache_path, allow_pickle=True).item()
-        except:
-            self.cache = {}
+        self.cache = _load_cache(self.cache_path)
 
         all_data = pd.read_csv(f"{CURRENT_DIR}/gsm8k/gsm8k_responses.csv")
         original_len = len(all_data)
