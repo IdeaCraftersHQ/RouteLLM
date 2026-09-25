@@ -167,7 +167,9 @@ class DomainIntentDetector:
             self.embedding_cache = {
                 text: np.array(embedding) for text, embedding in serializable_cache.items()
             }
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
+            # An unreadable or malformed cache is a cold start, not an
+            # error: the embeddings are recomputed on demand.
             print(f"Error loading cache: {e}")
 
     def detect_intent(self, prompt: str) -> str:
