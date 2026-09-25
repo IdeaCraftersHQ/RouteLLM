@@ -57,7 +57,7 @@ def test_a_tier_in_two_areas_names_both():
 
 def test_an_area_naming_a_missing_tier_is_rejected():
     with pytest.raises(ValueError) as excinfo:
-        EndpointRegistry.from_config(areas_config := _config(areas={"coding": ["ghost"]}))
+        EndpointRegistry.from_config(_config(areas={"coding": ["ghost"]}))
 
     message = str(excinfo.value)
     assert "ghost" in message

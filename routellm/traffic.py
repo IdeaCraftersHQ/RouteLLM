@@ -117,7 +117,9 @@ class TrafficManager:
     """Handles conditional routing and load balancing logic."""
 
     def __init__(
-        self, rules: list[TrafficRule] = None, load_balancers: dict[str, LoadBalancer] = None
+        self,
+        rules: list[TrafficRule] | None = None,
+        load_balancers: dict[str, LoadBalancer] | None = None,
     ):
         self.rules = rules or []
         self.load_balancers = load_balancers or {}

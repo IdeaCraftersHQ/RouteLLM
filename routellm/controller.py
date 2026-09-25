@@ -1249,13 +1249,13 @@ class Controller:
             # 3. Resolve the endpoint, then apply load balancing
             model, curr_api_base, curr_api_key, extra = self._endpoint_call_params(model_name)
 
-            async def _call(extra_headers={}):
+            async def _call(extra_headers=None):
                 kwargs_copy = {**extra, **kwargs}
                 kwargs_copy["model"] = model
                 return await acompletion(
                     api_base=curr_api_base,
                     api_key=curr_api_key,
-                    extra_headers=extra_headers,
+                    extra_headers={} if extra_headers is None else extra_headers,
                     **kwargs_copy,
                 )
 

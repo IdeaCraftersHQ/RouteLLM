@@ -30,7 +30,7 @@ class CausalLLMClassifier:
         score_threshold: int,
         prompt_field: str = "messages",
         use_last_turn: bool = False,
-        additional_fields: list[str] = list(["label", "pidx"]),
+        additional_fields: list[str] | None = None,
         max_new_tokens: int = 6,
     ):
         """Initialize causal LLM classifier.
@@ -75,6 +75,8 @@ class CausalLLMClassifier:
         self.prompt_format = prompt_format
         self.use_last_turn = use_last_turn
         self.prompt_field = prompt_field
+        if additional_fields is None:
+            additional_fields = ["label", "pidx"]
         self.additinal_fields = additional_fields
 
         self.tokenizer = get_tokenizer(

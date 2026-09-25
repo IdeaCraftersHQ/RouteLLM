@@ -421,7 +421,6 @@ def test_strict_endpoint_refuses_a_request_it_cannot_prove(hi_router, tmp_path):
 
 
 def test_context_requirement_uses_the_merged_context_window(hi_router, tmp_path):
-    controller = _controller(CONFIG, tmp_path)
     caps_wide = Capabilities(context=200000)
     caps_narrow = Capabilities(context=8192)
     reqs = Requirements(context_needed=100000)

@@ -29,6 +29,10 @@ from routellm.routers.registry import (
     discover_routers,
     register_router,
 )
+
+# ROUTER_CLS is re-exported here: the controller, the server and the
+# eval entry points all import it from this module, not the registry.
+__all__ = ["ROUTER_CLS", "discover_routers", "register_router"]
 from routellm.routers.similarity_weighted.utils import (
     compute_elo_mle_with_tie,
     compute_tiers,
@@ -53,7 +57,7 @@ class CausalLLMRouter(Router):
         self,
         checkpoint_path,
         score_threshold=4,
-        special_tokens=["[[1]]", "[[2]]", "[[3]]", "[[4]]", "[[5]]"],
+        special_tokens=None,
         num_outputs=5,
         model_type="causal",
         model_id="meta-llama/Meta-Llama-3-8B",
@@ -82,7 +86,11 @@ class CausalLLMRouter(Router):
             model_id=model_id,
             model_type=model_type,
             flash_attention_2=flash_attention_2,
-            special_tokens=special_tokens,
+            special_tokens=(
+                ["[[1]]", "[[2]]", "[[3]]", "[[4]]", "[[5]]"]
+                if special_tokens is None
+                else special_tokens
+            ),
             num_outputs=num_outputs,
         )
         prompt_format = load_prompt_format(model_config.model_id)

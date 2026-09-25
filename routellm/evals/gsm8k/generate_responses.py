@@ -8,7 +8,6 @@ import ast
 import json
 import os
 import re
-import time
 from types import SimpleNamespace
 
 import numpy as np
@@ -104,7 +103,6 @@ def main(args):
     backend = select_sglang_backend(args)
 
     # Run requests
-    tic = time.time()
     states = few_shot_gsm8k.run_batch(
         arguments,
         temperature=0,
