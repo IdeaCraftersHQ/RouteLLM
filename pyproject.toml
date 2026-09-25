@@ -134,7 +134,7 @@ ignore = [
 
 	# Correctness-adjacent, small, and worth doing next.
 	"RUF012",   # 8 mutable class default
-	"B017",     # 7 assert on bare Exception
+	"B017",     # 6 assert on bare Exception, all in the payment suite
 	"RUF059",   # 8 unused unpacked variable
 	"RUF005",   # 6 collection literal concatenation
 	"E741",     # 3 ambiguous variable name
