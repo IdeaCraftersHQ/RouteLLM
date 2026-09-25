@@ -1241,11 +1241,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.explain or not args.capabilities:
             blocks.append(_explain(args.config))
         if args.capabilities:
-            registry, selects = _registry_from(args.config)
-            blocks.append(_capability_matrix(registry, selects))
+            try:
+                registry, selects = _registry_from(args.config)
+                blocks.append(_capability_matrix(registry, selects))
+            except (ValueError, CatalogUnavailable, OSError):
+                # The matrix is the optional half: a registry that will
+                # not resolve still has an explain table worth printing.
+                # A failure of _explain itself falls through below.
+                if not blocks:
+                    blocks.append(_explain(args.config))
         print("\n\n".join(block for block in blocks if block))
-    except (ValueError, CatalogUnavailable, OSError):
-        print(_explain(args.config))
     except (ValueError, CatalogUnavailable, OSError, ConfigError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
