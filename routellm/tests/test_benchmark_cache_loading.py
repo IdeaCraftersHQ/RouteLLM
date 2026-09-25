@@ -13,14 +13,14 @@ from routellm.evals.benchmarks import _load_cache
 
 
 def test_a_missing_cache_file_is_a_cold_start(tmp_path):
-    assert _load_cache(str(tmp_path / "absent.npy")) == {}
+    assert _load_cache(str(tmp_path / "absent.npy")) == ({}, False)
 
 
 def test_a_truncated_cache_file_is_a_cold_start(tmp_path):
     path = tmp_path / "corrupt.npy"
     path.write_bytes(b"not an npy at all")
 
-    assert _load_cache(str(path)) == {}
+    assert _load_cache(str(path)) == ({}, False)
 
 
 def test_an_array_shaped_cache_is_a_cold_start(tmp_path):
@@ -28,14 +28,22 @@ def test_an_array_shaped_cache_is_a_cold_start(tmp_path):
     path = tmp_path / "arr.npy"
     np.save(path, np.array([1, 2, 3]))
 
-    assert _load_cache(str(path)) == {}
+    assert _load_cache(str(path)) == ({}, False)
 
 
 def test_a_good_cache_is_returned(tmp_path):
     path = tmp_path / "good.npy"
     np.save(path, np.array({"router": {"prompt": 0.5}}, dtype=object))
 
-    assert _load_cache(str(path)) == {"router": {"prompt": 0.5}}
+    assert _load_cache(str(path)) == ({"router": {"prompt": 0.5}}, True)
+
+
+def test_an_empty_cache_that_loaded_is_not_a_cold_start(tmp_path):
+    """A cache holding {} loaded fine; only a failure reports False."""
+    path = tmp_path / "empty.npy"
+    np.save(path, np.array({}, dtype=object))
+
+    assert _load_cache(str(path)) == ({}, True)
 
 
 def test_an_interrupt_during_the_load_is_not_swallowed(tmp_path, monkeypatch):

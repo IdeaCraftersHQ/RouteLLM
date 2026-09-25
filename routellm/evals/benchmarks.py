@@ -49,7 +49,7 @@ class Benchmark(abc.ABC):
 
 
 def _load_cache(cache_path):
-    """Return a benchmark's cached score table, or empty on a cold start.
+    """Return a benchmark's cached score table and whether it loaded.
 
     The cache is an optional `.npy` holding a single dict. Absent,
     truncated and wrong-shaped files are all cold starts; anything the
@@ -62,13 +62,15 @@ def _load_cache(cache_path):
 
     Returns
     -------
-    dict
-        The cached table, or an empty dict.
+    tuple[dict, bool]
+        The cached table, and False when the load fell back to empty.
+        A cache that loads and is genuinely empty reports True, so a
+        caller can tell "no cache" from "nothing cached yet".
     """
     try:
-        return np.load(cache_path, allow_pickle=True).item()
+        return np.load(cache_path, allow_pickle=True).item(), True
     except (OSError, pickle.UnpicklingError, ValueError):
-        return {}
+        return {}, False
 
 
 class MMLU(Benchmark):
@@ -77,7 +79,7 @@ class MMLU(Benchmark):
         self.overwrite_cache = overwrite_cache
         self.cache_path = f"{CURRENT_DIR}/mmlu/cache.npy"
 
-        self.cache = _load_cache(self.cache_path)
+        self.cache, _ = _load_cache(self.cache_path)
 
         all_data = pd.DataFrame()
         for domain in tqdm(domains, desc="Loading domain data"):
@@ -176,8 +178,8 @@ class MTBench(Benchmark):
         self.overwrite_cache = overwrite_cache
         self.cache_path = f"{CURRENT_DIR}/mt_bench/cache.npy"
 
-        self.cache = _load_cache(self.cache_path)
-        if not self.cache:
+        self.cache, loaded = _load_cache(self.cache_path)
+        if not loaded:
             print("Error loading MT Bench cache, starting fresh.")
 
     def evaluate(self, controller, router, num_results, overwrite_router_cache):
@@ -300,7 +302,7 @@ class GSM8K(Benchmark):
         self.overwrite_cache = overwrite_cache
         self.cache_path = f"{CURRENT_DIR}/gsm8k/cache.npy"
 
-        self.cache = _load_cache(self.cache_path)
+        self.cache, _ = _load_cache(self.cache_path)
 
         all_data = pd.read_csv(f"{CURRENT_DIR}/gsm8k/gsm8k_responses.csv")
         original_len = len(all_data)
