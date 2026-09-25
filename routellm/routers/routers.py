@@ -29,15 +29,15 @@ from routellm.routers.registry import (
     discover_routers,
     register_router,
 )
-
-# ROUTER_CLS is re-exported here: the controller, the server and the
-# eval entry points all import it from this module, not the registry.
-__all__ = ["ROUTER_CLS", "discover_routers", "register_router"]
 from routellm.routers.similarity_weighted.utils import (
     compute_elo_mle_with_tie,
     compute_tiers,
     preprocess_battles,
 )
+
+# ROUTER_CLS is re-exported here: the controller, the server and the
+# eval entry points all import it from this module, not the registry.
+__all__ = ["ROUTER_CLS", "discover_routers", "register_router"]
 
 logger = logging.getLogger(__name__)
 
