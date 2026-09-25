@@ -115,7 +115,9 @@ async def test_scenario_resilience_exhaustion(e2e_controller, monkeypatch):
     mock_acompletion = AsyncMock(side_effect=MockError("Permanent Fail", 500))
     monkeypatch.setattr("routellm.controller.acompletion", mock_acompletion)
 
-    with pytest.raises(Exception):
+    # The provider error surfaces unwrapped once the retries are spent;
+    # asserting on bare Exception would also pass on a TypeError here.
+    with pytest.raises(MockError, match="Permanent Fail"):
         await e2e_controller.acompletion(
             router="random", threshold=0.5, messages=[{"role": "user", "content": "fail me"}]
         )
