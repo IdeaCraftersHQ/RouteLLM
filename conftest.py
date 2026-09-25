@@ -8,8 +8,23 @@ with no heavy deps and is registered via ROUTER_CLS.
 Also stubs x402 so X402Adapter tests can exercise the adapter logic without
 the real PyPI package installed.
 """
-import sys
-from unittest.mock import MagicMock
+import os
+
+# MUST come before anything imports litellm, directly or transitively.
+#
+# `import litellm` fetches its model cost map over HTTPS at import time.
+# Offline -- or under a socket blocker -- that turns every module that
+# imports the controller into a collection error, so the suite cannot even
+# be collected without a network. litellm ships the same map inside the
+# package, and nothing in this repo reads pricing, so the local copy is
+# both sufficient and authoritative here.
+#
+# `setdefault`, not assignment: an operator who deliberately exports the
+# variable keeps their choice.
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
+import sys  # noqa: E402
+from unittest.mock import MagicMock  # noqa: E402
 
 
 def _stub(name: str) -> MagicMock:
