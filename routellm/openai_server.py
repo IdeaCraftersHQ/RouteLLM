@@ -33,6 +33,12 @@ from routellm.middleware.intent_model_selector import (
     IntentModelSelector,
 )
 from routellm.policy import build_policy, check_decision_classes
+from routellm.request_class import (
+    RequestClassRefusal,
+    check_policy_principals,
+    current_request_class,
+    declare,
+)
 from routellm.resilience import EndpointsCooling
 from routellm.routers.routers import ROUTER_CLS
 from routellm.server_config import (
@@ -566,10 +572,11 @@ async def lifespan(app):
 
     global AUTH
     AUTH = build_auth(file_config, config_origin)
+    if POLICY is not None:
+        check_policy_principals(POLICY, AUTH)
     if AUTH is None and args.host not in LOOPBACK_HOSTS:
         logging.warning(
-            "listening on %s with no `auth:` configured: anyone who can reach "
-            "this port can use it",
+            "listening on %s with no `auth:` configured: anyone who can reach this port can use it",
             args.host,
         )
 
@@ -690,6 +697,8 @@ class ChatCompletionRequest(BaseModel):
     parallel_tool_calls: bool | None = None
     reasoning_effort: str | None = None
     user: str | None = None
+    # Read for `data_class` and `operation` only, then dropped: never forwarded.
+    metadata: dict[str, Any] | None = None
 
 
 class ChatMessage(BaseModel):
@@ -843,6 +852,21 @@ class LoopDetected(Exception):
     """A request that already carries the hop header."""
 
 
+def _declare(request: "ChatCompletionRequest", http_request: Request):
+    """The request's validated declaration, attached to its context; or a refusal."""
+    classifier = CONTROLLER.decision.config.data_classes if CONTROLLER.decision else ()
+    rc = declare(
+        http_request.headers, request.metadata, http_request.state.principal, POLICY, classifier
+    )
+    http_request.state.request_class = rc
+    current_request_class.set(rc)
+    return rc
+
+
+def _class_refusal(exc: RequestClassRefusal) -> JSONResponse:
+    return JSONResponse(ErrorResponse(message=str(exc)).model_dump(), status_code=exc.status)
+
+
 def refuse_loops(http_request: Request) -> None:
     """Refuse a request that has already been through a router.
 
@@ -888,8 +912,13 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
     # `stream` stays in: the server reads it to pick the response shape,
     # but litellm is what has to produce the chunks.
     forwarded = request.model_dump(exclude_unset=True, exclude_none=True)
-    for handled in ("model", "messages"):
+    for handled in ("model", "messages", "metadata"):
         forwarded.pop(handled, None)
+
+    try:
+        declared = _declare(request, http_request)
+    except RequestClassRefusal as e:
+        return _class_refusal(e)
 
     language = http_request.headers.get(TRANSCRIBE_LANGUAGE_HEADER)
 
@@ -900,6 +929,7 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
             transcribe_language=language,
             request_id=request_id,
             principal=http_request.state.principal,
+            declared_class=declared.data_class,
             compare=http_request.headers.get(COMPARE_HEADER),
             **forwarded,
         )
@@ -957,7 +987,7 @@ class CompareRequest(ChatCompletionRequest):
     "/v1/compare",
     dependencies=[fastapi.Depends(require_principal), fastapi.Depends(refuse_loops)],
 )
-async def create_comparison(request: CompareRequest):
+async def create_comparison(request: CompareRequest, http_request: Request):
     """Run one request on every named model and return the results side by side.
 
     Present only when `comparison.enabled` and `comparison.endpoint`
@@ -977,8 +1007,13 @@ async def create_comparison(request: CompareRequest):
             status_code=400,
         )
 
+    try:
+        _declare(request, http_request)
+    except RequestClassRefusal as e:
+        return _class_refusal(e)
+
     forwarded = request.model_dump(exclude_unset=True, exclude_none=True)
-    for handled in ("model", "models", "tier", "measure_ttft"):
+    for handled in ("model", "models", "tier", "measure_ttft", "metadata"):
         forwarded.pop(handled, None)
 
     request_id = shortuuid.uuid()

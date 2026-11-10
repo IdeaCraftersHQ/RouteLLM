@@ -104,6 +104,10 @@ class StaticKeyResolver:
     def __len__(self) -> int:
         return len(self._entries)
 
+    def principals(self) -> list[Principal]:
+        """Every principal in the map, for startup checks."""
+        return [p for _, p in self._entries]
+
     def resolve(self, bearer: str) -> Principal | None:
         digest = hashlib.sha256(bearer.encode("utf-8")).digest()
         found: Principal | None = None
