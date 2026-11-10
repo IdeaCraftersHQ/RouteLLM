@@ -494,7 +494,10 @@ if aux:
         "router": "emb", "threshold": 0.5, "strong": "local_main", "weak": "local_small",
     }}
 open({config!r}, "w").write(json.dumps(cfg))
-sys.argv = ["x", "--config", {config!r}, "--routers", "random"]
+import os
+# governance (the policy) is honoured from the system layer only
+os.environ["ROUTELLM_SYSTEM_CONFIG"] = {config!r}
+sys.argv = ["x", "--routers", "random"]
 from routellm.routers.routers import ROUTER_CLS
 class _Pin:
     def route(self, prompt, threshold, pair):
