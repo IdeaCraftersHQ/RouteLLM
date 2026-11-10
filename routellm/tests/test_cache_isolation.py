@@ -60,7 +60,7 @@ def _controller(fake, tmp_path, policy=True, **cache):
     }
     registry = EndpointRegistry.from_config(
         {
-            "endpoints": {"loc": leaf},
+            "endpoints": {"loc": leaf, "embedding": leaf},
             "tiers": {
                 "default": {"router": "random", "threshold": 0.0, "strong": "loc", "weak": "loc"}
             },
