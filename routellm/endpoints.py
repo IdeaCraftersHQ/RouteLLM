@@ -95,13 +95,13 @@ from pydantic import (
 )
 
 from routellm.capabilities import Capabilities
-from routellm.requirements import DEFAULT_AUDIO_TOKENS_PER_SECOND
 from routellm.governance import (
     check_namespaces,
     check_tag_namespaces_config,
     parse_jur,
     parse_reach,
 )
+from routellm.requirements import DEFAULT_AUDIO_TOKENS_PER_SECOND
 from routellm.transcription import LOCAL_TAG, TranscriberConfig
 
 logger = logging.getLogger(__name__)
