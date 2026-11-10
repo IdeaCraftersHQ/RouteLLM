@@ -554,7 +554,7 @@ def _unsupported_term(name: str) -> ValueError:
         f"Selector term {name!r} is not supported by routellm pairing; "
         "supported catalog terms are tool_call, reasoning, provider, "
         "open_weights, structured_output, and input, plus routellm's own "
-        "vision, tools, context, and max_output."
+        "vision, audio, tools, context, and max_output."
     )
 
 
@@ -962,6 +962,7 @@ def resolve_registry_pairings(registry: EndpointRegistry) -> None:
 #: Columns the capability matrix prints, in order.
 _MATRIX_COLUMNS = (
     "vision",
+    "audio",
     "tools",
     "structured_output",
     "reasoning",

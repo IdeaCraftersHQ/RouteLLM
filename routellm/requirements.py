@@ -5,9 +5,10 @@ from the model name: `derive` looks at the messages and the kwargs the
 client actually sent, and returns a small frozen record the tier walk
 checks against each side's `Capabilities`.
 
-Four facts are read and nothing else::
+Five facts are read and nothing else::
 
     vision              an image part in some message's content
+    audio               an audio part (`input_audio`, `audio_url`)
     tools               a non-empty `tools` or `functions`
     structured_output   a `response_format` of json_schema/json_object
     context_needed      the prompt's token count plus `max_tokens`
@@ -29,6 +30,9 @@ __all__ = ["Requirements", "derive"]
 #: Content part types that mean the request carries an image.
 _IMAGE_PART_TYPES = frozenset({"image_url", "input_image"})
 
+#: Content part types that mean the request carries audio input.
+_AUDIO_PART_TYPES = frozenset({"input_audio", "audio_url"})
+
 #: `response_format` types that mean the request wants a schema.
 _STRUCTURED_TYPES = frozenset({"json_schema", "json_object"})
 
@@ -49,6 +53,8 @@ class Requirements:
     ----------
     vision : bool
         Whether some message carries an image part.
+    audio : bool
+        Whether some message carries an audio part.
     tools : bool
         Whether the request defines tools or functions.
     structured_output : bool
@@ -60,6 +66,7 @@ class Requirements:
     """
 
     vision: bool = False
+    audio: bool = False
     tools: bool = False
     structured_output: bool = False
     context_needed: int | None = None
@@ -78,6 +85,7 @@ class Requirements:
         """
         return (
             not self.vision
+            and not self.audio
             and not self.tools
             and not self.structured_output
             and self.context_needed is None
@@ -118,15 +126,16 @@ def derive(messages: Any, kwargs: dict[str, Any], model: str | None) -> Requirem
         What the request needs.
     """
     return Requirements(
-        vision=_has_image(messages),
+        vision=_has_part(messages, _IMAGE_PART_TYPES),
+        audio=_has_part(messages, _AUDIO_PART_TYPES),
         tools=bool(kwargs.get("tools")) or bool(kwargs.get("functions")),
         structured_output=_wants_schema(kwargs.get("response_format")),
         context_needed=_context_needed(messages, kwargs, model),
     )
 
 
-def _has_image(messages: Any) -> bool:
-    """Return whether any message content carries an image part.
+def _has_part(messages: Any, part_types: frozenset[str]) -> bool:
+    """Return whether any message content carries a part of these types.
 
     A string `content` can never set this, whatever it says. Every
     access is guarded: `content` may be a str, a list of dicts, or a
@@ -146,7 +155,7 @@ def _has_image(messages: Any) -> bool:
         for part in content:
             if not isinstance(part, dict):
                 continue
-            if part.get("type") in _IMAGE_PART_TYPES:
+            if part.get("type") in part_types:
                 return True
 
     return False
@@ -179,7 +188,7 @@ def _count_tokens(messages: Any, model: str | None) -> int:
     global _warned_fallback
 
     try:
-        return int(litellm.token_counter(model=model, messages=messages))
+        return int(litellm.token_counter(model=model, messages=_without_audio(messages)))
     except Exception as exc:
         if not _warned_fallback:
             _warned_fallback = True
@@ -192,8 +201,35 @@ def _count_tokens(messages: Any, model: str | None) -> int:
         return _rough_tokens(messages)
 
 
+def _without_audio(messages: Any) -> Any:
+    """Return `messages` with audio parts removed, for token counting.
+
+    `litellm.token_counter` raises on an `input_audio` part, and a
+    base64 payload counted as text would swamp the estimate. Audio is
+    therefore skipped: the count covers the text and the other parts
+    only, and is advisory in any case. The request itself is never
+    altered; this returns a copy of the shapes it touches.
+    """
+    if not isinstance(messages, list):
+        return messages
+
+    cleaned = []
+    for message in messages:
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, list):
+            kept = [
+                part
+                for part in content
+                if not (isinstance(part, dict) and part.get("type") in _AUDIO_PART_TYPES)
+            ]
+            message = {**message, "content": kept}
+        cleaned.append(message)
+    return cleaned
+
+
 def _rough_tokens(messages: Any) -> int:
     """Return a characters-over-four estimate over every message."""
+    messages = _without_audio(messages)
     if not isinstance(messages, list):
         return len(str(messages)) // _CHARS_PER_TOKEN
 

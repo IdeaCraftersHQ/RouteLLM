@@ -205,8 +205,9 @@ def test_capabilities_flag_marks_unknown_with_a_question_mark(matrix_config, cap
     out = capsys.readouterr().out
     mystery = next(line for line in out.splitlines() if line.startswith("mystery"))
 
-    assert "?" in mystery
-    assert "no" not in mystery.split()
+    # Columns: name, vision, audio, ... Audio reads `no` off the
+    # endpoint's declared `modalities_in`; vision stays unknown.
+    assert mystery.split()[1] == "?"
 
 
 def test_capabilities_and_explain_print_both(matrix_config, capsys):

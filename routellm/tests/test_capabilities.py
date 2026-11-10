@@ -69,6 +69,7 @@ def test_unknown_stays_none_when_neither_source_knows():
     assert merged.context is None
     assert set(merged.unknown_fields()) == {
         "vision",
+        "audio",
         "tools",
         "structured_output",
         "reasoning",

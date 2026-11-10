@@ -416,9 +416,26 @@ Both defaults are deliberate. Read together: *at startup, prove it; at request t
 
 #### What a request needs
 
-Four facts are read off the request and nothing else: `vision` from an `image_url` or `input_image` part in some message's content, `tools` from a non-empty `tools` or `functions`, `structured_output` from a `response_format` of `json_schema` or `json_object`, and `context_needed` from the prompt's token count plus `max_tokens`. `stream`, `n`, `temperature`, `seed` and the rest never affect routing.
+Five facts are read off the request and nothing else: `vision` from an `image_url` or `input_image` part in some message's content, `audio` from an `input_audio` or `audio_url` part, `tools` from a non-empty `tools` or `functions`, `structured_output` from a `response_format` of `json_schema` or `json_object`, and `context_needed` from the prompt's token count plus `max_tokens`. `stream`, `n`, `temperature`, `seed` and the rest never affect routing.
 
 `context` is judged only when both the count and the endpoint's window are known: the count is an estimate, and it never refuses a request whose endpoint declares no context window.
+
+#### Audio input
+
+A request carrying an audio part (`{"type": "input_audio", "input_audio": {"data": "<base64>", "format": "wav"}}`, or `audio_url`) needs an endpoint that serves audio. An endpoint declares it with `capabilities.audio: true`, by listing `audio` in `modalities_in`, or through its models.dev record; `modalities_in: [text]` or `audio: false` declares the opposite.
+
+```yaml
+endpoints:
+  local_audio:
+    model: openai/<your-audio-model>
+    api_base: http://127.0.0.1:11434/v1
+    capabilities:
+      modalities_in: [text, audio]
+```
+
+Audio is **fail-closed**, unlike the other requirements: an endpoint that says nothing about audio does not serve it, `strict` or not, because a text-only model would answer without ever hearing the clip. A tier takes a side only if it (or a leaf reachable from it) declares audio; with none, the request is refused with a 400 naming `audio` before any upstream call, and the audio is never dropped or sent to a model outside the tier. The path entry shows `capability_requirement: "audio"` when audio forced the side. A request with an image and audio needs a side declaring both. Selectors accept `audio:true`.
+
+Transport matters. litellm's native `ollama_chat/` and `ollama/` providers drop audio parts (and `ollama_chat/` fails while counting tokens over them), so routellm treats those endpoints as not audio capable and logs a warning if you declared otherwise. Reach an audio-capable Ollama model through its OpenAI-compatible route: `openai/<model>` with `api_base: http://host:11434/v1`. The audio payload is skipped when estimating prompt tokens.
 
 #### Three outcomes
 
@@ -435,7 +452,7 @@ Each level of the tier walk checks both its sides before running its router:
 
 A tier-valued side passes when **any** reachable leaf passes; that union is computed once at startup, bottom-up, and cached. Flat pairs get the same check — the legacy pair, a traffic rule's pair, a middleware's pair. A fallback sibling that cannot serve the request is dropped from the chain, because falling back to a model that cannot take the request turns one provider error into two.
 
-A request carrying no images, no tools and no `response_format` demands nothing, so every side passes and the path is byte-identical to what it was before capabilities existed.
+A request carrying no images, no audio, no tools and no `response_format` demands nothing, so every side passes and the path is byte-identical to what it was before capabilities existed.
 
 #### Seeing the picture
 
@@ -443,7 +460,7 @@ A request carrying no images, no tools and no `response_format` demands nothing,
 python -m routellm.pairing --config config.yaml --capabilities
 ```
 
-prints one row per endpoint over `vision`, `tools`, `structured_output`, `reasoning`, `context`, `max_output`, rendered `yes` / `no` / `?`; then one row per tier with its union and a `via` column naming the leaf that supplied each `yes`; then an `Unknown:` block listing the keys each endpoint cannot answer; and finally the capability terms your own selectors use that some endpoint is unknown on — those are the endpoints a selector drops without saying so.
+prints one row per endpoint over `vision`, `audio`, `tools`, `structured_output`, `reasoning`, `context`, `max_output`, rendered `yes` / `no` / `?`; then one row per tier with its union and a `via` column naming the leaf that supplied each `yes`; then an `Unknown:` block listing the keys each endpoint cannot answer; and finally the capability terms your own selectors use that some endpoint is unknown on — those are the endpoints a selector drops without saying so.
 
 Add `--explain` to print the selector tables too, selectors first. There is deliberately no `python -m routellm.capabilities`: this command already loads the YAML, builds the registry and resolves the selectors, which is everything the matrix needs, and a second entry point would duplicate all of it and drift from it.
 

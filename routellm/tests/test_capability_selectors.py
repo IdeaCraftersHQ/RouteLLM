@@ -272,6 +272,7 @@ def test_catalog_failure_raises_when_a_term_needs_the_record(no_catalog):
 def test_capability_key_sets_are_what_the_plan_fixes():
     assert CAPABILITY_KEYS == {
         "vision",
+        "audio",
         "tools",
         "structured_output",
         "reasoning",

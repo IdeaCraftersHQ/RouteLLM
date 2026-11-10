@@ -529,7 +529,7 @@ class ChatCompletionRequest(BaseModel):
     Agent clients send the full OpenAI chat shapes: nested `tools`,
     `tool_choice` as a string or an object, messages with `tool_calls`,
     `role: "tool"` turns, null or absent `content`, content parts
-    (text, image_url) and `response_format` of type `json_schema`. The
+    (text, image_url, input_audio) and `response_format` of type `json_schema`. The
     nested shapes belong to the provider, so they are typed as open
     dicts and forwarded untouched.
 
@@ -600,6 +600,18 @@ def _has_images(messages: Any) -> bool:
     )
 
 
+def _has_audio(messages: Any) -> bool:
+    """Whether any message carries an audio part."""
+    if not isinstance(messages, list):
+        return False
+    return any(
+        isinstance(part, dict) and part.get("type") in ("input_audio", "audio_url")
+        for message in messages
+        if isinstance(message, dict) and isinstance(message.get("content"), list)
+        for part in message["content"]
+    )
+
+
 def request_summary(request: "ChatCompletionRequest") -> str:
     """One log line describing a request, without any of its content.
 
@@ -611,6 +623,7 @@ def request_summary(request: "ChatCompletionRequest") -> str:
     return (
         f"Received request: model={request.model} messages={count} "
         f"tools={bool(request.tools)} images={_has_images(messages)} "
+        f"audio={_has_audio(messages)} "
         f"stream={bool(request.stream)}"
     )
 

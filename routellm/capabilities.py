@@ -37,7 +37,7 @@ under `TYPE_CHECKING` only.
 import logging
 from typing import TYPE_CHECKING, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
     from routellm.endpoints import Endpoint
@@ -83,6 +83,7 @@ _warned: set[str] = set()
 #: Every capability field, in the order the matrix and merge read them.
 _FIELDS = (
     "vision",
+    "audio",
     "tools",
     "structured_output",
     "reasoning",
@@ -104,6 +105,9 @@ class Capabilities(BaseModel):
     ----------
     vision : bool, optional
         Whether the endpoint accepts image parts in message content.
+    audio : bool, optional
+        Whether it accepts audio input parts. Read off `modalities_in`
+        (`audio` listed or not) when not stated directly.
     tools : bool, optional
         Whether it accepts tool/function definitions. The catalog
         spells this `tool_call`; both names mean the same thing.
@@ -122,6 +126,7 @@ class Capabilities(BaseModel):
     """
 
     vision: bool | None = None
+    audio: bool | None = None
     tools: bool | None = None
     structured_output: bool | None = None
     reasoning: bool | None = None
@@ -129,6 +134,13 @@ class Capabilities(BaseModel):
     context: int | None = None
     max_output: int | None = None
     modalities_in: list[str] | None = None
+
+    @model_validator(mode="after")
+    def _audio_from_modalities(self) -> "Capabilities":
+        """Fill `audio` from `modalities_in` when it was not stated."""
+        if self.audio is None and self.modalities_in is not None:
+            self.audio = "audio" in self.modalities_in
+        return self
 
     def unknown_fields(self) -> list[str]:
         """Return the capability names this record cannot answer.
@@ -199,6 +211,7 @@ def _from_record(record: Optional["ModelRecord"]) -> Capabilities | None:
     modalities = list(record.modalities_in or [])
     return Capabilities(
         vision=("image" in modalities) if modalities else None,
+        audio=("audio" in modalities) if modalities else None,
         tools=bool(record.tool_call),
         structured_output=bool(record.structured_output),
         reasoning=bool(record.reasoning),
@@ -276,7 +289,32 @@ def capabilities_for(endpoint: "Endpoint", record: Optional["ModelRecord"]) -> C
     """
     explicit = getattr(endpoint, "capabilities", None)
     tag_derived = from_tags(getattr(endpoint, "tags", None) or [])
-    return merge(explicit, record, tag_derived)
+    caps = merge(explicit, record, tag_derived)
+    return _apply_transport_limits(caps, getattr(endpoint, "model", None))
+
+
+#: litellm provider prefixes whose transport drops audio parts. The
+#: native Ollama paths read only text and `image_url`; `ollama_chat`
+#: additionally raises while counting tokens over an `input_audio`
+#: part. An OpenAI-compatible transport (`openai/` with the server's
+#: `/v1` base) carries the part through untouched.
+_NO_AUDIO_TRANSPORTS = ("ollama/", "ollama_chat/")
+
+
+def _apply_transport_limits(caps: Capabilities, model: str | None) -> Capabilities:
+    """Return `caps` with `audio` forced off for a transport that drops it."""
+    if not isinstance(model, str) or not model.startswith(_NO_AUDIO_TRANSPORTS):
+        return caps
+
+    if caps.audio:
+        logger.warning(
+            "endpoint model %s: audio declared, but this transport drops "
+            "audio parts; treating it as not audio capable. Use an "
+            "OpenAI-compatible route (openai/<model> with the server's "
+            "/v1 api_base) for audio.",
+            model,
+        )
+    return caps.model_copy(update={"audio": False})
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +326,7 @@ def capabilities_for(endpoint: "Endpoint", record: Optional["ModelRecord"]) -> C
 #: answered from `Capabilities.tools`, which already merged the catalog.
 CAPABILITY_KEYS = {
     "vision",
+    "audio",
     "tools",
     "structured_output",
     "reasoning",
@@ -474,7 +513,7 @@ def matches(caps: Capabilities, query: CapabilityQuery) -> bool:
 
 #: Requirements in the order `satisfies` checks them, so the name it
 #: reports for a side that fails several is stable.
-_REQUIREMENT_ORDER = ("vision", "tools", "structured_output", "context")
+_REQUIREMENT_ORDER = ("vision", "audio", "tools", "structured_output", "context")
 
 #: (endpoint, requirement) pairs whose unknown assumption has been
 #: logged. One INFO line per pair per process.
@@ -517,7 +556,7 @@ def satisfies(
     -------
     str or None
         The name of the first failed requirement, one of "vision",
-        "tools", "structured_output", "context", or None when the side
+        "audio", "tools", "structured_output", "context", or None when the side
         can serve the request.
     """
     for requirement in _REQUIREMENT_ORDER:
@@ -537,8 +576,9 @@ def satisfies(
         if value is False:
             return requirement
 
-        # Unknown.
-        if strict:
+        # Unknown. Audio is fail-closed whatever `strict` says: a leaf
+        # that does not declare it would drop the part silently.
+        if strict or requirement == "audio":
             return requirement
         _log_assumption(name, requirement)
 
@@ -585,7 +625,7 @@ def union(parts: list[Capabilities]) -> Capabilities:
 
     values: dict[str, object] = {}
 
-    for name in ("vision", "tools", "structured_output", "reasoning", "open_weights"):
+    for name in ("vision", "audio", "tools", "structured_output", "reasoning", "open_weights"):
         known = [getattr(part, name) for part in parts if getattr(part, name) is not None]
         if known:
             values[name] = any(known)

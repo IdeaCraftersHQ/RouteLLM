@@ -100,6 +100,18 @@ endpoints:
     tags: [local, tools]
     quality: 85
 
+  # An audio-capable local model. Requests carrying `input_audio` parts
+  # are served only by an endpoint that declares audio, either directly
+  # (`audio: true`) or by listing `audio` in `modalities_in`; undeclared
+  # means no, whatever `strict` says. Use the `openai/` route: litellm's
+  # native `ollama_chat/` and `ollama/` transports drop audio parts, so
+  # routellm treats them as not audio capable.
+  local_audio:
+    model: openai/<your-audio-model>
+    api_base: http://127.0.0.1:11434/v1
+    capabilities:
+      modalities_in: [text, audio]
+
   # The `mf` and `sw_ranking` routers embed each prompt before scoring
   # it. This endpoint supplies the base URL and the credential for those
   # calls and nothing else: each router keeps its own `embedding_model`,

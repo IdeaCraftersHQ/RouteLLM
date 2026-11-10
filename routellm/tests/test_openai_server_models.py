@@ -365,6 +365,7 @@ def test_config_example_loads_into_the_registry():
     assert registry.names() == [
         "cloud_strong",
         "embedding",
+        "local_audio",
         "local_glm",
         "ollama_qwen",
     ]
