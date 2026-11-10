@@ -334,11 +334,11 @@ Two forwards, both landing on loopback so the endpoint config can name
 `127.0.0.1` and never a remote host:
 
 ```
-# Ollama -> 127.0.0.1:11500 (host alias m3-ollama in ~/.ssh/config)
-ssh -f -N m3-ollama
+# Ollama -> 127.0.0.1:11500, from the model host's 127.0.0.1:11434
+ssh -f -N -L 11500:localhost:11434 <user>@<gpu-host>
 
 # colibri -> 127.0.0.1:11800, from its own 127.0.0.1:8000
-ssh -f -N -L 11800:localhost:8000 jadb@m3.local
+ssh -f -N -L 11800:localhost:8000 <user>@<gpu-host>
 ```
 
 `-f -N` backgrounds the forward without running a remote command.
