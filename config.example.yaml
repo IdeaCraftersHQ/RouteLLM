@@ -337,6 +337,16 @@ endpoints:
 #       deny: ["*:legacy"]
 #     also_check: [extra_body.models]
 
+# Audit (required with `policy:`, pinned to the system layer). One event per
+# request: caller, class, policy, tier, endpoint, outcome, refusal reason,
+# cache, tokens, latency and a keyed HMAC of the prompt; never content. The
+# file sink appends JSONL (0600 file, 0700 dir) and reopens per write, so
+# logrotate works. The key comes from an env var or a 0600 file, never inline.
+# audit:
+#   sink: file
+#   path: /var/log/routellm/audit.jsonl
+#   hmac_key_env: ROUTELLM_AUDIT_KEY      # or hmac_key_file: /etc/routellm/audit.key
+
 # Policy routing (optional; needs `policy:`). Request attributes, read from
 # headers, pick a routing policy; its rules pick the tier. A request
 # addressed to an `entry` tier goes to the first matching rule's tier, else

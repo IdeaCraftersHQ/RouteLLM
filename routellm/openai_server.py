@@ -17,9 +17,12 @@ import shortuuid
 import uvicorn
 from fastapi import Request
 from fastapi.concurrency import asynccontextmanager
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from routellm.audit import Auditor, build_audit
+from routellm.audit_http import Trail, settle
 from routellm.auth import PrincipalResolver, bearer_token, build_auth, current_principal
 from routellm.capabilities import Capabilities, side_capabilities, union
 from routellm.comparison import COMPARE_HEADER
@@ -41,6 +44,7 @@ from routellm.request_class import (
     current_request_class,
     declare,
 )
+from routellm.requirements import _prompt_text
 from routellm.resilience import EndpointsCooling
 from routellm.routers.routers import ROUTER_CLS
 from routellm.server_config import (
@@ -485,6 +489,7 @@ def payment_budget_for(payment_budget):
 
 #: Resolver for `auth:`; None leaves the server unauthenticated.
 AUTH: PrincipalResolver | None = None
+AUDIT: Auditor | None = None
 
 LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
 
@@ -523,8 +528,10 @@ async def lifespan(app):
     # A policy implies governance and strict_registry, so it loads before
     # the registry is built; a relative path resolves against the file
     # that set it. Any load error stops startup.
-    global POLICY
+    global POLICY, AUDIT
     POLICY = build_policy(file_config, loaded.resolve_path)
+    # A loaded policy requires an audit trail: no audit, no startup.
+    AUDIT = build_audit(file_config, POLICY, loaded.resolve_path)
     endpoints = build_registry(file_config, config_origin)
     intents = build_intents(file_config, endpoints)
     decision = build_decision(file_config, endpoints)
@@ -612,9 +619,14 @@ async def lifespan(app):
         embedding_endpoint=build_embedding_endpoint(file_config),
         allow_remote_embeddings=args.allow_remote_embeddings,
     )
+    if AUDIT is not None:
+        AUDIT.resolve = _endpoint_facts
     yield
     CONTROLLER = None
     AUTH = None
+    if AUDIT is not None:
+        AUDIT.sink.close()
+    AUDIT = None
 
 
 app = fastapi.FastAPI(lifespan=lifespan)
@@ -644,13 +656,36 @@ def require_principal(http_request: Request):
     return principal
 
 
+def _endpoint_facts(name: str) -> tuple[list[str], str | None]:
+    """Reach labels and jurisdiction of endpoint `name`, for audit events."""
+    endpoint = CONTROLLER.endpoints.resolve(name)
+    return sorted(endpoint.reach), endpoint.jur
+
+
+def _early_trail(request: Request) -> "Trail | None":
+    """A trail for a request refused before its handler ran; None off the audited routes."""
+    path = request.url.path
+    if request.method != "POST" or path not in ("/v1/chat/completions", "/v1/compare"):
+        return None
+    return Trail.start(AUDIT, request, None, "compare" if path == "/v1/compare" else "chat")
+
+
 @app.exception_handler(Unauthorized)
-async def _unauthorized(_request: Request, _exc: Unauthorized) -> JSONResponse:
-    return JSONResponse(
+async def _unauthorized(request: Request, _exc: Unauthorized) -> JSONResponse:
+    response = JSONResponse(
         {"object": "error", "message": "Missing or invalid bearer key"},
         status_code=401,
         headers={"WWW-Authenticate": "Bearer"},
     )
+    return settle(_early_trail(request), response, "refused", 401, "unauthorized")
+
+
+@app.exception_handler(RequestValidationError)
+async def _invalid_request(request: Request, exc: RequestValidationError):
+    from fastapi.exception_handlers import request_validation_exception_handler
+
+    response = await request_validation_exception_handler(request, exc)
+    return settle(_early_trail(request), response, "refused", 422, "invalid_request")
 
 
 class ErrorResponse(BaseModel):
@@ -825,7 +860,7 @@ def _transcription_failure(exc: TranscriptionError, request_id: str) -> JSONResp
     )
 
 
-async def stream_response(response, request_id: str | None = None) -> AsyncGenerator:
+async def stream_response(response, request_id: str | None = None, done=None) -> AsyncGenerator:
     """Frame a chunk stream as server-sent events.
 
     A stream that fails after its first chunk has already sent a 200, so
@@ -836,12 +871,20 @@ async def stream_response(response, request_id: str | None = None) -> AsyncGener
     The event is generic: a message and a request id. The exception
     itself (which can name the upstream and echo its text) is logged
     server-side under the same id.
+
+    `done(outcome, reason, tokens_in, tokens_out)`, when given, is called
+    once as the stream ends: `served`, or `failed` for an upstream error
+    or a caller that went away.
     """
     request_id = request_id or shortuuid.uuid()
+    outcome, reason, usage = "failed", "client_disconnect", None
     try:
         async for chunk in response:
+            usage = getattr(chunk, "usage", None) or usage
             yield f"data: {chunk.model_dump_json()}\n\n"
+        outcome, reason = "served", None
     except Exception as e:
+        outcome, reason = "failed", "stream_error"
         logging.getLogger(__name__).error(
             f"Stream failed after its first chunk (request id {request_id}): "
             f"{type(e).__name__}: {e!s}"
@@ -852,9 +895,18 @@ async def stream_response(response, request_id: str | None = None) -> AsyncGener
         # A client that disconnects cancels this generator mid-stream;
         # without this the upstream connection (and the provider's
         # generation) would run on until garbage collection.
-        closer = getattr(response, "aclose", None)
-        if closer is not None:
-            await closer()
+        try:
+            closer = getattr(response, "aclose", None)
+            if closer is not None:
+                await closer()
+        finally:
+            if done is not None:
+                done(
+                    outcome,
+                    reason,
+                    getattr(usage, "prompt_tokens", None),
+                    getattr(usage, "completion_tokens", None),
+                )
     yield "data: [DONE]\n\n"
 
 
@@ -910,11 +962,12 @@ def refuse_loops(http_request: Request) -> None:
 
 
 @app.exception_handler(LoopDetected)
-async def _loop_detected(_request: Request, _exc: LoopDetected) -> JSONResponse:
-    return JSONResponse(
+async def _loop_detected(request: Request, _exc: LoopDetected) -> JSONResponse:
+    response = JSONResponse(
         ErrorResponse(message=f"Loop detected: request already carries {HOP_HEADER}").model_dump(),
         status_code=508,
     )
+    return settle(_early_trail(request), response, "refused", 508, "loop_detected")
 
 
 @app.post(
@@ -936,6 +989,16 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
     """
     request_id = shortuuid.uuid()
     logging.info(f"{request_summary(request)} request_id={request_id}")
+    trail = Trail.start(
+        AUDIT,
+        http_request,
+        request_id,
+        "chat",
+        prompt=_prompt_text(request.messages)
+        if isinstance(request.messages, list)
+        else request.messages,
+        streaming=bool(request.stream),
+    )
 
     # Only what the client actually sent is forwarded. `exclude_unset`
     # drops the fields the body never named, `exclude_none` drops the
@@ -950,7 +1013,9 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
     try:
         declared = _declare(request, http_request)
     except RequestClassRefusal as e:
-        return _class_refusal(e)
+        return settle(trail, _class_refusal(e), "refused", e.status, "class_refused")
+    if trail is not None:
+        trail.declared(declared)
 
     language = http_request.headers.get(TRANSCRIBE_LANGUAGE_HEADER)
 
@@ -967,23 +1032,25 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
             **forwarded,
         )
     except PolicyDenied as e:
-        return JSONResponse(ErrorResponse(message=str(e)).model_dump(), status_code=e.status)
+        response = JSONResponse(ErrorResponse(message=str(e)).model_dump(), status_code=e.status)
+        return settle(trail, response, "refused", e.status, "policy_denied")
     except RoutingError as e:
-        return JSONResponse(
-            ErrorResponse(message=str(e)).model_dump(),
-            status_code=400,
-        )
+        response = JSONResponse(ErrorResponse(message=str(e)).model_dump(), status_code=400)
+        return settle(trail, response, "refused", 400, "routing_error")
     except TranscriptionError as e:
-        return _transcription_failure(e, request_id)
+        return settle(
+            trail, _transcription_failure(e, request_id), "failed", e.status_code, "transcription"
+        )
     except EndpointsCooling as e:
-        return _cooling_response(e, request_id)
+        return settle(trail, _cooling_response(e, request_id), "failed", 503, "endpoints_cooling")
     except Exception as e:
         # Whatever an upstream raised can name it and echo its text: the
         # client gets a generic message and an id; the detail stays here.
         logging.getLogger(__name__).error(
             f"Request failed (request id {request_id}): {type(e).__name__}: {e!s}"
         )
-        return JSONResponse({"object": "error", **_error_body(request_id)}, status_code=502)
+        response = JSONResponse({"object": "error", **_error_body(request_id)}, status_code=502)
+        return settle(trail, response, "failed", 502, "provider_error")
 
     logging.info(CONTROLLER.model_counts)
 
@@ -992,14 +1059,30 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
     logging.info(f"Routing path: {path}")
 
     if request.stream:
-        return StreamingResponse(
-            content=stream_response(res, request_id), media_type="text/event-stream"
+        stream = StreamingResponse(
+            content=stream_response(
+                res, request_id, trail.stream_done(res) if trail is not None else None
+            ),
+            media_type="text/event-stream",
         )
+        # The route is final once the stream is open. The decision is
+        # written before the first byte; a failed write refuses the stream.
+        settled = settle(trail, stream, "served", 200, phase="decision", res=res)
+        if settled is not stream:
+            await res.aclose()
+        return settled
 
     body = res.model_dump()
     if path is not None:
         body["routellm"] = {"path": path}
-    return JSONResponse(content=body)
+    return settle(trail, JSONResponse(content=body), "served", 200, res=res)
+
+
+def _compare_prompt(request: "ChatCompletionRequest") -> str | None:
+    """The text the audit digest covers: the last message, as the router reads it."""
+    if isinstance(request.messages, list):
+        return _prompt_text(request.messages)
+    return request.messages
 
 
 class CompareRequest(ChatCompletionRequest):
@@ -1032,26 +1115,35 @@ async def create_comparison(request: CompareRequest, http_request: Request):
     configured. One model failing never fails the request. Non-
     streaming only.
     """
+    request_id = shortuuid.uuid()
+    trail = Trail.start(AUDIT, http_request, request_id, "compare", _compare_prompt(request))
     manager = CONTROLLER.comparison
     if manager is None or not manager.config.endpoint:
-        return JSONResponse(ErrorResponse(message="Not found").model_dump(), status_code=404)
+        response = JSONResponse(ErrorResponse(message="Not found").model_dump(), status_code=404)
+        return settle(trail, response, "refused", 404, "not_found")
 
     if request.stream:
-        return JSONResponse(
+        response = JSONResponse(
             ErrorResponse(message="/v1/compare does not stream").model_dump(),
             status_code=400,
         )
+        return settle(trail, response, "refused", 400, "compare_stream")
 
     try:
         declared = _declare(request, http_request)
     except RequestClassRefusal as e:
-        return _class_refusal(e)
+        return settle(trail, _class_refusal(e), "refused", e.status, "class_refused")
+    if trail is not None:
+        trail.declared(declared)
+        trail.record.entry_tier = request.tier
+        trail.record.targets = (
+            [request.models] if isinstance(request.models, str) else list(request.models)
+        )
 
     forwarded = request.model_dump(exclude_unset=True, exclude_none=True)
     for handled in ("model", "models", "tier", "measure_ttft", "metadata"):
         forwarded.pop(handled, None)
 
-    request_id = shortuuid.uuid()
     try:
         # The class every target is held to: the strictest of the selected
         # routing policy's floor, the declared class and the decision's;
@@ -1063,6 +1155,8 @@ async def create_comparison(request: CompareRequest, http_request: Request):
             http_request.state.principal,
             tier=request.tier,
         )
+        if trail is not None:
+            trail.record.effective_class, trail.record.policy = data_class, route_policy
         body = await manager.compare(
             request.models,
             forwarded,
@@ -1072,17 +1166,18 @@ async def create_comparison(request: CompareRequest, http_request: Request):
             route_policy=route_policy,
         )
     except PolicyDenied as e:
-        return JSONResponse(ErrorResponse(message=str(e)).model_dump(), status_code=e.status)
-    except RoutingError as e:
-        return JSONResponse(ErrorResponse(message=str(e)).model_dump(), status_code=400)
-    except ValueError as e:
-        return JSONResponse(ErrorResponse(message=str(e)).model_dump(), status_code=400)
+        response = JSONResponse(ErrorResponse(message=str(e)).model_dump(), status_code=e.status)
+        return settle(trail, response, "refused", e.status, "policy_denied")
+    except (RoutingError, ValueError) as e:
+        response = JSONResponse(ErrorResponse(message=str(e)).model_dump(), status_code=400)
+        return settle(trail, response, "refused", 400, "routing_error")
     except Exception as e:
         logging.getLogger(__name__).error(
             f"Compare failed (request id {request_id}): {type(e).__name__}: {e!s}"
         )
-        return JSONResponse({"object": "error", **_error_body(request_id)}, status_code=502)
-    return JSONResponse(content=body)
+        response = JSONResponse({"object": "error", **_error_body(request_id)}, status_code=502)
+        return settle(trail, response, "failed", 502, "provider_error")
+    return settle(trail, JSONResponse(content=body), "served", 200)
 
 
 @app.get("/v1/models", dependencies=[fastapi.Depends(require_principal)])

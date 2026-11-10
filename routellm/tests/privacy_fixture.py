@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from routellm.pairing import CATALOG_CACHE_ENV, write_snapshot
+from routellm.tests.audit_fixture import audit_section
 from routellm.tests.fake_upstream import FakeUpstream  # noqa: F401  used by the subprocess script
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -323,6 +324,7 @@ def class_policy_files(tmp_path: Path, route: bool = False) -> dict:
     return {
         "policy": str(tmp_path / "policy.json"),
         "auth": {"keys_file": str(tmp_path / "keys.yaml")},
+        "audit": audit_section(tmp_path),
         "tiers": {**tiers(), **policy_tiers()},
     }
 

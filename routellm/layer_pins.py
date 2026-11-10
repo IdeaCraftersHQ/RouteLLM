@@ -46,6 +46,7 @@ PINNED_KEYS: tuple[str, ...] = (
     "egress_gates",
     "auth",
     "decision",
+    "audit",
 )
 
 #: Display name of the endpoint-tag pin, listed beside `PINNED_KEYS`.
