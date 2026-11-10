@@ -46,8 +46,6 @@ if __name__ == "__main__":
         controller = Controller(
             routers=args.routers,
             config=load_config(explicit=args.config).data,
-            # This is not needed since we only calculate the win rate
-            routed_pair=None,
             progress_bar=True,
         )
 

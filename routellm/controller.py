@@ -1522,6 +1522,45 @@ class Controller:
             return namespace, "none"
         return namespace, spec.cache or "none"
 
+    def batch_calculate_win_rate(self, prompts, router: str):
+        """Score every prompt's strong win rate with one router.
+
+        Used by evaluations and threshold calibration, which need the raw
+        scores before any threshold is applied.
+
+        Parameters
+        ----------
+        prompts : pandas.Series
+            Prompts to score.
+        router : str
+            Name of an initialized router.
+
+        Returns
+        -------
+        pandas.Series
+            Strong win rate per prompt, same index as `prompts`.
+
+        Raises
+        ------
+        RoutingError
+            If `router` was not initialized.
+        """
+        self._validate_router_threshold(router, 0)
+        router_instance = self.routers[router]
+
+        if not router_instance.NO_PARALLEL:
+            # Needs `pandarallel.initialize()` by the caller.
+            return prompts.parallel_apply(router_instance.calculate_strong_win_rate)
+        if self.progress_bar:
+            return prompts.__class__(
+                [
+                    router_instance.calculate_strong_win_rate(p)
+                    for p in tqdm(prompts, desc=f"Scoring {router}")
+                ],
+                index=prompts.index,
+            )
+        return prompts.apply(router_instance.calculate_strong_win_rate)
+
     def _validate_router_threshold(self, router: str, threshold: float):
         if router not in self.routers:
             raise RoutingError(f"Router {router} not found.")
