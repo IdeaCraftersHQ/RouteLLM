@@ -683,7 +683,10 @@ def _subprocess_env(tmp_path):
 
     env = dict(os.environ)
     env["PYTHONPATH"] = str(REPO_ROOT)
-    env[CATALOG_CACHE_ENV] = str(tmp_path / "subprocess_cache.json")
+    snapshot = tmp_path / "subprocess_cache.json"
+    # An empty fresh snapshot: the subprocess must not fetch the catalog.
+    pairing.write_snapshot(snapshot, [])
+    env[CATALOG_CACHE_ENV] = str(snapshot)
     return env
 
 

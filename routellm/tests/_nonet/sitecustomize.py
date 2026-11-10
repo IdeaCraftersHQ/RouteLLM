@@ -33,7 +33,7 @@ _orig = {}
 
 
 def _is_local(host) -> bool:
-    if host is None or host == "" or host == b"":
+    if host is None or host in ("", b""):
         return True
     if isinstance(host, bytes):
         host = host.decode("ascii", "replace")

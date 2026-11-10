@@ -19,6 +19,11 @@ import pytest
 OFFSITE = "192.0.2.1"
 
 
+def _accept_once(srv):
+    """Accept one connection, then close it (runs in a thread)."""
+    srv.accept()[0].close()
+
+
 def _log() -> str:
     path = os.environ["ROUTELLM_TEST_NO_NETWORK_LOG"]
     with open(path, encoding="utf-8") as fh:
@@ -69,7 +74,7 @@ def test_loopback_tcp_still_works():
     srv.bind(("127.0.0.1", 0))
     srv.listen(1)
     port = srv.getsockname()[1]
-    t = threading.Thread(target=lambda: srv.accept()[0].close())
+    t = threading.Thread(target=_accept_once, args=(srv,))
     t.start()
     try:
         socket.create_connection(("localhost", port), timeout=2).close()
@@ -86,7 +91,7 @@ def test_unix_socket_still_works():
     srv = socket.socket(socket.AF_UNIX)
     srv.bind(path)
     srv.listen(1)
-    t = threading.Thread(target=lambda: srv.accept()[0].close())
+    t = threading.Thread(target=_accept_once, args=(srv,))
     t.start()
     try:
         c = socket.socket(socket.AF_UNIX)

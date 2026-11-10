@@ -518,6 +518,10 @@ def test_server_returns_400_with_a_json_body_for_a_refusal(tmp_path):
         "random",
     ]
 
+    from routellm.pairing import write_snapshot
+
+    # An empty fresh snapshot: the server must not fetch the catalog.
+    write_snapshot(tmp_path / "catalog.json", [])
     result = subprocess.run(
         [sys.executable, "-c", _SERVER_BODY.format(argv=argv)],
         cwd=REPO_ROOT,

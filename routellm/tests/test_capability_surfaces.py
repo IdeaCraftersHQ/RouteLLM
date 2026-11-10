@@ -90,6 +90,10 @@ def matrix_config(tmp_path):
 
 def _run_server(tmp_path, argv, body):
     """Run `body` against a server built from `argv` and parse its JSON."""
+    from routellm.pairing import write_snapshot
+
+    # An empty fresh snapshot: the server must not fetch the catalog.
+    write_snapshot(tmp_path / "catalog.json", [])
     result = subprocess.run(
         [sys.executable, "-c", _PREAMBLE.format(argv=argv) + body],
         cwd=REPO_ROOT,

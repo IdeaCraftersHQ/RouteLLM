@@ -61,6 +61,19 @@ if _BLOCK:
         os.environ[_nonet.ENV_LOG] = _log_path
     _nonet.install()
 
+    # The pairing extra fetches the models.dev catalog when no fresh
+    # snapshot exists. Default every test, and every subprocess, to an
+    # empty offline snapshot; a test that sets its own keeps it.
+    from pathlib import Path
+
+    from routellm.pairing import CATALOG_CACHE_ENV, write_snapshot
+
+    if not os.environ.get(CATALOG_CACHE_ENV):
+        _catalog_dir = tempfile.mkdtemp(prefix="routellm-catalog-")
+        _catalog_path = os.path.join(_catalog_dir, "models_dev.json")
+        write_snapshot(Path(_catalog_path), [])
+        os.environ[CATALOG_CACHE_ENV] = _catalog_path
+
     _real_popen_init = subprocess.Popen.__init__
 
     def _popen_init(self, args, *a, **kw):
@@ -70,6 +83,7 @@ if _BLOCK:
             env["PYTHONPATH"] = _NONET_DIR + (os.pathsep + old if old else "")
             env[_nonet.ENV_FLAG] = "1"
             env[_nonet.ENV_LOG] = os.environ[_nonet.ENV_LOG]
+            env.setdefault(CATALOG_CACHE_ENV, os.environ[CATALOG_CACHE_ENV])
             if os.environ.get("PYTEST_CURRENT_TEST"):
                 env[_nonet.ENV_TEST] = os.environ["PYTEST_CURRENT_TEST"]
             kw["env"] = env

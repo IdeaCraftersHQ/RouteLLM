@@ -284,6 +284,10 @@ def _serve(tmp_path, endpoints):
         "endpoints:\n" + endpoints + "tiers:\n  default:\n    router: random\n"
         "    threshold: 0.5\n    strong: a\n    weak: b\n"
     )
+    from routellm.pairing import write_snapshot
+
+    # An empty fresh snapshot: the server must not fetch the catalog.
+    write_snapshot(tmp_path / "catalog.json", [])
     argv = ["openai_server", "--config", str(config), "--routers", "random"]
     result = subprocess.run(
         [sys.executable, "-c", _SERVER_BODY.format(argv=argv)],
