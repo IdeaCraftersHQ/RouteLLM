@@ -47,6 +47,34 @@ class CacheConfig(BaseModel):
     embedding_model: str = "text-embedding-3-small"
 
 
+def cache_namespace(principal: str | None, data_class: str | None) -> str:
+    """Digest naming whose entries a request may read and write.
+
+    An entry is visible only inside the namespace it was stored under:
+    one caller, one data class. The digest, not the names, reaches the
+    cache database, so a shared or inspectable store does not list
+    callers or classes. Components are encoded unambiguously and `None`
+    differs from an empty name.
+
+    Parameters
+    ----------
+    principal : str, optional
+        The authenticated caller's name; None when auth is off.
+    data_class : str, optional
+        The request's effective data class; None when none applies.
+
+    Returns
+    -------
+    str
+        SHA256 hex digest; "" for no principal and no class, the namespace
+        of an unauthenticated, unclassified setup.
+    """
+    if principal is None and data_class is None:
+        return ""
+    canonical = json.dumps([principal, data_class], separators=(",", ":"))
+    return hashlib.sha256(b"routellm-cache-ns\0" + canonical.encode()).hexdigest()
+
+
 def conversation_key(messages: Any) -> str:
     """Digest of a whole conversation, for use in a cache key.
 
@@ -153,7 +181,8 @@ class Cache:
                 response TEXT,
                 embedding BLOB,
                 created_at INTEGER,
-                scope TEXT
+                scope TEXT,
+                ns TEXT
             )
         """)
         # A database made before `scope` existed gains the column; its old
@@ -162,6 +191,10 @@ class Cache:
         columns = {row[1] for row in cursor.execute("PRAGMA table_info(completion_cache)")}
         if "scope" not in columns:
             cursor.execute("ALTER TABLE completion_cache ADD COLUMN scope TEXT")
+        # Likewise `ns`: a row without one belongs to no namespace and
+        # is never served, exact or semantic.
+        if "ns" not in columns:
+            cursor.execute("ALTER TABLE completion_cache ADD COLUMN ns TEXT")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_model ON completion_cache(model)")
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_model_scope ON completion_cache(model, scope)"
@@ -169,8 +202,10 @@ class Cache:
         conn.commit()
         conn.close()
 
-    def _get_key(self, prompt: str, model: str, params: dict[str, Any]) -> str:
-        """Generate cache key from prompt, model, and parameters.
+    def _get_key(
+        self, prompt: str, model: str, params: dict[str, Any], namespace: str | None = None
+    ) -> str:
+        """Generate cache key from prompt, model, parameters and namespace.
 
         Parameters
         ----------
@@ -180,13 +215,15 @@ class Cache:
             Model name.
         params : dict
             Generation parameters (temperature, top_p, etc.).
+        namespace : str, optional
+            Digest from `cache_namespace`; "" when the caller has none.
 
         Returns
         -------
         str
             SHA256 hash as cache key.
         """
-        data = {"prompt": prompt, "model": model, "params": params}
+        data = {"prompt": prompt, "model": model, "params": params, "ns": namespace or ""}
         return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
     @staticmethod
@@ -215,7 +252,14 @@ class Cache:
             scoped["_conversation"] = params["_conversation"]
         return hashlib.sha256(json.dumps(scoped, sort_keys=True, default=str).encode()).hexdigest()
 
-    def get(self, prompt: str, model: str, params: dict[str, Any]) -> dict[str, Any] | None:
+    def get(
+        self,
+        prompt: str,
+        model: str,
+        params: dict[str, Any],
+        namespace: str | None = None,
+        semantic: bool = True,
+    ) -> dict[str, Any] | None:
         """Retrieve cached completion via exact or semantic match.
 
         Attempts exact match first, then falls back to semantic matching
@@ -229,6 +273,12 @@ class Cache:
             Model name.
         params : dict
             Generation parameters.
+        namespace : str, optional
+            Digest from `cache_namespace`. Only entries stored under the
+            same one match, exactly or semantically.
+        semantic : bool
+            False restricts the lookup to exact matches whatever the
+            config says; no embedding is requested.
 
         Returns
         -------
@@ -238,7 +288,8 @@ class Cache:
         if not self.config.enabled:
             return None
 
-        key = self._get_key(prompt, model, params)
+        namespace = namespace or ""
+        key = self._get_key(prompt, model, params, namespace)
         logger.debug(f"Cache: Checking for model={model} key={key}")
         conn = sqlite3.connect(self.config.db_path)
         cursor = conn.cursor()
@@ -257,13 +308,13 @@ class Cache:
                 logger.debug("Cache entry expired (exact)")
 
         # 2. Try semantic match if enabled
-        if self.config.semantic_enabled:
+        if self.config.semantic_enabled and semantic:
             logger.debug("Cache: Attempting semantic match")
             prompt_emb = self._get_embedding(prompt)
             cursor.execute(
                 "SELECT response, embedding, created_at FROM completion_cache "
-                "WHERE model = ? AND scope = ? AND embedding IS NOT NULL",
-                (model, self._get_scope(params)),
+                "WHERE model = ? AND scope = ? AND ns = ? AND embedding IS NOT NULL",
+                (model, self._get_scope(params), namespace),
             )
             rows = cursor.fetchall()
             for r, emb_blob, c_at in rows:
@@ -290,7 +341,14 @@ class Cache:
         conn.close()
         return None
 
-    async def aget(self, prompt: str, model: str, params: dict[str, Any]) -> dict[str, Any] | None:
+    async def aget(
+        self,
+        prompt: str,
+        model: str,
+        params: dict[str, Any],
+        namespace: str | None = None,
+        semantic: bool = True,
+    ) -> dict[str, Any] | None:
         """Async wrapper for get().
 
         Parameters
@@ -301,15 +359,29 @@ class Cache:
             Model name.
         params : dict
             Generation parameters.
+        namespace : str, optional
+            See `get`.
+        semantic : bool
+            See `get`.
 
         Returns
         -------
         dict or None
             Cached response dict, or None if cache miss.
         """
-        return await asyncio.get_event_loop().run_in_executor(None, self.get, prompt, model, params)
+        return await asyncio.get_event_loop().run_in_executor(
+            None, self.get, prompt, model, params, namespace, semantic
+        )
 
-    def put(self, prompt: str, model: str, params: dict[str, Any], response: dict[str, Any]):
+    def put(
+        self,
+        prompt: str,
+        model: str,
+        params: dict[str, Any],
+        response: dict[str, Any],
+        namespace: str | None = None,
+        semantic: bool = True,
+    ):
         """Store completion in cache.
 
         Parameters
@@ -322,14 +394,19 @@ class Cache:
             Generation parameters.
         response : dict
             Model response dict (typically ModelResponse.model_dump()).
+        namespace : str, optional
+            Digest from `cache_namespace`; the entry is visible only there.
+        semantic : bool
+            False stores no embedding, so the entry never serves a fuzzy hit.
         """
         if not self.config.enabled:
             return
 
-        key = self._get_key(prompt, model, params)
+        namespace = namespace or ""
+        key = self._get_key(prompt, model, params, namespace)
         logger.debug(f"Cache: Putting entry for model={model} key={key}")
         embedding = None
-        if self.config.semantic_enabled:
+        if self.config.semantic_enabled and semantic:
             try:
                 embedding = self._get_embedding(prompt)
                 logger.debug(f"Cache: Generated embedding for model={model}")
@@ -340,8 +417,8 @@ class Cache:
         cursor = conn.cursor()
         cursor.execute(
             "INSERT OR REPLACE INTO completion_cache "
-            "(key, prompt, model, response, embedding, created_at, scope) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "(key, prompt, model, response, embedding, created_at, scope, ns) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 key,
                 prompt,
@@ -350,12 +427,21 @@ class Cache:
                 embedding.tobytes() if embedding is not None else None,
                 int(time.time()),
                 self._get_scope(params),
+                namespace,
             ),
         )
         conn.commit()
         conn.close()
 
-    async def aput(self, prompt: str, model: str, params: dict[str, Any], response: dict[str, Any]):
+    async def aput(
+        self,
+        prompt: str,
+        model: str,
+        params: dict[str, Any],
+        response: dict[str, Any],
+        namespace: str | None = None,
+        semantic: bool = True,
+    ):
         """Async wrapper for put().
 
         Parameters
@@ -368,9 +454,13 @@ class Cache:
             Generation parameters.
         response : dict
             Model response dict.
+        namespace : str, optional
+            See `put`.
+        semantic : bool
+            See `put`.
         """
         return await asyncio.get_event_loop().run_in_executor(
-            None, self.put, prompt, model, params, response
+            None, self.put, prompt, model, params, response, namespace, semantic
         )
 
     def _get_embedding(self, text: str) -> np.ndarray:

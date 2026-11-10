@@ -19,7 +19,7 @@ from tqdm import tqdm
 from routellm import requirements as requirements_module
 from routellm import transcription
 from routellm.auth import Principal, current_principal
-from routellm.caching import Cache, CacheConfig, context_key, conversation_key
+from routellm.caching import Cache, CacheConfig, cache_namespace, context_key, conversation_key
 from routellm.capabilities import (
     build_tier_index,
     catalog_records,
@@ -1238,6 +1238,27 @@ class Controller:
         params["_context"] = context_key(kwargs.get("messages"))
         return params
 
+    def _cache_scope(self, effective_class: str | None) -> tuple[str, str]:
+        """Return `(namespace, mode)` for this request's cache use.
+
+        The namespace is the digest of the caller and the effective data
+        class, so an entry is never served across either. The mode is the
+        class's `cache:` under a loaded policy, `none`, `exact` or `both`;
+        a class the policy does not list, or one that is blocked, vaulted
+        or redacted, gets `none`. Without a policy it is `both`, which the
+        cache narrows to whatever its config enables.
+        """
+        principal = current_principal.get()
+        namespace = cache_namespace(
+            principal.principal if principal is not None else None, effective_class
+        )
+        if self.policy is None:
+            return namespace, "both"
+        spec = self.policy.classes.get(effective_class) if effective_class else None
+        if spec is None or spec.treatment != "raw":
+            return namespace, "none"
+        return namespace, spec.cache or "none"
+
     def _validate_router_threshold(self, router: str, threshold: float):
         if router not in self.routers:
             raise RoutingError(f"Router {router} not found.")
@@ -1654,7 +1675,16 @@ class Controller:
 
         # Try cache
         cache_params = self._cache_params(kwargs)
-        cached_res = None if streaming else self.cache.get(prompt, model_to_use, cache_params)
+        cache_ns, cache_mode = self._cache_scope(
+            decision.data_class if decision is not None else declared_class
+        )
+        use_cache = not streaming and cache_mode != "none"
+        fuzzy = cache_mode == "both"
+        cached_res = (
+            self.cache.get(prompt, model_to_use, cache_params, cache_ns, fuzzy)
+            if use_cache
+            else None
+        )
         if cached_res:
             from litellm.utils import ModelResponse
 
@@ -1711,7 +1741,10 @@ class Controller:
 
                 # Cache the response
                 try:
-                    self.cache.put(prompt, model_name, cache_params, res.model_dump())
+                    if use_cache:
+                        self.cache.put(
+                            prompt, model_name, cache_params, res.model_dump(), cache_ns, fuzzy
+                        )
                 except Exception as e:
                     import logging
 
@@ -1898,8 +1931,15 @@ class Controller:
 
         # Try cache
         cache_params = self._cache_params(kwargs)
+        cache_ns, cache_mode = self._cache_scope(
+            decision.data_class if decision is not None else declared_class
+        )
+        use_cache = not streaming and cache_mode != "none"
+        fuzzy = cache_mode == "both"
         cached_res = (
-            None if streaming else await self.cache.aget(prompt, model_to_use, cache_params)
+            await self.cache.aget(prompt, model_to_use, cache_params, cache_ns, fuzzy)
+            if use_cache
+            else None
         )
         if cached_res:
             from litellm.utils import ModelResponse
@@ -2026,7 +2066,10 @@ class Controller:
 
                 # Cache the response
                 try:
-                    await self.cache.aput(prompt, model_name, cache_params, res.model_dump())
+                    if use_cache:
+                        await self.cache.aput(
+                            prompt, model_name, cache_params, res.model_dump(), cache_ns, fuzzy
+                        )
                 except Exception as e:
                     import logging
 
