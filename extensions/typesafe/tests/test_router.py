@@ -4,17 +4,17 @@ All requests go through httpx2.MockTransport, never the network. Every
 fixture sets TYPESAFE_API_KEY: TypeSafeClient requires it even with a
 mock transport, since the key check happens before any request is sent.
 """
+
 import json
 import logging
 
 import httpx2
 import pytest
 import typesafe_sdk
-
-import routellm.routers.registry as registry
-
-from routellm.types import ModelPair
 from routellm_typesafe.router import DEFAULT_CRITERIA, JevRouter
+
+from routellm.routers import registry
+from routellm.types import ModelPair
 
 RESPONSE_BODY = {
     "model": "jev-1.13.0",
@@ -61,9 +61,7 @@ def test_prompt_truncated(captured):
         captured["body"] = json.loads(request.content)
         return httpx2.Response(200, json=RESPONSE_BODY)
 
-    router = JevRouter(
-        max_prompt_chars=10, transport=httpx2.MockTransport(handler)
-    )
+    router = JevRouter(max_prompt_chars=10, transport=httpx2.MockTransport(handler))
     router.calculate_strong_win_rate("x" * 100)
     router.close()
 
@@ -83,9 +81,7 @@ def test_custom_criteria_in_request(captured):
         captured["body"] = json.loads(request.content)
         return httpx2.Response(200, json=RESPONSE_BODY)
 
-    router = JevRouter(
-        criteria=criteria, transport=httpx2.MockTransport(handler)
-    )
+    router = JevRouter(criteria=criteria, transport=httpx2.MockTransport(handler))
     router.calculate_strong_win_rate("hello world")
     router.close()
 
@@ -181,3 +177,20 @@ def test_str_is_jev(router):
             registry.ROUTER_CLS.pop("jev", None)
         else:
             registry.ROUTER_CLS["jev"] = saved
+
+
+def test_base_url_directs_requests():
+    seen = {}
+
+    def handler(request):
+        seen["url"] = str(request.url)
+        return httpx2.Response(200, json=RESPONSE_BODY)
+
+    router = JevRouter(
+        base_url="https://upstream.example.test",
+        transport=httpx2.MockTransport(handler),
+    )
+    router.calculate_strong_win_rate("hello world")
+    router.close()
+
+    assert seen["url"].startswith("https://upstream.example.test/")

@@ -8,6 +8,7 @@ The `Router` base comes from `routellm.routers.base`, not from
 class is not registered here: the `routellm.routers` entry point
 declared in this package's pyproject does that at discovery time.
 """
+
 from __future__ import annotations
 
 import logging
@@ -20,8 +21,7 @@ from routellm.routers.base import Router
 logger = logging.getLogger(__name__)
 
 DEFAULT_INSTRUCTIONS = (
-    "Would a frontier-class model answer this prompt materially better "
-    "than a small, cheap model?"
+    "Would a frontier-class model answer this prompt materially better than a small, cheap model?"
 )
 
 DEFAULT_CRITERIA = {
@@ -30,8 +30,7 @@ DEFAULT_CRITERIA = {
         "handling of long or ambiguous input, or precise domain knowledge."
     ),
     "false": (
-        "The prompt is a greeting, a simple lookup, a short rewrite, or "
-        "plain formatting work."
+        "The prompt is a greeting, a simple lookup, a short rewrite, or plain formatting work."
     ),
 }
 
@@ -69,8 +68,7 @@ def _check_criteria(criteria, path):
             raise ValueError(f"{path}: unknown key {key!r} in 'router.criteria'")
         if not isinstance(value, str):
             raise ValueError(
-                f"{path}: router.criteria.{key} must be str, "
-                f"got {type(value).__name__}"
+                f"{path}: router.criteria.{key} must be str, got {type(value).__name__}"
             )
 
 
@@ -153,9 +151,7 @@ class JevRouter(Router):
         self.instructions, instructions_source = resolve(
             instructions, section.get("instructions"), DEFAULT_INSTRUCTIONS
         )
-        self.criteria, criteria_source = resolve(
-            criteria, file_criteria, dict(DEFAULT_CRITERIA)
-        )
+        self.criteria, criteria_source = resolve(criteria, file_criteria, dict(DEFAULT_CRITERIA))
         logger.debug(
             "jev router prompt sources instructions=%s criteria=%s",
             instructions_source,

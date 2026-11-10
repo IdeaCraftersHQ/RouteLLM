@@ -18,7 +18,8 @@ classifiers = [
 dependencies = [
     # Routellm core (sibling package); installed via local path / editable in dev
     "routellm",
-    "typesafe-sdk>=0.7,<1",
+    # Exact pin: MIT, 0.7.5 released 2026-10-14, official typesafe-ai repo.
+    "typesafe-sdk==0.7.5",
 ]
 
 [project.optional-dependencies]

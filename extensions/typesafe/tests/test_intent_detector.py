@@ -1,15 +1,16 @@
 """Tests for JevIntentDetector, backed by a MockTransport TypeSafe client."""
+
 import json
 
 import httpx2
 import pytest
+from routellm_typesafe.intent_detector import JevIntentDetector
 
 from routellm.controller import ModelPair
 from routellm.middleware.intent_model_selector import (
     IntentModelMapping,
     IntentModelSelector,
 )
-from routellm_typesafe.intent_detector import JevIntentDetector
 
 CODING_MAPPING = IntentModelMapping(
     intent="coding",
@@ -51,9 +52,7 @@ def typesafe_api_key(monkeypatch):
 
 def test_detect_intent_returns_choice():
     captured = {}
-    body = _choice_response(
-        "coding", 0.91, {"coding": 0.91, "general": 0.09}
-    )
+    body = _choice_response("coding", 0.91, {"coding": 0.91, "general": 0.09})
     transport = _make_transport(body, captured)
     detector = JevIntentDetector([CODING_MAPPING], transport=transport)
 
@@ -64,9 +63,7 @@ def test_detect_intent_returns_choice():
 
 def test_confidence_floor_returns_general():
     captured = {}
-    body = _choice_response(
-        "coding", 0.3, {"coding": 0.3, "general": 0.7}
-    )
+    body = _choice_response("coding", 0.3, {"coding": 0.3, "general": 0.7})
     transport = _make_transport(body, captured)
     detector = JevIntentDetector([CODING_MAPPING], transport=transport)
 
@@ -77,9 +74,7 @@ def test_confidence_floor_returns_general():
 
 def test_probabilities_map_matches_intents():
     captured = {}
-    body = _choice_response(
-        "coding", 0.91, {"coding": 0.91, "general": 0.09}
-    )
+    body = _choice_response("coding", 0.91, {"coding": 0.91, "general": 0.09})
     transport = _make_transport(body, captured)
     detector = JevIntentDetector([CODING_MAPPING], transport=transport)
 
@@ -90,9 +85,7 @@ def test_probabilities_map_matches_intents():
 
 def test_criteria_built_from_mappings():
     captured = {}
-    body = _choice_response(
-        "coding", 0.91, {"coding": 0.91, "general": 0.09}
-    )
+    body = _choice_response("coding", 0.91, {"coding": 0.91, "general": 0.09})
     transport = _make_transport(body, captured)
     detector = JevIntentDetector([CODING_MAPPING], transport=transport)
 
@@ -110,9 +103,7 @@ def test_selector_integration(monkeypatch):
     from unittest.mock import patch
 
     captured = {}
-    body = _choice_response(
-        "coding", 0.91, {"coding": 0.91, "general": 0.09}
-    )
+    body = _choice_response("coding", 0.91, {"coding": 0.91, "general": 0.09})
     transport = _make_transport(body, captured)
     detector = JevIntentDetector([CODING_MAPPING], transport=transport)
     default_pair = ModelPair(strong="default-strong", weak="default-weak")
@@ -131,9 +122,7 @@ def test_selector_integration(monkeypatch):
 
 def test_close_delegates_to_client_close():
     captured = {}
-    body = _choice_response(
-        "coding", 0.91, {"coding": 0.91, "general": 0.09}
-    )
+    body = _choice_response("coding", 0.91, {"coding": 0.91, "general": 0.09})
     transport = _make_transport(body, captured)
     detector = JevIntentDetector([CODING_MAPPING], transport=transport)
     closed = {"called": False}
@@ -161,3 +150,21 @@ def test_get_intent_confidence_fills_missing_intent_with_zero():
 
     assert probabilities == {"coding": 0.0, "general": 0.6}
 
+
+def test_base_url_directs_requests():
+    seen = {}
+    body = _choice_response("coding", 0.91, {"coding": 0.91, "general": 0.09})
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen["url"] = str(request.url)
+        return httpx2.Response(200, json=body)
+
+    detector = JevIntentDetector(
+        [CODING_MAPPING],
+        base_url="https://upstream.example.test",
+        transport=httpx2.MockTransport(handler),
+    )
+    detector.detect_intent("write a for loop")
+    detector.close()
+
+    assert seen["url"].startswith("https://upstream.example.test/")
