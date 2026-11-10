@@ -148,6 +148,8 @@ class QualityManager:
         latency_ms: int | None = None,
         provider: str | None = None,
         area: str | None = None,
+        comparison: dict[str, Any] | None = None,
+        score: float | None = None,
     ) -> None:
         """Record one routed request as a fit-ingestible trace.
 
@@ -189,6 +191,13 @@ class QualityManager:
             litellm provider name.
         area : str, optional
             The area the deepest tier belongs to.
+        comparison : dict, optional
+            Present when the request took part in a comparison: its
+            `id`, `role` (primary, shadow or candidate), the per-model
+            `metrics`, any `error` and the judge `score`. Stored under
+            the `routellm` block.
+        score : float, optional
+            A judge's score, stored as `reward.score`.
         """
         if not self.fine_tune_config.enabled:
             return
@@ -217,7 +226,7 @@ class QualityManager:
                     "output": _extract_output(response),
                     "usage": _extract_usage(response),
                 },
-                "reward": {"score": None, "breakdown": {}},
+                "reward": {"score": score, "breakdown": {}},
                 "routellm": {
                     "endpoint": endpoint or routed_model,
                     "request_model": request_model,
@@ -238,6 +247,9 @@ class QualityManager:
                 "output": response,
                 "routed_model": routed_model,
             }
+
+            if comparison is not None:
+                trace["routellm"]["comparison"] = comparison
 
             final = os.path.join(self.fine_tune_config.trace_dir, f"{trace_id}.json")
             temporary = f"{final}.tmp"

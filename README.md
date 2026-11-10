@@ -689,6 +689,77 @@ areas:
 
 Record traces, score them offline against a rubric, aggregate, and restart: `python -m routellm.quality_scores score --traces .routellm_traces --scorer rubric:./rubric.yaml` then `aggregate --scores scores.jsonl --out quality.yaml`. Scoring needs the `fit` extra; aggregation needs nothing. An endpoint the sidecar does not name keeps the number it has, and each override logs one line naming both. The whole loop is in [docs/runbooks/traces-to-quality.md](docs/runbooks/traces-to-quality.md).
 
+### Comparison routing
+
+Send one request to two or more models at once and record how each did: time to first token, total latency, tokens per second, prompt and completion tokens, cost, error and output. Off by default; nothing below does anything until `comparison.enabled` is `true`.
+
+```yaml
+comparison:
+  enabled: true
+  budget_usd: 5.00            # stop all comparison calls after this much spend
+  max_concurrency: 4          # shadow calls in flight at once
+  profiles:
+    frontier_vs_local: [cloud_strong, local_glm]
+  sampling:                   # shadow 5% of requests that enter tier `default`
+    default: {rate: 0.05, models: [local_glm]}
+  experiments:
+    bench:
+      models: frontier_vs_local
+      rate: 0.1
+      budget_usd: 1.00
+      max_concurrency: 2
+  judge:
+    scorer: "rubric:rubric.yaml"
+
+traces:                       # the trace store; off unless enabled
+  enabled: true
+  trace_dir: .routellm_traces # relative to this file
+  max_files: 10000
+  max_bytes: 536870912
+```
+
+`config.example.yaml` carries the same section, commented, with every key.
+
+**Shadow mode.** The normal `/v1/chat/completions` request is answered by its primary, unchanged, streamed or not. The shadow models get the same request concurrently, as background tasks, non-streaming. Their results go to the trace store (turn it on with the `traces:` section below) and nowhere else: a shadow never delays or alters the response, never reads or writes the response cache, and its failures are logged and recorded, never shown to the client. A cache hit on the primary runs no shadow. Primary and shadow traces share a `routellm.comparison.id`, with `role` `primary` or `shadow`.
+
+What triggers a shadow, in priority order, at most one per request:
+
+1. The `X-RouteLLM-Compare` request header: an experiment name, a profile name, or a comma-separated list of endpoint names (`X-RouteLLM-Compare: cloud_strong,local_glm`). Names that are not configured endpoints are ignored. `allow_header: false` turns the header off.
+2. A named experiment, sampled at its `rate`. Naming the experiment in the header ignores the rate. `tiers:` limits it to requests that entered those tiers.
+3. The `sampling` rule of the tier the request entered.
+
+A shadow is never sent to the endpoint the primary was routed to.
+
+**`POST /v1/compare`.** On whenever comparison is enabled (`endpoint: false` turns it off; see Privacy for who may name which models). The body is a chat request plus `models` (a list of endpoint names, or a profile or experiment name, at least two), and optionally `tier` and `measure_ttft`. Every model answers and the results come back side by side; one model failing never fails the request.
+
+```json
+{"object": "comparison", "id": "cmp-...", "results": [
+  {"endpoint": "cloud_strong", "model": "gpt-4o", "output": "...", "finish_reason": "stop",
+   "error": null, "score": null,
+   "metrics": {"ttft_ms": null, "latency_ms": 812, "tokens_per_second": 41.2,
+               "prompt_tokens": 12, "completion_tokens": 33, "cost_usd": 0.00041}}]}
+```
+
+`error` is a short code (`upstream_error`, `timeout`, `budget_exhausted`, `unsupported: <requirement>`); the upstream's own text stays in the server log. Streaming a compare is not supported. `measure_ttft: true` (or `comparison.measure_ttft`) makes each call stream upstream so `ttft_ms` is measured; the response is still one JSON body. Without it `ttft_ms` is null. `tokens_per_second` is completion tokens over total latency. `cost_usd` is the token usage priced from the endpoint's models.dev record, null when it has none.
+
+**Limits.** `budget_usd` (global and per experiment) is USD, in memory, per process; a restart clears it. A call is charged when it finishes, so calls in flight can overshoot a cap by their own cost, and an unpriced endpoint costs nothing against it. `max_concurrency` (global and per experiment) counts calls in flight; a shadow that does not fit is dropped, never queued. `max_models` bounds one plan, `timeout_ms` one call. Comparison calls are not retried and carry the hop header like every other outbound call.
+
+**Privacy.** A tier is local-only when every endpoint it can reach is tagged `local`. Such a tier may only be shadowed to `local`-tagged endpoints: `sampling` or `experiments` that break this are refused when the config loads, and a header-named model or an untiered experiment is filtered at request time. `POST /v1/compare` is explicit multi-model fan-out, so it is closed by default: a request must either name a `tier` (that tier's local-only rule then applies) or name only models in `comparison.compare_allowed_models` or in a profile or experiment, otherwise 400. `allow_untiered_compare: true` lifts this and lets any caller send any prompt to any configured endpoint, paid and cloud ones included; it is dangerous, leave it off on anything reachable by untrusted clients. `pay: true` endpoints stay refused either way. The replay CLI is an operator tool and is not restricted. Endpoints with `pay: true` can never be comparison targets, so a shadow cannot spend the wallet.
+
+**Judge.** `judge.scorer` is any scorer spec of `python -m routellm.quality_scores` (`rubric:`, `module:`, `composite:`, `judge:<model>`), run on each recorded output and stored as `reward.score` and `routellm.comparison.score`. Only `judge:<model>` calls an LLM, and it counts as local only when `<model>` is an endpoint tagged `local`. A non-local judge is refused at load when a sampled or experiment tier is local-only, and is never run on data from a local-only tier that reached comparison some other way. A failed comparison call is recorded with its `error` and skipped by `quality_scores score`.
+
+**Offline replay.** Run a jsonl dataset of chat requests (`{"messages": [...]}` or `{"prompt": "..."}` per line) through N models, recorded the same way:
+
+```
+python -m routellm.compare replay --dataset chats.jsonl \
+    --models cloud_strong,local_glm --config config.yaml \
+    --trace-dir .routellm_traces --out results.jsonl [--judge SPEC] [--tier T] [--limit N]
+```
+
+Each row gets one comparison id, role `candidate`, and a per-model summary is printed. `comparison.enabled` is not required for replay; the config's `comparison:` section still supplies the timeout, budget and judge. Feed the traces to `routellm.quality_scores` as in [Traces to quality](docs/runbooks/traces-to-quality.md).
+
+Shadow mode runs on the async request path the server uses; the synchronous `Controller.completion` is untouched.
+
 ### Intents
 
 There are two ways to pick the area of expertise a request is answered from. An app that already knows names the tier itself, in the `model` field. An app that does not sends `default` and lets an intent classifier pick, which is what an `intents:` section turns on:

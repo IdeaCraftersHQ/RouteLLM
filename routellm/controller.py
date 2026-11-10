@@ -25,6 +25,7 @@ from routellm.capabilities import (
     side_capabilities,
     usable_sibling,
 )
+from routellm.comparison import ComparisonConfig, ComparisonManager
 from routellm.endpoints import EndpointRegistry, Selector
 from routellm.hints import TYPESAFE_INSTALL_HINT
 from routellm.leaf_params import drop_kwargs, log_dropped
@@ -145,6 +146,7 @@ class Controller:
         endpoints: EndpointRegistry | None = None,
         default_router: str | None = None,
         default_threshold: float = 0.5,
+        comparison_config: ComparisonConfig | None = None,
     ):
         """Initialize controller with routers and configuration.
 
@@ -200,6 +202,9 @@ class Controller:
             request carries none. Falls back to `routers[0]`.
         default_threshold : float
             Threshold used under the same conditions. Default 0.5.
+        comparison_config : ComparisonConfig, optional
+            Shadow and compare settings. None, or a disabled config,
+            builds no manager and the request path is untouched.
 
         Raises
         ------
@@ -309,6 +314,13 @@ class Controller:
             self.routers[router] = router_cls(**router_config)
             if router_pbar:
                 router_pbar.update(1)
+
+        # Built last: it validates against the finished registry.
+        self.comparison = (
+            ComparisonManager(comparison_config, self)
+            if comparison_config is not None and comparison_config.enabled
+            else None
+        )
 
     def _router_upstream(self, router: str, router_config: dict) -> dict[str, str | None]:
         """Resolve the registry endpoint a hosted router calls.
@@ -1445,6 +1457,7 @@ class Controller:
         session_id,
         started,
         area,
+        comparison=None,
     ):
         """Record a streamed completion's trace once the stream is over.
 
@@ -1485,6 +1498,7 @@ class Controller:
                 session_id=session_id,
                 latency_ms=latency_ms,
                 area=area,
+                comparison=comparison,
             )
             logger.info("routing path at stream end: %s -> %s", path, model_name)
 
@@ -1511,6 +1525,7 @@ class Controller:
         threshold: float | None = None,
         transcribe_language: str | None = None,
         request_id: str | None = None,
+        compare: str | None = None,
         **kwargs,
     ):
         tier = None
@@ -1587,6 +1602,26 @@ class Controller:
             )
             return self._attach_path(res, path, model_to_use, sibling, sibling_reference)
 
+        # Shadow comparison: background tasks that record and nothing
+        # else. They start only on a cache miss, run beside the primary
+        # and never see the cache or the client.
+        primary_mark = None
+        if self.comparison is not None:
+            plan = self.comparison.plan(
+                header=compare, path=path, pair=effective_pair, picked=routed_model
+            )
+            if plan is not None:
+                primary_mark = {"id": plan.id, "role": "primary"}
+                self.comparison.launch(
+                    plan,
+                    kwargs=kwargs,
+                    prompt=prompt,
+                    request_model=request_name,
+                    path=path,
+                    session_id=session_id,
+                    reqs=reqs,
+                )
+
         last_err = None
         walk: list[dict[str, Any]] = []
         for model_name in models_to_try:
@@ -1637,6 +1672,7 @@ class Controller:
                             session_id=session_id,
                             started=started,
                             area=area,
+                            comparison=primary_mark,
                         ),
                     )
 
@@ -1686,6 +1722,7 @@ class Controller:
                     session_id=session_id,
                     latency_ms=latency_ms,
                     area=area,
+                    comparison=primary_mark,
                 )
 
                 return self._attach_path(res, path, model_name, sibling, sibling_reference, walk)

@@ -18,13 +18,19 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from routellm.caching import CacheConfig
+from routellm.comparison import ComparisonConfig
 from routellm.config import ConfigError
+from routellm.quality import FineTuneConfig, QualityManager
 from routellm.resilience import ResilienceConfig
 
-SERVER_SECTIONS = ("cache", "resilience")
+SERVER_SECTIONS = ("cache", "resilience", "comparison", "traces")
 
 
 class _StrictCache(CacheConfig):
+    model_config = ConfigDict(extra="forbid")
+
+
+class _StrictTraces(FineTuneConfig):
     model_config = ConfigDict(extra="forbid")
 
 
@@ -77,3 +83,45 @@ def build_resilience_config(file_config: dict | None) -> ResilienceConfig:
     """Return the resilience settings, field names as in `ResilienceConfig`."""
     config = _validate(_StrictResilience, "resilience", _section(file_config, "resilience"))
     return ResilienceConfig(**config.model_dump())
+
+
+def build_comparison_config(file_config: dict | None) -> ComparisonConfig:
+    """Return the comparison settings; disabled unless the config enables it.
+
+    The model refuses unknown keys itself, so a mistyped `rate:` is an
+    error rather than a limit that quietly never applied.
+    """
+    return _validate(ComparisonConfig, "comparison", _section(file_config, "comparison"))
+
+
+def build_quality_manager(
+    file_config: dict | None, config_path: str | None
+) -> QualityManager | None:
+    """Return the trace recorder the `traces:` section asks for, else None.
+
+    Traces are off unless the section enables them. The keys are those
+    of `FineTuneConfig` (`enabled`, `trace_dir`, `max_files`,
+    `max_bytes`). A relative `trace_dir` resolves against the config
+    file's directory, never the process CWD.
+
+    Parameters
+    ----------
+    file_config : dict, optional
+        The merged config.
+    config_path : str, optional
+        The file the config was read from.
+
+    Returns
+    -------
+    QualityManager or None
+        None leaves the controller its default, which records nothing.
+    """
+    raw = _section(file_config, "traces")
+    config = _validate(_StrictTraces, "traces", dict(raw))
+    if not config.enabled:
+        return None
+    path = Path(config.trace_dir).expanduser()
+    if not path.is_absolute() and config_path:
+        path = Path(config_path).resolve().parent / path
+    values = {**config.model_dump(), "trace_dir": os.fspath(path)}
+    return QualityManager(fine_tune_config=FineTuneConfig(**values))
