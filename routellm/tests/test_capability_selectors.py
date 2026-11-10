@@ -219,6 +219,7 @@ def test_structured_output_term_no_longer_raises_unsupported(catalog):
     assert _names(registry, "open_weights:false") == ["plain", "structured"]
 
 
+@pytest.mark.pairing
 def test_family_term_still_raises_unsupported(catalog):
     registry = _registry(cloud=Endpoint(name="cloud", model="gpt-4o"))
 

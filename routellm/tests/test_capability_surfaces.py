@@ -312,6 +312,7 @@ def test_record_without_modalities_leaves_vision_unknown():
     assert caps.tools is True
 
 
+@pytest.mark.pairing
 def test_explain_failure_reports_to_stderr_instead_of_raising(tmp_path, capsys):
     """A selector matching nothing must exit 1 with the reason on stderr.
 

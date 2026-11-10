@@ -91,7 +91,7 @@ client = Controller(
 
 **From PyPI**
 ```
-pip install "routellm[serve,eval]"
+pip install "routellm[serve]"
 ```
 
 **From source**
@@ -99,8 +99,32 @@ pip install "routellm[serve,eval]"
 ```
 git clone https://github.com/lm-sys/RouteLLM.git
 cd RouteLLM
-pip install -e .[serve,eval]
+pip install -e ".[serve]"
 ```
+
+**Optional extras**
+
+| Extra | Adds | Needed for |
+|-------|------|------------|
+| `serve` | fastapi, uvicorn, `mcp` | the OpenAI-compatible server (`mcp` is imported by litellm on any request carrying `tools`) |
+| `ml` | torch, transformers, datasets, huggingface_hub | the `mf`, `bert`, `causal_llm` and `sw_ranking` routers; calibration |
+| `eval` | matplotlib, pandarallel, sglang, tiktoken, psutil | the evaluation scripts |
+| `pairing` | `hop-top-aim` (models.dev client) | policy-based tier selectors |
+
+The base install and `serve` run the `random` router and threshold routing
+over config tiers with none of the ML stack (the install is hundreds of MB
+rather than several GB). A router that runs a model fails at start-up with an
+error naming the missing extra; install it with:
+
+```
+pip install "routellm[serve,ml]"
+```
+
+If you installed the previous default (which bundled torch), add `ml` to keep
+the model-backed routers.
+
+Supported litellm versions: `>=1.106.4,<1.109`. CI runs the suite on the oldest
+and the newest version in that range.
 
 **Policy-based pairing (optional)**
 
@@ -815,6 +839,16 @@ A sample configuration is provided in the `config.example.yaml` file - it provid
 ## Contribution
 
 We welcome contributions! Please feel free to open an issue or a pull request if you have any suggestions or improvements.
+
+### Running the tests
+
+```
+pip install -e ".[dev,serve]"
+python -m pytest routellm/tests -q -rs
+```
+
+Tests that need an optional extra (`pairing`) skip with a reason naming the
+extra when it is absent. To run them, install it: `pip install -e ".[dev,serve,pairing]"`.
 
 ### Adding a new router
 

@@ -10,20 +10,11 @@ import logging
 import random
 
 import numpy as np
-import torch
-from datasets import concatenate_datasets, load_dataset
-from huggingface_hub import hf_hub_download
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
+from routellm.routers._ml import require_ml
 from routellm.routers.base import Router, no_parallel
 from routellm.routers.causal_llm.configs import RouterModelConfig
-from routellm.routers.causal_llm.llm_utils import (
-    load_prompt_format,
-    to_openai_api_messages,
-)
-from routellm.routers.causal_llm.model import CausalLLMClassifier
 from routellm.routers.embeddings import get_embedding_client
-from routellm.routers.matrix_factorization.model import MODEL_IDS, MFModel
 from routellm.routers.registry import (
     ROUTER_CLS,
     discover_routers,
@@ -34,6 +25,10 @@ from routellm.routers.similarity_weighted.utils import (
     compute_tiers,
     preprocess_battles,
 )
+
+# The `ml` extra (torch, transformers, datasets, huggingface_hub) is
+# imported inside the routers that run a model, after `require_ml`, so
+# this module loads -- and the random router serves -- without it.
 
 # ROUTER_CLS is re-exported here: the controller, the server and the
 # eval entry points all import it from this module, not the registry.
@@ -82,6 +77,15 @@ class CausalLLMRouter(Router):
         flash_attention_2 : bool, optional
             Enable Flash Attention 2 optimization (default False).
         """
+        require_ml("causal_llm", "torch", "transformers", "huggingface_hub")
+        from huggingface_hub import hf_hub_download
+
+        from routellm.routers.causal_llm.llm_utils import (
+            load_prompt_format,
+            to_openai_api_messages,
+        )
+        from routellm.routers.causal_llm.model import CausalLLMClassifier
+
         model_config = RouterModelConfig(
             model_id=model_id,
             model_type=model_type,
@@ -164,6 +168,9 @@ class BERTRouter(Router):
         num_labels : int, optional
             Number of classification labels (default 3).
         """
+        require_ml("bert", "torch", "transformers")
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
         self.model = AutoModelForSequenceClassification.from_pretrained(
             checkpoint_path, num_labels=num_labels
         )
@@ -185,6 +192,8 @@ class BERTRouter(Router):
         float
             Strong model win rate in [0, 1].
         """
+        import torch
+
         inputs = self.tokenizer(prompt, return_tensors="pt", padding=True, truncation=True)
         with torch.no_grad():
             outputs = self.model(**inputs)
@@ -234,6 +243,9 @@ class SWRankingRouter(Router):
         num_tiers : int, optional
             Number of tiers for model grouping (default 10).
         """
+        require_ml("sw_ranking", "datasets")
+        from datasets import concatenate_datasets, load_dataset
+
         self.strong_model = strong_model
         self.weak_model = weak_model
 
@@ -363,6 +375,11 @@ class MatrixFactorizationRouter(Router):
         use_proj : bool, optional
             Whether to use projection layer (default True).
         """
+        require_ml("mf", "torch", "huggingface_hub")
+        import torch
+
+        from routellm.routers.matrix_factorization.model import MODEL_IDS, MFModel
+
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.model = MFModel.from_pretrained(

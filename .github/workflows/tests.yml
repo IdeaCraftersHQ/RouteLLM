@@ -1,0 +1,76 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # A base install: no optional extra beyond the test tooling and the
+  # server. Tests that need an extra skip (see `-rs`); none may fail.
+  base:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: python -m pip install -e ".[dev,serve]"
+
+      - name: Test
+        run: python -m pytest routellm/tests -q -rs
+
+  # The optional `pairing` extra installed: its tests run, not skip.
+  pairing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: python -m pip install -e ".[dev,serve,pairing]"
+
+      - name: Test
+        run: python -m pytest routellm/tests -q -rs
+
+  # The two ends of the litellm range `pyproject.toml` declares: the
+  # oldest version verified, and the newest the range allows. A change
+  # to the range there must change the matching entry here.
+  litellm:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: oldest
+            litellm: "litellm==1.106.4"
+          - name: newest
+            litellm: "litellm>=1.106.4,<1.109"
+    name: litellm (${{ matrix.name }})
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install -e ".[dev,serve,pairing]"
+          python -m pip install "${{ matrix.litellm }}"
+
+      - name: Show resolved litellm
+        run: python -m pip show litellm
+
+      - name: Test
+        run: python -m pytest routellm/tests -q -rs
