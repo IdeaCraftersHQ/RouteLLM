@@ -292,6 +292,42 @@ class PolicyRouter:
             return default, "unknown"
         return value, "attribute"
 
+    def selected(self, attrs: RequestAttributes | None, principal=None) -> tuple[str, str]:
+        """Return `(policy name, why)` for a request, enforcing who may select what.
+
+        The one place the principal's `projects` list is applied, shared
+        by chat (`select`), `/v1/compare` and the class declaration.
+
+        Raises
+        ------
+        PolicyDenied
+            A non-default policy the caller may not use (`policy_from: forbidden`).
+        """
+        name, why = self.policy_for(attrs or RequestAttributes())
+        if why == "attribute" and name != self.config.default_policy:
+            allowed = (
+                self.class_policy.principal_projects(principal.principal if principal else None)
+                if self.class_policy is not None
+                else []
+            )
+            if name not in allowed:
+                raise PolicyDenied(
+                    f"routing policy {name!r} is not allowed for this caller "
+                    "(policy_from: forbidden)"
+                )
+        return name, why
+
+    def floor(self, attrs: RequestAttributes | None, principal=None) -> str | None:
+        """Return the class floor of the policy this request selects, or None.
+
+        Raises
+        ------
+        PolicyDenied
+            As `selected`.
+        """
+        name, _ = self.selected(attrs, principal)
+        return self.policies[name].data_class
+
     # -- class ------------------------------------------------------------
 
     def _rank(self, name: str) -> int:
@@ -368,18 +404,7 @@ class PolicyRouter:
             policy and tier), or a class the policy file does not list.
         """
         attrs = attrs or RequestAttributes()
-        name, why = self.policy_for(attrs)
-        if why == "attribute" and name != self.config.default_policy:
-            allowed = (
-                self.class_policy.principal_projects(principal.principal if principal else None)
-                if self.class_policy is not None
-                else []
-            )
-            if name not in allowed:
-                raise PolicyDenied(
-                    f"routing policy {name!r} is not allowed for this caller "
-                    "(policy_from: forbidden)"
-                )
+        name, why = self.selected(attrs, principal)
         route_policy = self.policies[name]
         classes = {
             "policy": route_policy.data_class,

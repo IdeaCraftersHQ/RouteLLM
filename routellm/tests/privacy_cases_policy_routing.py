@@ -15,6 +15,7 @@ from routellm.tests.privacy_fixture import (
     RESTRICTED_PROJECT,
     ROUTE_CLIENT_HEADER,
     ROUTE_PROJECT_HEADER,
+    TAGGED_PROJECT,
     case,
 )
 
@@ -135,3 +136,88 @@ def spoofed(w):
     # The caller's policy-file entry does not list this project: naming
     # it in a header is refused, not downgraded, and nothing is called.
     return _reason(w.post(ENTRY, data_class="general", headers=_project(RESTRICTED_PROJECT)))
+
+
+# -- /v1/compare and aux calls: the floor and the tag lists apply there too ---------------
+
+
+COMPARED = ["local_main", "cloud_main"]
+
+
+@case("route_compare_under_a_restrictive_project_floor_takes_no_hit", 403, route=True)
+def compare_floor(w):
+    # Declared general, but the default policy's floor is private: the
+    # cloud target is refused, so nothing is called at all.
+    return _reason(w.compare(COMPARED, data_class="general"))
+
+
+@case("route_compare_with_no_declared_class_is_held_to_the_floor", 403, route=True)
+def compare_floor_undeclared(w):
+    return _reason(w.compare(COMPARED))
+
+
+@case("route_compare_under_a_tag_denying_project_takes_no_cloud_hit", 403, route=True)
+def compare_deny_tags(w):
+    return _reason(w.compare(COMPARED, data_class="general", headers=_project(TAGGED_PROJECT)))
+
+
+@case("route_compare_a_policy_the_caller_may_not_select_is_403", 403, route=True)
+def compare_spoofed(w):
+    return _reason(w.compare(COMPARED, data_class="general", headers=_project(RESTRICTED_PROJECT)))
+
+
+@case(
+    "route_compare_control_open_project_reaches_the_cloud",
+    200,
+    {"local_main": 1},
+    route=True,
+    reaches_off_host=True,
+)
+def compare_control(w):
+    return _status(w.compare(COMPARED, data_class="general", headers=_project(OPEN_PROJECT)))
+
+
+@case(
+    "route_no_declared_class_takes_the_project_floor_and_stays_local",
+    200,
+    {"local_main": 1},
+    route=True,
+)
+def floor_supplies_class(w):
+    # No header, no body class, default_class null: the default policy's
+    # floor (private) is the class, so the request is routed at the floor.
+    r = w.post(ENTRY)
+    if r.status_code != 200:
+        return _reason(r)
+    return {
+        "status": r.status_code,
+        "class": _record(r)["effective_class"],
+        "classes": _record(r)["classes"],
+    }
+
+
+@case(
+    "route_aux_detector_gets_zero_prompts_under_a_tag_denying_policy",
+    200,
+    {"local_main": 1},
+    route=True,
+    aux=True,
+)
+def aux_detector_tag_denied(w):
+    for middleware in w.server.CONTROLLER.middleware:
+        middleware.intent_cache.clear()
+    return _status(w.post(ENTRY, data_class="general", headers=_project(TAGGED_PROJECT)))
+
+
+@case(
+    "route_aux_control_detector_is_called_under_a_policy_without_the_tag",
+    200,
+    route=True,
+    aux=True,
+    reaches_off_host=True,
+    total=0,
+)
+def aux_detector_control(w):
+    for middleware in w.server.CONTROLLER.middleware:
+        middleware.intent_cache.clear()
+    return _status(w.post(ENTRY, data_class="general", headers=_project(OPEN_PROJECT)))

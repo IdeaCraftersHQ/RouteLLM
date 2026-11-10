@@ -505,6 +505,12 @@ class Controller:
     async def _decide(self, kwargs, declared_class, conversation_id):
         """Run the decision step; None when no `decision:` section is configured.
 
+        Runs before the routing policy is selected, so the classifier's own
+        call (its endpoint, which sees the prompt) is held only to the check
+        made at startup (`check_decision_endpoint`): it cannot be judged
+        against a policy's `deny_tags` or gate allow set, which are per
+        request. Keep the classifier endpoint local, or on tags no policy denies.
+
         Raises
         ------
         RoutingError
@@ -595,6 +601,41 @@ class Controller:
         decision = await self._decide(kwargs, declared_class, conversation_id)
         return decision.data_class if decision is not None else declared_class
 
+    async def compare_scope(
+        self,
+        kwargs,
+        declared_class,
+        attributes=None,
+        principal=None,
+        tier=None,
+        conversation_id=None,
+    ):
+        """Return `(effective class, routing policy name)` for a `/v1/compare` request.
+
+        Selects the routing policy the way chat does (principal-bound),
+        and takes the strictest of the policy's floor, the declared class
+        and the decision's. Every compare target is then held to that
+        class and to the policy's `deny_tags` and gate allow set. Without
+        policy routing it is `(decision's or declared class, None)`.
+
+        An explicit `tier` is checked against the policy's tiers, never
+        moved: it is a privacy scope for the comparison, not a route.
+
+        Raises
+        ------
+        PolicyDenied
+            A policy the caller may not select, a tier the policy does
+            not allow, or a class the policy file does not list.
+        """
+        decision = await self._decide(kwargs, declared_class, conversation_id)
+        if self.policy_routing is None:
+            return (decision.data_class if decision is not None else declared_class), None
+        entry = self.policy_routing.config.entry
+        sel = self.policy_routing.select(
+            None if tier in entry else tier, declared_class, decision, None, attributes, principal
+        )
+        return sel.effective, sel.policy
+
     def _aux_denial(
         self, name: str, data_class: str | None, route_policy: str | None = None
     ) -> str | None:
@@ -622,7 +663,9 @@ class Controller:
             return self.egress_gates.denial(self.endpoints, name, data_class, route_policy=allowed)
         return None
 
-    def _semantic_cache_allowed(self, data_class: str | None) -> bool:
+    def _semantic_cache_allowed(
+        self, data_class: str | None, route_policy: str | None = None
+    ) -> bool:
         """Return whether this request may be embedded for the semantic cache.
 
         Semantic lookup and store embed the prompt and keep it beside
@@ -640,12 +683,14 @@ class Controller:
         target = self.embedding_endpoint
         if target is None:
             return self.policy is None
-        reason = self._aux_denial(target, data_class)
+        reason = self._aux_denial(target, data_class, route_policy)
         if reason is not None:
             logger.info("semantic cache skipped: %s", reason)
         return reason is None
 
-    def _detector_gated(self, middleware, data_class: str | None) -> bool:
+    def _detector_gated(
+        self, middleware, data_class: str | None, route_policy: str | None = None
+    ) -> bool:
         """Return whether the endpoint a middleware sends prompts to is refused for this class.
 
         A middleware whose detector calls a registry endpoint reports it
@@ -656,24 +701,26 @@ class Controller:
         target = getattr(middleware, "egress_endpoint", None)
         if not target:
             return False
-        reason = self._aux_denial(target, data_class)
+        reason = self._aux_denial(target, data_class, route_policy)
         if reason is not None:
             logger.info("middleware %s skipped: %s", type(middleware).__name__, reason)
         return reason is not None
 
     def _get_model_pair_for_prompt(
-        self, prompt: str, data_class: str | None = None
+        self, prompt: str, data_class: str | None = None, route_policy: str | None = None
     ) -> ModelPair | None:
         """Get the model pair a middleware asks for, or None."""
         for m in self.middleware:
-            if self._detector_gated(m, data_class):
+            if self._detector_gated(m, data_class, route_policy):
                 continue
             pair = m.get_model_pair(prompt)
             if pair:
                 return pair
         return None
 
-    def _get_tier_for_prompt(self, prompt: str, data_class: str | None = None) -> str | None:
+    def _get_tier_for_prompt(
+        self, prompt: str, data_class: str | None = None, route_policy: str | None = None
+    ) -> str | None:
         """Get the tier a middleware asks the request to enter, or None.
 
         `get_tier` is optional on the middleware protocol, so it is
@@ -696,7 +743,7 @@ class Controller:
         """
         for m in self.middleware:
             hook = getattr(m, "get_tier", None)
-            if hook is None or self._detector_gated(m, data_class):
+            if hook is None or self._detector_gated(m, data_class, route_policy):
                 continue
             tier = hook(prompt)
             if tier:
@@ -704,7 +751,11 @@ class Controller:
         return None
 
     def _apply_intent_tier(
-        self, prompt: str, tier: str | None, data_class: str | None = None
+        self,
+        prompt: str,
+        tier: str | None,
+        data_class: str | None = None,
+        route_policy: str | None = None,
     ) -> tuple[str | None, str | None, str | None]:
         """Let a middleware choose the tier this request enters.
 
@@ -725,6 +776,9 @@ class Controller:
             The request's effective class under a policy. A tier the
             class may not enter is not honoured, and is reported like
             one the addressed tier passed over.
+        route_policy : str, optional
+            The routing policy the request selected; a detector endpoint
+            it denies by tag (or its gate allow set) is not consulted.
 
         Returns
         -------
@@ -741,7 +795,7 @@ class Controller:
         if tier is None or not self.middleware:
             return tier, None, None
 
-        chosen = self._get_tier_for_prompt(prompt, data_class)
+        chosen = self._get_tier_for_prompt(prompt, data_class, route_policy)
         if chosen is None:
             return tier, None, None
 
@@ -790,14 +844,17 @@ class Controller:
         """
         return parse_model_name(model_name, self.endpoints, RoutingError)
 
-    def _router_denial(self, router: str, data_class: str | None) -> str | None:
+    def _router_denial(
+        self, router: str, data_class: str | None, route_policy: str | None = None
+    ) -> str | None:
         """Return why a router may not see a prompt of this class, or None.
 
         A router that embeds sends the prompt to the embedding endpoint;
         a hosted router sends it to its `upstream`. Either must pass the
         class policy and any egress gate. An embedding call with no
         registry endpoint (`--allow-remote-embeddings`) carries no tags,
-        so a request with a class is refused it.
+        so a request with a class is refused it. A request routed by a
+        named route policy is also held to its tag denials.
         """
         instance = self.routers.get(router)
         if getattr(type(instance), "requires_embedding", False):
@@ -806,12 +863,12 @@ class Controller:
                 if data_class is not None and self.policy is not None:
                     return f"policy:{data_class}:reach"
             else:
-                reason = self._aux_denial(target, data_class)
+                reason = self._aux_denial(target, data_class, route_policy)
                 if reason is not None:
                     return reason
         upstream = self._router_upstreams.get(router)
         if upstream is not None:
-            return self._aux_denial(upstream, data_class)
+            return self._aux_denial(upstream, data_class, route_policy)
         return None
 
     def _run_router(
@@ -821,6 +878,7 @@ class Controller:
         prompt: str,
         pair: ModelPair,
         data_class: str | None = None,
+        route_policy: str | None = None,
     ) -> tuple[str, float | None] | tuple[str, float | None, dict[str, str]]:
         """Run one router over one pair and report what it picked.
 
@@ -845,6 +903,10 @@ class Controller:
             The request's effective class. A router whose embedding
             endpoint or upstream the class may not reach is not run: the
             weak side is taken and the path notes `gate:router`.
+        route_policy : str, optional
+            The routing policy the request selected; its tag denials and
+            gate allow set apply to the router's embedding endpoint and
+            upstream as well.
 
         Returns
         -------
@@ -861,7 +923,7 @@ class Controller:
         self._validate_router_threshold(router, threshold)
         instance = self.routers[router]
 
-        denied = self._router_denial(router, data_class)
+        denied = self._router_denial(router, data_class, route_policy)
         if denied is not None:
             logger.info("router %s skipped: %s", router, denied)
             return pair.weak, None, {"gate": "gate:router", "gate_reason": denied}
@@ -978,6 +1040,7 @@ class Controller:
             If no tier applies and the controller carries no flat pair.
         """
         data_class = getattr(reqs, "data_class", None)
+        route_policy = getattr(reqs, "route_policy", None)
         inherited = {
             "parent_router": None,
             "parent_threshold": None,
@@ -996,9 +1059,9 @@ class Controller:
         tier_from = ignored_tier = None
         if overridden is None:
             tier, tier_from, ignored_tier = self._apply_intent_tier(
-                prompt, tier, getattr(reqs, "data_class", None)
+                prompt, tier, data_class, route_policy
             )
-            overridden = self._get_model_pair_for_prompt(prompt, getattr(reqs, "data_class", None))
+            overridden = self._get_model_pair_for_prompt(prompt, data_class, route_policy)
             pair_from = "middleware"
 
         if overridden is None and tier is not None:
@@ -1007,7 +1070,9 @@ class Controller:
                 prompt,
                 inherited,
                 self.endpoints,
-                functools.partial(self._run_router, data_class=data_class),
+                functools.partial(
+                    self._run_router, data_class=data_class, route_policy=route_policy
+                ),
                 requirements=reqs,
                 check=self._can_serve,
                 error_cls=route_error(RoutingError),
@@ -1058,7 +1123,7 @@ class Controller:
         gate: list[dict[str, str]] = []
         if forced is None:
             picked, win_rate, *gate = self._run_router(
-                level["router"], level["threshold"], prompt, pair, data_class
+                level["router"], level["threshold"], prompt, pair, data_class, route_policy
             )
         else:
             picked, win_rate = forced[0], None
@@ -1863,7 +1928,8 @@ class Controller:
         )
         use_cache = not streaming and cache_mode != "none"
         fuzzy = cache_mode == "both" and self._semantic_cache_allowed(
-            decision.data_class if decision is not None else declared_class
+            decision.data_class if decision is not None else declared_class,
+            getattr(reqs, "route_policy", None),
         )
         cached_res = (
             self.cache.get(prompt, model_to_use, cache_params, cache_ns, fuzzy)
@@ -2132,7 +2198,8 @@ class Controller:
         )
         use_cache = not streaming and cache_mode != "none"
         fuzzy = cache_mode == "both" and self._semantic_cache_allowed(
-            decision.data_class if decision is not None else declared_class
+            decision.data_class if decision is not None else declared_class,
+            getattr(reqs, "route_policy", None),
         )
         cached_res = (
             await self.cache.aget(prompt, model_to_use, cache_params, cache_ns, fuzzy)

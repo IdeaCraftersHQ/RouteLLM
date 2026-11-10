@@ -5,13 +5,17 @@ sets (`A`, `B`) that share no name: header, attribute, classes, intents,
 tiers and project values are all config.
 """
 
+import asyncio
+
 import pytest
 
+from routellm.auth import Principal
 from routellm.pairing import CATALOG_CACHE_ENV, write_snapshot
 from routellm.policy import PolicyDenied
 from routellm.tests.policy_routing_world import (
     GATE,
     IMAGE,
+    MESSAGES,
     A,
     B,
     Decider,
@@ -383,3 +387,77 @@ def test_an_authorised_policy_unlocks_the_gated_endpoint(L):
         assert w.hits() == {"gat": 1}
     finally:
         close(w)
+
+
+# --- floor and compare scope ---------------------------------------------------------
+
+
+def test_the_floor_is_the_selected_policys_data_class(world):
+    L = world.L
+    assert world.router.floor(world.attrs(L.projects["floor"]), Principal("tester")) == L.high
+    assert world.router.floor(world.attrs(), Principal("tester")) == L.low
+    assert world.router.floor(world.attrs(L.projects["nofb"]), Principal("tester")) is None
+
+
+def test_the_floor_refuses_a_policy_the_caller_may_not_select(world):
+    L = world.L
+    with pytest.raises(PolicyDenied, match="not allowed for this caller"):
+        world.router.floor(world.attrs(L.projects["floor"]), Principal("limited"))
+
+
+def test_compare_scope_raises_the_class_to_the_floor_and_names_the_policy(world):
+    L = world.L
+    scope = asyncio.run(
+        world.controller.compare_scope(
+            {"messages": MESSAGES},
+            L.low,
+            world.attrs(L.projects["floor"]),
+            Principal("tester"),
+        )
+    )
+    assert scope == (L.high, L.projects["floor"])
+
+
+def test_compare_scope_takes_the_stricter_of_decision_and_floor(world):
+    L = world.L
+    world.controller.decision = Decider(L.high)
+    scope = asyncio.run(
+        world.controller.compare_scope(
+            {"messages": MESSAGES}, L.low, world.attrs(L.projects["open"]), Principal("tester")
+        )
+    )
+    assert scope == (L.high, L.projects["open"])
+
+
+def test_compare_scope_refuses_a_policy_the_caller_may_not_select(world):
+    L = world.L
+    with pytest.raises(PolicyDenied):
+        asyncio.run(
+            world.controller.compare_scope(
+                {"messages": MESSAGES},
+                L.low,
+                world.attrs(L.projects["floor"]),
+                Principal("limited"),
+            )
+        )
+
+
+def test_compare_scope_holds_an_explicit_tier_to_the_policys_tiers(world):
+    L = world.L
+    with pytest.raises(PolicyDenied, match="does not allow tier"):
+        asyncio.run(
+            world.controller.compare_scope(
+                {"messages": MESSAGES},
+                L.low,
+                world.attrs(L.projects["floor"]),
+                Principal("tester"),
+                tier=L.tiers["code"],
+            )
+        )
+
+
+def test_compare_scope_without_policy_routing_is_the_decision_or_declared_class(world):
+    L = world.L
+    world.controller.policy_routing = None
+    scope = asyncio.run(world.controller.compare_scope({"messages": MESSAGES}, L.low, None, None))
+    assert scope == (L.low, None)

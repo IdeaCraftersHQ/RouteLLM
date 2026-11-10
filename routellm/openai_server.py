@@ -865,9 +865,17 @@ class LoopDetected(Exception):
 def _declare(request: "ChatCompletionRequest", http_request: Request):
     """The request's validated declaration, attached to its context; or a refusal."""
     classifier = CONTROLLER.decision.config.data_classes if CONTROLLER.decision else ()
-    rc = declare(
-        http_request.headers, request.metadata, http_request.state.principal, POLICY, classifier
-    )
+    principal = http_request.state.principal
+    floor = None
+    router = CONTROLLER.policy_routing
+    if router is not None:
+        # The selected routing policy's floor supplies a class a request
+        # did not declare; a policy the caller may not select is refused.
+        try:
+            floor = router.floor(router.attributes(http_request.headers), principal)
+        except PolicyDenied as exc:
+            raise RequestClassRefusal(exc.status, str(exc)) from None
+    rc = declare(http_request.headers, request.metadata, principal, POLICY, classifier, floor)
     http_request.state.request_class = rc
     current_request_class.set(rc)
     return rc
@@ -1045,15 +1053,23 @@ async def create_comparison(request: CompareRequest, http_request: Request):
 
     request_id = shortuuid.uuid()
     try:
-        # The class every target is held to: the decision step's when one
-        # is configured, else the declared one.
-        data_class = await CONTROLLER.effective_class(forwarded, declared.data_class)
+        # The class every target is held to: the strictest of the selected
+        # routing policy's floor, the declared class and the decision's;
+        # and the policy itself, whose tag lists apply to every target.
+        data_class, route_policy = await CONTROLLER.compare_scope(
+            forwarded,
+            declared.data_class,
+            _attributes(http_request),
+            http_request.state.principal,
+            tier=request.tier,
+        )
         body = await manager.compare(
             request.models,
             forwarded,
             tier=request.tier,
             measure_ttft=request.measure_ttft,
             data_class=data_class,
+            route_policy=route_policy,
         )
     except PolicyDenied as e:
         return JSONResponse(ErrorResponse(message=str(e)).model_dump(), status_code=e.status)

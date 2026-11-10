@@ -94,6 +94,7 @@ def declare(
     principal: Principal | None,
     policy: Policy | None,
     classifier_classes: Collection[str] = (),
+    floor: str | None = None,
 ) -> RequestClass:
     """Parse, validate and return a request's declaration.
 
@@ -112,6 +113,12 @@ def declare(
     classifier_classes : collection of str
         The decision classifier's label set. Without a policy a declared
         class outside it is ignored rather than refused.
+    floor : str, optional
+        The class floor of the routing policy the request selects. With
+        a policy loaded, it supplies the class of a request that declares
+        none when the policy file has no `default_class`; with neither,
+        the request is refused. It never replaces a declared or default
+        class: policy routing raises those to the floor afterwards.
 
     Raises
     ------
@@ -147,7 +154,7 @@ def declare(
         return RequestClass(declared if declared in classifier_classes else None, operation)
 
     try:
-        name, _ = policy.resolve(declared)
+        name, _ = policy.resolve(declared or (None if policy.default_class else floor))
     except PolicyRefusal as exc:
         status = 403 if exc.code == "vault" else 400
         raise RequestClassRefusal(status, str(exc)) from None
