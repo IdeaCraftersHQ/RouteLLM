@@ -29,11 +29,15 @@ Nothing here reads a request body; the request path passes the class
 and the tier in.
 """
 
+import re
 from collections.abc import Iterable
 from typing import Any
 
 from routellm.policy import ClassPolicy, Policy, PolicyDenied, PolicyError
 from routellm.routing import sibling_of
+
+#: A refusal reason: `policy:<class>:...` or `gate:<name>:...`.
+_REASON = re.compile(r"(?<!\w)(?:policy|gate):")
 
 __all__ = [
     "check_class_tiers",
@@ -85,12 +89,13 @@ def class_denial(policy: Policy, registry, name: str, data_class: str | None) ->
 def route_error(plain: type[Exception]):
     """Return a factory for the error a failed candidate check raises.
 
-    A message carrying a `policy:` reason becomes `PolicyDenied` (403),
-    anything else is `plain` (a capability the side cannot serve).
+    A message carrying a `policy:` or `gate:` reason becomes
+    `PolicyDenied` (403), anything else is `plain` (a capability the
+    side cannot serve).
     """
 
     def make(message: str) -> Exception:
-        if "policy:" in message:
+        if _REASON.search(message):
             return PolicyDenied(message)
         return plain(message)
 

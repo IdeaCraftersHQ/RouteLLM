@@ -30,6 +30,7 @@ from routellm.capabilities import (
 from routellm.class_tiers import check_class_tiers, check_entry_tier, class_denial, route_error
 from routellm.comparison import ComparisonConfig, ComparisonManager
 from routellm.decision import DecisionRefused, set_decision
+from routellm.egress_gate import EgressGates
 from routellm.endpoints import EndpointRegistry, Selector
 from routellm.hints import TYPESAFE_INSTALL_HINT
 from routellm.leaf_params import drop_kwargs, log_dropped
@@ -156,6 +157,7 @@ class Controller:
         strict_registry: bool = False,
         decision=None,
         policy: Policy | None = None,
+        egress_gates: EgressGates | None = None,
     ):
         """Initialize controller with routers and configuration.
 
@@ -224,9 +226,17 @@ class Controller:
             its effective class allows (`PolicyDenied`, 403), and at
             construction every leaf reachable from a class's tiers must
             carry that class's reach and jurisdiction.
+        egress_gates : EgressGates, optional
+            Hard gates in front of tagged endpoints. At construction
+            every selected endpoint's model ids are checked; per request
+            each candidate passes them beside the class check.
 
         Raises
         ------
+        EgressGateError
+            If a selected endpoint's model id (or an id under a gate's
+            `also_check`) breaks the gate's allow or deny list, or a gate
+            is invalid against the registry and policy.
         PolicyError
             If a class names a tier the registry lacks, or a leaf
             reachable from its tiers is outside its reach or
@@ -318,6 +328,15 @@ class Controller:
                 traffic_manager=self.traffic_manager,
                 quality_manager=self.quality_manager,
                 middleware=self.middleware,
+            )
+
+        # Egress gates: model ids checked now, class and policy per request.
+        self.egress_gates = egress_gates
+        if egress_gates is not None:
+            egress_gates.check(
+                self.endpoints,
+                policy,
+                decision_endpoint=getattr(getattr(decision, "config", None), "endpoint", None),
             )
 
         if config is None:
@@ -500,15 +519,37 @@ class Controller:
         decision = await self._decide(kwargs, declared_class, conversation_id)
         return decision.data_class if decision is not None else declared_class
 
-    def _get_model_pair_for_prompt(self, prompt: str) -> ModelPair | None:
+    def _detector_gated(self, middleware, data_class: str | None) -> bool:
+        """Return whether an egress gate refuses the endpoint a middleware sends prompts to.
+
+        A middleware whose detector calls a registry endpoint reports it
+        as `egress_endpoint`. When a gate refuses that endpoint for this
+        request's class the middleware is not consulted at all, so the
+        prompt never reaches the detector.
+        """
+        if self.egress_gates is None:
+            return False
+        target = getattr(middleware, "egress_endpoint", None)
+        if not target:
+            return False
+        reason = self.egress_gates.denial(self.endpoints, target, data_class)
+        if reason is not None:
+            logger.info("middleware %s skipped: %s", type(middleware).__name__, reason)
+        return reason is not None
+
+    def _get_model_pair_for_prompt(
+        self, prompt: str, data_class: str | None = None
+    ) -> ModelPair | None:
         """Get the model pair a middleware asks for, or None."""
         for m in self.middleware:
+            if self._detector_gated(m, data_class):
+                continue
             pair = m.get_model_pair(prompt)
             if pair:
                 return pair
         return None
 
-    def _get_tier_for_prompt(self, prompt: str) -> str | None:
+    def _get_tier_for_prompt(self, prompt: str, data_class: str | None = None) -> str | None:
         """Get the tier a middleware asks the request to enter, or None.
 
         `get_tier` is optional on the middleware protocol, so it is
@@ -519,6 +560,9 @@ class Controller:
         ----------
         prompt : str
             The request's prompt.
+        data_class : str, optional
+            The request's effective class; a middleware whose detector
+            endpoint a gate refuses for it is not asked.
 
         Returns
         -------
@@ -528,7 +572,7 @@ class Controller:
         """
         for m in self.middleware:
             hook = getattr(m, "get_tier", None)
-            if hook is None:
+            if hook is None or self._detector_gated(m, data_class):
                 continue
             tier = hook(prompt)
             if tier:
@@ -573,7 +617,7 @@ class Controller:
         if tier is None or not self.middleware:
             return tier, None, None
 
-        chosen = self._get_tier_for_prompt(prompt)
+        chosen = self._get_tier_for_prompt(prompt, data_class)
         if chosen is None:
             return tier, None, None
 
@@ -684,15 +728,23 @@ class Controller:
         return config
 
     def _policy_reason(self, name: str, reqs) -> str | None:
-        """Return `policy:<class>:<reach|jur>` when the request's class may not use `name`.
+        """Return why the request may not use `name`, or None.
 
-        None without a loaded policy or a class on the request. A tier
-        is judged by every leaf it can reach.
+        `policy:<class>:<reach|jur>` when its class may not (None without
+        a loaded policy or a class on the request), then
+        `gate:<name>:<why>` when an egress gate refuses it. A tier is
+        judged by every leaf it can reach. The gate reads the class the
+        controller put on `reqs` once the decision step has run, so a
+        request is never judged on a class that is not final.
         """
         data_class = getattr(reqs, "data_class", None)
-        if self.policy is None or data_class is None:
-            return None
-        return class_denial(self.policy, self.endpoints, name, data_class)
+        if self.policy is not None and data_class is not None:
+            denial = class_denial(self.policy, self.endpoints, name, data_class)
+            if denial is not None:
+                return denial
+        if self.egress_gates is not None:
+            return self.egress_gates.denial(self.endpoints, name, data_class)
+        return None
 
     def _can_serve(self, name: str, reqs) -> str | None:
         """Return the first requirement `name` cannot serve, or None.
@@ -700,7 +752,8 @@ class Controller:
         The request's data class comes first: under a policy, a leaf
         outside the class's reach or jurisdiction (or a tier with such a
         leaf) returns `policy:<class>:<reach|jur>`, whatever its
-        capabilities. This is the one check every tier side, forced
+        capabilities; an egress gate's refusal returns
+        `gate:<name>:<why>` the same way. This is the one check every tier side, forced
         side, sibling, pool member, balancer target and comparison
         target passes.
 
@@ -785,7 +838,7 @@ class Controller:
             tier, tier_from, ignored_tier = self._apply_intent_tier(
                 prompt, tier, getattr(reqs, "data_class", None)
             )
-            overridden = self._get_model_pair_for_prompt(prompt)
+            overridden = self._get_model_pair_for_prompt(prompt, getattr(reqs, "data_class", None))
             pair_from = "middleware"
 
         if overridden is None and tier is not None:
@@ -892,8 +945,8 @@ class Controller:
             What the request needs; a sibling that cannot serve it is
             dropped. See `capabilities.usable_sibling`.
         denied : list[str], optional
-            Receives the `policy:` reason of every candidate dropped
-            for its class, so a walk that ends with none left can
+            Receives the `policy:` or `gate:` reason of every candidate
+            dropped for its class or by a gate, so a walk that ends with none left can
             refuse 403 instead of reporting an upstream error.
 
         Returns
@@ -903,6 +956,8 @@ class Controller:
             to try, the sibling endpoint itself, and the name it was
             written under.
         """
+        if denied is None:
+            denied = []
         canary = self.quality_manager.canary_config.canary_model
         if self.quality_manager.should_canary() and self._walkable(canary, reqs, denied):
             model_to_use = canary
@@ -931,6 +986,10 @@ class Controller:
                 if name not in models_to_try:
                     models_to_try.append(name)
 
+        gated = list(dict.fromkeys(r for r in denied if r.startswith("gate:")))
+        if gated and path:
+            path[-1]["egress_gate_denied"] = gated
+
         return model_to_use, models_to_try, sibling, reference
 
     def _walkable(self, name: str | None, reqs, denied: list[str] | None = None) -> bool:
@@ -938,10 +997,10 @@ class Controller:
 
         The one check every fallback candidate, a sibling or a pool
         member, passes before it is added to the walk: a candidate that
-        cannot serve the request is dropped. Policy that restricts which
-        endpoints may be served (an egress gate, say) hooks in here, so
-        a pool cannot route around what the sibling is held to. A
-        candidate refused for its class is noted in `denied`.
+        cannot serve the request is dropped. The class check and the
+        egress gates sit in `_can_serve`, so a pool cannot route around
+        what the sibling is held to. A candidate refused for its class
+        or by a gate is noted in `denied`.
         """
         if usable_sibling(name, reqs, self._can_serve):
             return True
@@ -1008,7 +1067,7 @@ class Controller:
         if cooling and len(cooling) == len(set(names)):
             raise EndpointsCooling(cooling, self.resilience.clock())
         if denied:
-            raise PolicyDenied(f"{denied[0]}: no endpoint this class may reach could answer")
+            raise PolicyDenied(f"{denied[0]}: no endpoint this request may reach could answer")
         if last_err:
             raise last_err
 
@@ -1056,6 +1115,10 @@ class Controller:
             The same response.
         """
         final = [dict(entry) for entry in path]
+        if final and self.egress_gates is not None:
+            passed = self.egress_gates.passed(used)
+            if passed:
+                final[-1]["egress_gate"] = {"passed": passed}
         if final and walk:
             final[-1]["walk"] = [*walk, {"endpoint": used, "outcome": "served"}]
         if final and sibling is not None and used == sibling:
@@ -1155,7 +1218,7 @@ class Controller:
 
     def _balancer_filter(self, reqs):
         """Return the target check a balancer applies, None when the class gates nothing."""
-        if self.policy is None or getattr(reqs, "data_class", None) is None:
+        if self.policy is None and self.egress_gates is None:
             return None
         return lambda target: self._policy_reason(target, reqs) is None
 

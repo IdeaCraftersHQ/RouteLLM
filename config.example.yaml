@@ -300,6 +300,27 @@ endpoints:
 #     - {name: key_material, type: regex, class: private, patterns: ['-----BEGIN [A-Z ]*PRIVATE KEY-----']}
 #   sticky: {enabled: true, ttl_s: 3600}
 
+# Egress gates (optional; need `policy:` for the class rules). A gate holds
+# back endpoints carrying a tag: before any call, a class in `deny_classes`
+# never reaches them (tier side, forced side, fallback, pool, shadow,
+# compare, intent detector). At load every selected endpoint's model id,
+# and each id under `also_check`, must pass `models` or startup fails.
+# `deny` wins over `allow`; an empty `allow` allows nothing. An allow entry
+# may demand params in the endpoint's `extra`. `require_policy_allow` is
+# accepted but fails closed until request policies exist: it refuses every
+# request to the gate's endpoints.
+# egress_gates:
+#   - name: gated
+#     select: "tag:gated"
+#     deny_classes: [internal]
+#     models:
+#       allow:
+#         - "vendor/*"
+#         - model: "vendor/free-*"
+#           require: {extra_body.provider.data_collection: deny}
+#       deny: ["*:legacy"]
+#     also_check: [extra_body.models]
+
 # Tiers: named strong/weak pairs whose sides may themselves be tiers, so
 # a request addressed to a tier walks a tree, one router call per level.
 # A tier naming no router or threshold inherits them from the level

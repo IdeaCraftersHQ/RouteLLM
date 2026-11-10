@@ -56,6 +56,7 @@ CASE_MODULES = [
     "routellm.tests.privacy_cases_clients",
     "routellm.tests.privacy_cases_selectors",
     "routellm.tests.privacy_cases_class_policy",
+    "routellm.tests.privacy_cases_egress_gate",
 ]
 
 #: The caller every class-policy case sends as, and its key.
@@ -159,6 +160,7 @@ def policy_tiers() -> dict:
     """
     pair = {"router": "pin_strong", "threshold": 0.0}
     return {
+        **gate_tiers(),
         "leaky_both": {**pair, "strong": "cloud_main", "weak": "gated_main"},
         "leaky_forced": {**pair, "strong": "cloud_main", "weak": "local_audio"},
         "leaky_forced_local": {**pair, "strong": "cloud_main", "weak": "local_main"},
@@ -171,9 +173,44 @@ def policy_tiers() -> dict:
     }
 
 
+def gate_tiers() -> dict:
+    """Tiers with the gated leaf on every path a request can reach it by.
+
+    The `leaky` class may use all of them by policy; the gate world's
+    `egress_gates` entry is what refuses it the gated leaf.
+    """
+    pair = {"router": "pin_strong", "threshold": 0.0}
+    return {
+        "gate_primary": {**pair, "strong": "gated_main", "weak": "local_small"},
+        "gate_forced": {**pair, "strong": "gated_main", "weak": "local_audio"},
+        "gate_sibling": {**pair, "strong": "local_main", "weak": "gated_main"},
+        "gate_pool": {
+            **pair,
+            "strong": {"select": "tag:jur:ca", "order": "quality_asc", "pool": 4},
+            "weak": "local_main",
+        },
+    }
+
+
+#: The gate world's extra config: a gate on the `gated` tag that refuses
+#: the `leaky` class, and a detector whose endpoint is the gated leaf.
+GATE_CONFIG = {
+    "egress_gates": [
+        {
+            "name": "gated",
+            "select": "tag:gated",
+            "deny_classes": ["leaky"],
+            "models": {"allow": ["openai/model-gated-*"]},
+        }
+    ],
+    "intents": {"detector": "litellm", "model": "gated_main", "tiers": {"code": "gate_sibling"}},
+}
+
+
 def class_policy_files(tmp_path: Path) -> dict:
     """Write the policy and the keys file; return the config keys naming them."""
     leaky = list(policy_tiers())
+    gate = list(gate_tiers())
     policy = {
         "classes": {
             "private": {
@@ -183,7 +220,11 @@ def class_policy_files(tmp_path: Path) -> dict:
                 "tiers": ["private", "private_audio", "private_selector", "default"],
             },
             "leaky": {"treatment": "raw", "reach": ["local", "cloud"], "tiers": leaky},
-            "general": {"treatment": "raw", "reach": ["local", "cloud"], "tiers": ["general"]},
+            "general": {
+                "treatment": "raw",
+                "reach": ["local", "cloud"],
+                "tiers": ["general", *gate],
+            },
         },
         "principals": {"suite": {"classes": ["private", "leaky", "general"]}},
     }
@@ -211,19 +252,23 @@ class Case:
     local_total: int | None = None  # with local=None: hits across all local leaves
     reaches_off_host: bool = False  # the control: off-host leaves ARE expected to be hit
     policy: bool = False  # runs in the class-policy world (see `run_cases`)
+    gate: bool = False  # runs in the egress-gate world (policy world plus gates)
 
 
 CASES: dict[str, Case] = {}
 
 
-def case(name, status=None, local=None, total=None, reaches_off_host=False, policy=False):
+def case(
+    name, status=None, local=None, total=None, reaches_off_host=False, policy=False, gate=False
+):
     """Register a case. `status` and `local` are what the test asserts.
 
     `local` maps a local leaf to its expected hit count; a leaf left out
     is expected at zero. `total` replaces it when the case cannot say
     which local leaf answers. Off-host leaves are expected at zero unless
     the case is a control (`reaches_off_host=True`). `policy=True` runs
-    it only in the class-policy world.
+    it only in the class-policy world, `gate=True` only in the egress-gate
+    world (which is the policy world plus `GATE_CONFIG`).
     """
 
     def deco(fn):
@@ -233,7 +278,8 @@ def case(name, status=None, local=None, total=None, reaches_off_host=False, poli
             None if total is not None else dict(local or {}),
             total,
             reaches_off_host,
-            policy,
+            policy or gate,
+            gate,
         )
         return fn
 

@@ -451,13 +451,17 @@ class ComparisonManager(CallMixin):
         return {"object": "comparison", "id": plan.id, "results": list(results)}
 
     def _gate(self, reqs, names: list[str], tier: str | None, data_class, operator: bool):
-        """Hold an explicit comparison to the class policy; return `reqs` carrying the class."""
+        """Hold an explicit comparison to the class policy and the egress gates.
+
+        Returns `reqs` carrying the class. An operator run with no class
+        is not class-gated, but an egress gate still judges it, with the
+        class undecided (the most restrictive).
+        """
         policy = getattr(self.host, "policy", None)
-        if policy is None or (operator and data_class is None):
-            return reqs
-        if tier is not None or data_class is None:
-            check_entry_tier(policy, tier, data_class)
-        reqs = dataclasses.replace(reqs, data_class=data_class)
+        if policy is not None and not (operator and data_class is None):
+            if tier is not None or data_class is None:
+                check_entry_tier(policy, tier, data_class)
+            reqs = dataclasses.replace(reqs, data_class=data_class)
         denied = self.policy_reasons(names, reqs)
         if denied:
             name, reason = next(iter(denied.items()))

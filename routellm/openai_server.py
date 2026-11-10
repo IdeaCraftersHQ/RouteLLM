@@ -26,6 +26,7 @@ from routellm.comparison import COMPARE_HEADER
 from routellm.config import layer_summary, load_config
 from routellm.controller import HOP_HEADER, Controller, RoutingError
 from routellm.decision import build_decision
+from routellm.egress_gate import build_egress_gates
 from routellm.endpoints import Endpoint, EndpointRegistry, Tier
 from routellm.hints import TYPESAFE_INSTALL_HINT
 from routellm.middleware.intent_model_selector import (
@@ -374,6 +375,7 @@ def build_router_config(file_config: dict | None) -> dict | None:
         "quality_from_override",
         "strict_registry",
         "policy",
+        "egress_gates",
         *SERVER_SECTIONS,
     ):
         router_config.pop(key, None)
@@ -602,6 +604,7 @@ async def lifespan(app):
         quality_manager=build_quality_manager(file_config, config_origin),
         strict_registry=endpoints.strict_registry,
         policy=POLICY,
+        egress_gates=build_egress_gates(file_config),
     )
     yield
     CONTROLLER = None
