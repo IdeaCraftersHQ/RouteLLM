@@ -30,6 +30,7 @@ from routellm.middleware.intent_model_selector import (
     IntentModelMapping,
     IntentModelSelector,
 )
+from routellm.policy import build_policy, check_decision_classes
 from routellm.routers.routers import ROUTER_CLS
 from routellm.server_config import (
     SERVER_SECTIONS,
@@ -42,6 +43,8 @@ from routellm.transcription import TranscriptionError
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 CONTROLLER = None
+#: The loaded `policy:` file, or None when the config names none.
+POLICY = None
 
 #: `created` for every listed model: the moment this process came up.
 #: The listing is derived from the config, so it never changes while the
@@ -361,6 +364,7 @@ def build_router_config(file_config: dict | None) -> dict | None:
         "quality_from",
         "quality_from_override",
         "strict_registry",
+        "policy",
         *SERVER_SECTIONS,
     ):
         router_config.pop(key, None)
@@ -499,9 +503,16 @@ async def lifespan(app):
     if args.strict_registry:
         file_config["strict_registry"] = True
     config_origin = str(loaded.layers[-1].path) if loaded.layers else None
+    # A policy implies governance and strict_registry, so it loads before
+    # the registry is built; a relative path resolves against the file
+    # that set it. Any load error stops startup.
+    global POLICY
+    POLICY = build_policy(file_config, loaded.resolve_path)
     endpoints = build_registry(file_config, config_origin)
     intents = build_intents(file_config, endpoints)
     decision = build_decision(file_config, endpoints)
+    if POLICY is not None and decision is not None:
+        check_decision_classes(POLICY, decision.config.data_classes)
     router_config = build_router_config(file_config)
 
     # Neither flag and no tier to route into leaves the legacy flat form
