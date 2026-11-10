@@ -82,7 +82,7 @@ client = Controller(
     # Quality: 5% Canary traffic and record traces for fine-tuning
     quality_manager=QualityManager(
         canary_config=CanaryConfig(enabled=True, canary_model="gpt-4o", weight=0.05),
-        fine_tune_config=FineTuneConfig(enabled=True)
+        fine_tune_config=FineTuneConfig(enabled=True)  # digests only; capture_content=True stores text
     )
 )
 ```
@@ -707,7 +707,7 @@ areas:
   coding: [coding, coding_quality, coding_fast]   # per-area numbers, used inside those tiers
 ```
 
-Record traces, score them offline against a rubric, aggregate, and restart: `python -m routellm.quality_scores score --traces .routellm_traces --scorer rubric:./rubric.yaml` then `aggregate --scores scores.jsonl --out quality.yaml`. Scoring needs the `fit` extra; aggregation needs nothing. An endpoint the sidecar does not name keeps the number it has, and each override logs one line naming both. The whole loop is in [docs/runbooks/traces-to-quality.md](docs/runbooks/traces-to-quality.md).
+Traces keep ids, scores, token usage, and a SHA-256 and length of the prompt and of the output; no prompt or response text unless `capture_content: true` (logs a startup WARNING). Scoring reads text, so it needs a capturing store and refuses digest-only traces naming the trace. Trace directory is `0700`, files `0600`. Record traces, score them offline against a rubric, aggregate, and restart: `python -m routellm.quality_scores score --traces .routellm_traces --scorer rubric:./rubric.yaml` then `aggregate --scores scores.jsonl --out quality.yaml`. Scoring needs the `fit` extra; aggregation needs nothing. An endpoint the sidecar does not name keeps the number it has, and each override logs one line naming both. The whole loop is in [docs/runbooks/traces-to-quality.md](docs/runbooks/traces-to-quality.md).
 
 ### Comparison routing
 
@@ -736,6 +736,7 @@ traces:                       # the trace store; off unless enabled
   trace_dir: .routellm_traces # relative to this file
   max_files: 10000
   max_bytes: 536870912
+  capture_content: false      # true stores prompt and response text in plaintext
 ```
 
 `config.example.yaml` carries the same section, commented, with every key.
@@ -773,10 +774,10 @@ A shadow is never sent to the endpoint the primary was routed to.
 ```
 python -m routellm.compare replay --dataset chats.jsonl \
     --models cloud_strong,local_glm --config config.yaml \
-    --trace-dir .routellm_traces --out results.jsonl [--judge SPEC] [--tier T] [--limit N]
+    --trace-dir .routellm_traces --out results.jsonl [--judge SPEC] [--tier T] [--limit N] [--capture-content]
 ```
 
-Each row gets one comparison id, role `candidate`, and a per-model summary is printed. `comparison.enabled` is not required for replay; the config's `comparison:` section still supplies the timeout, budget and judge. Feed the traces to `routellm.quality_scores` as in [Traces to quality](docs/runbooks/traces-to-quality.md).
+Each row gets one comparison id, role `candidate`, and a per-model summary is printed. `comparison.enabled` is not required for replay; the config's `comparison:` section still supplies the timeout, budget and judge. Replay traces hold digests only unless `--capture-content` is passed. Feed the traces to `routellm.quality_scores` as in [Traces to quality](docs/runbooks/traces-to-quality.md).
 
 Shadow mode runs on the async request path the server uses; the synchronous `Controller.completion` is untouched.
 
