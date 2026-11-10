@@ -76,6 +76,7 @@ Names are restricted to `[A-Za-z0-9_]+`; hyphens are reserved for the
 model-name grammar that splits on '-'.
 """
 
+import difflib
 import logging
 import os
 import re
@@ -83,6 +84,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
     StrictBool,
     StringConstraints,
@@ -205,6 +207,8 @@ class Endpoint(BaseModel):
         what authorises paying.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     model: str
     api_base: str | None = None
@@ -219,6 +223,30 @@ class Endpoint(BaseModel):
     max_payment: str | None = None
     timeout_ms: int | None = Field(default=None, gt=0)
     drop_params: StrictBool | list[Annotated[str, StringConstraints(min_length=1)]] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_unknown_keys(cls, data: Any) -> Any:
+        """Name the endpoint and the key, with a near-miss suggestion.
+
+        A mistyped key that was silently ignored (`api_base_env:` for
+        `api_base:`) would let the endpoint fall back to its provider's
+        public default base. `extra="forbid"` is the backstop; this runs
+        first so the message says which endpoint and what was meant.
+        """
+        if not isinstance(data, dict):
+            return data
+        known = sorted(cls.model_fields)
+        for key in data:
+            if key in cls.model_fields:
+                continue
+            hint = difflib.get_close_matches(str(key), known, n=1)
+            raise ValueError(
+                f"endpoint {data.get('name')!r}: unknown key {key!r}"
+                + (f" (did you mean {hint[0]!r}?)" if hint else "")
+                + f"; allowed keys: {', '.join(known)}"
+            )
+        return data
 
     @field_validator("name")
     @classmethod
@@ -253,6 +281,23 @@ class Endpoint(BaseModel):
 
         parse_cap(value)
         return value
+
+    @model_validator(mode="after")
+    def _validate_local_has_base(self) -> "Endpoint":
+        """A `local` endpoint names where it lives, or it does not load.
+
+        Without `api_base` the call goes to the provider's default base
+        (public OpenAI for an `openai/` model), so a leaf meant to stay
+        on the machine would send its prompts to the cloud. Tag-only
+        enforcement of the privacy intent: no implicit fallback.
+        """
+        if LOCAL_TAG in self.tags and not self.api_base:
+            raise ValueError(
+                f"endpoint {self.name!r} is tagged `local` but sets no `api_base`; "
+                "without one the call would go to the provider's default (public) "
+                "base. Set `api_base`, or drop the `local` tag."
+            )
+        return self
 
     @model_validator(mode="after")
     def _validate_cap_needs_pay(self) -> "Endpoint":

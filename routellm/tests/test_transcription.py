@@ -161,8 +161,8 @@ def _local_tiers(transcriber, tier_transcriber=None, tags=("local",), other_tags
         tier["transcriber"] = tier_transcriber
     return {
         "endpoints": {
-            "a": {"model": "m", "tags": list(tags)},
-            "b": {"model": "n", "tags": list(other_tags)},
+            "a": {"model": "m", "api_base": "http://127.0.0.1:11434/v1", "tags": list(tags)},
+            "b": {"model": "n", "api_base": "http://127.0.0.1:11434/v1", "tags": list(other_tags)},
         },
         "tiers": {"private": tier},
         "transcriber": transcriber,
@@ -195,8 +195,8 @@ def test_a_tier_override_cannot_smuggle_in_a_cloud_transcriber():
 def test_the_rule_reaches_through_nested_tiers():
     spec = {
         "endpoints": {
-            "a": {"model": "m", "tags": ["local"]},
-            "b": {"model": "n", "tags": ["local"]},
+            "a": {"model": "m", "api_base": "http://127.0.0.1:11434/v1", "tags": ["local"]},
+            "b": {"model": "n", "api_base": "http://127.0.0.1:11434/v1", "tags": ["local"]},
         },
         "tiers": {
             "inner": {"strong": "a", "weak": "b"},
@@ -708,8 +708,8 @@ def _intent_spec(transcriber, intents, intent_routing=None, tags_open=("cloud",)
         open_tier["intent_routing"] = intent_routing
     return {
         "endpoints": {
-            "a": {"model": "m", "tags": ["local"]},
-            "b": {"model": "n", "tags": ["local"]},
+            "a": {"model": "m", "api_base": "http://127.0.0.1:11434/v1", "tags": ["local"]},
+            "b": {"model": "n", "api_base": "http://127.0.0.1:11434/v1", "tags": ["local"]},
             "c": {"model": "o", "tags": list(tags_open)},
             "d": {"model": "p", "tags": list(tags_open)},
         },

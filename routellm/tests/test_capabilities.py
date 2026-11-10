@@ -115,6 +115,7 @@ def test_tags_survive_the_alias_and_stay_selectable():
     endpoint = Endpoint(
         name="local_server",
         model="ollama_chat/qwen3:8b",
+        api_base="http://127.0.0.1:11434/v1",
         tags=["local", "vision", "private"],
     )
 
