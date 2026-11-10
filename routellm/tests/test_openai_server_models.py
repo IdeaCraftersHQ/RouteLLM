@@ -366,6 +366,7 @@ def test_config_example_loads_into_the_registry():
         "cloud_strong",
         "embedding",
         "local_audio",
+        "local_box",
         "local_glm",
         "ollama_qwen",
     ]

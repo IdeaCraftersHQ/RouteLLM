@@ -31,6 +31,11 @@ which is the only way to drop a globally defined endpoint locally::
     endpoints:
       cloud_strong: null
 
+String values may read the environment (`${VAR}`, `${VAR:-default}`,
+`${VAR:?message}`, `$$`; see `routellm.interpolate`). Expansion runs once
+on the merged mapping, so a variable that a higher layer overrides with a
+literal is never read, and an error names the file that set the value.
+
 Relative paths inside a config file (`prompt_file`, `quality_from`)
 resolve against the file that set them, never the CWD; `origins` records
 which layer last set each leaf key so `resolve_path` can do that.
@@ -92,12 +97,16 @@ class LoadedConfig:
         no file and so no origin.
     chain : list[ResolvedPath]
         Every location searched, existing or not, in the same order.
+    variables : dict[str, list[str]]
+        Dotted key mapped to the environment variables its (merged,
+        unexpanded) value reads. Only keys that read any appear.
     """
 
     data: dict[str, Any] = field(default_factory=dict)
     layers: list[ResolvedPath] = field(default_factory=list)
     origins: dict[str, Path] = field(default_factory=dict)
     chain: list[ResolvedPath] = field(default_factory=list)
+    variables: dict[str, list[str]] = field(default_factory=dict)
 
     def resolve_path(self, key: str, value: Any) -> Path:
         """Resolve a path-valued config entry against the file that set it.
@@ -288,9 +297,38 @@ def _defaults() -> dict[str, Any]:
     return {name: dict(section) for name, section in GPT_4_AUGMENTED_CONFIG.items()}
 
 
+def _origin_of(origins: dict[str, Path], dotted: str) -> str | None:
+    """File that set `dotted`, trying list-item keys as their list."""
+    key = dotted
+    while key:
+        if key in origins:
+            return str(origins[key])
+        key = key.rsplit("[", 1)[0] if key.endswith("]") else ""
+    return None
+
+
+def _scan_variables(data: Any, dotted: str = "") -> dict[str, list[str]]:
+    """Variables read by each string value in `data`, by dotted key."""
+    from routellm.interpolate import variables_in
+
+    found: dict[str, list[str]] = {}
+    if isinstance(data, Mapping):
+        for key, value in data.items():
+            found.update(_scan_variables(value, f"{dotted}.{key}" if dotted else str(key)))
+    elif isinstance(data, list):
+        for index, value in enumerate(data):
+            found.update(_scan_variables(value, f"{dotted}[{index}]"))
+    elif isinstance(data, str):
+        names = variables_in(data)
+        if names:
+            found[dotted] = names
+    return found
+
+
 def load_config(
     cwd: os.PathLike | str | None = None,
     explicit: os.PathLike | str | None = None,
+    interpolate: bool = True,
 ) -> LoadedConfig:
     """Load and merge every config layer that applies.
 
@@ -300,12 +338,16 @@ def load_config(
         Directory the project walk-up starts from. Defaults to the CWD.
     explicit : path-like, optional
         The `--config` flag value.
+    interpolate : bool
+        Expand `${VAR}` references in string values (default). False
+        leaves the merged text as written, for inspection; `variables`
+        is filled either way.
 
     Returns
     -------
     LoadedConfig
-        The merged data, the layers that existed, per-key origins, and
-        the full searched chain.
+        The merged data, the layers that existed, per-key origins, the
+        full searched chain, and the variables each key reads.
 
     Raises
     ------
@@ -314,7 +356,9 @@ def load_config(
         there; the message names the variable or the flag.
     ConfigError
         When a layer is not valid YAML or is not a mapping; the message
-        names the file and the layer.
+        names the file and the layer. Also, with `interpolate`, when a
+        value reads an unset variable; the message names the file, the
+        dotted key and the variable.
     """
     chain = config_paths(cwd=cwd, explicit=explicit)
 
@@ -334,7 +378,13 @@ def load_config(
         _record_origins(origins, parsed, entry.path)
         layers.append(entry)
 
-    return LoadedConfig(data=data, layers=layers, origins=origins, chain=chain)
+    variables = _scan_variables(data)
+    if interpolate:
+        from routellm.interpolate import interpolate_tree
+
+        data = interpolate_tree(data, origin_of=lambda key: _origin_of(origins, key))
+
+    return LoadedConfig(data=data, layers=layers, origins=origins, chain=chain, variables=variables)
 
 
 def explain(loaded: LoadedConfig) -> str:
@@ -361,6 +411,12 @@ def explain(loaded: LoadedConfig) -> str:
     for line in dumped.splitlines():
         origin = _top_level_origin(loaded, line)
         lines.append(f"{line}  # from {origin}" if origin else line)
+
+    if loaded.variables:
+        lines.append("")
+        lines.append("# environment variables read (values not shown)")
+        for dotted, names in sorted(loaded.variables.items()):
+            lines.append(f"#   {dotted}: {', '.join(names)}")
 
     return "\n".join(lines) + "\n"
 
@@ -487,6 +543,12 @@ def main(argv: list[str] | None = None) -> int:
     ):
         sub = subparsers.add_parser(name, parents=[common], help=helptext)
         sub.add_argument("--format", choices=["text", "json"], default="text")
+        if name == "show":
+            sub.add_argument(
+                "--resolve",
+                action="store_true",
+                help="Expand ${VAR} references; by default the text is shown as written.",
+            )
 
     args = parser.parse_args(argv)
 
@@ -520,7 +582,7 @@ def main(argv: list[str] | None = None) -> int:
             # raises FileNotFoundError with the right message for that
             # case (caught below); call it here for the side effect of
             # that check before ever consulting the chain for a winner.
-            load_config(explicit=explicit)
+            load_config(explicit=explicit, interpolate=False)
             winner = winning_path(config_paths(explicit=explicit))
             if winner is None:
                 print(
@@ -531,7 +593,7 @@ def main(argv: list[str] | None = None) -> int:
             print(winner.path)
             return 0
 
-        loaded = load_config(explicit=getattr(args, "config", None))
+        loaded = load_config(explicit=getattr(args, "config", None), interpolate=args.resolve)
         if args.format == "json":
             print(json.dumps(loaded.data, indent=2, default=str))
         else:

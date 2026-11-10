@@ -296,6 +296,39 @@ Tags are free-form, with one rule: a tag written `<ns>:<value>` is namespaced, a
 
 Setting `governance: true` (top-level, off by default) additionally requires every endpoint to carry at least one reach tag and exactly one `jur:` tag.
 
+#### Strict endpoint keys
+
+Unknown keys under an endpoint are a load error naming the endpoint and the key, with a "did you mean" for near misses (`api_base_env` for `api_base`). A silently ignored key would leave the endpoint on its provider's default base.
+
+An endpoint tagged `local` must set `api_base`. Without one the call would go to the provider's default (public) base, so a leaf meant to stay on your machine would send its prompts to the cloud; the config is refused instead. Drop the tag if the endpoint is meant to be remote.
+
+#### Environment variables in config values
+
+One config file can serve several hosts whose endpoint URLs differ. Any string value (in mappings and lists; never keys) may read the environment:
+
+| Syntax | Meaning |
+|--------|---------|
+| `${VAR}` | the value; unset is a load error |
+| `${VAR:-default}` | `default` when unset or empty |
+| `${VAR:?message}` | load error with `message` when unset or empty |
+| `$$` | a literal `$` |
+
+A bare `$NAME` is left alone, so header templates and model ids containing `$` need no escaping.
+
+```yaml
+endpoints:
+  box:
+    model: openai/my-model
+    api_base: ${MY_BOX_BASE:-http://127.0.0.1:11434/v1}
+    tags: [local]
+```
+
+Expansion runs once, on the merged config. Layers still merge first (system, user, project, `ROUTELLM_CONFIG`, `--config`), so a higher layer's literal replaces a lower layer's `${VAR}`; the replaced variable is never read and need not be set. An unset variable fails the load with the file that set the value, the dotted key (`endpoints.box.api_base`) and the variable.
+
+Do not interpolate secrets. Keys stay in `api_key_env`, read at call time. A `${...}` in a field named like a secret (`api_key`, `secret`, `token`, `password`, `authorization`) is refused.
+
+`python -m routellm.config show` prints the text as written, plus the variables each key reads, and needs none of them set. Add `--resolve` to print the expanded values.
+
 ### Tiers
 
 A tier is a named strong/weak pair whose sides may themselves be tiers, so a request addressed to a tier walks a tree, one router call per level on the original prompt:

@@ -128,11 +128,13 @@ CONFIG = {
         "sonnet": {"model": "anthropic/claude-sonnet-4", "tags": ["cloud"]},
         "local_fast": {
             "model": "ollama_chat/qwen3:8b",
+            "api_base": "http://127.0.0.1:11434/v1",
             "tags": ["local"],
             "quality": 40,
         },
         "local_big": {
             "model": "ollama_chat/qwen3:32b",
+            "api_base": "http://127.0.0.1:11434/v1",
             "tags": ["local"],
             "quality": 55,
         },
@@ -628,8 +630,8 @@ def test_explain_output_contains_the_pick(tmp_path):
     config.write_text(
         "endpoints:\n"
         "  cloud_strong: {model: gpt-4o, tags: [cloud], quality: 90}\n"
-        "  local_fast: {model: 'ollama_chat/qwen3:8b', tags: [local], quality: 40}\n"
-        "  local_big: {model: 'ollama_chat/qwen3:32b', tags: [local], quality: 55}\n"
+        "  local_fast: {model: 'ollama_chat/qwen3:8b', api_base: 'http://127.0.0.1:11434/v1', tags: [local], quality: 40}\n"
+        "  local_big: {model: 'ollama_chat/qwen3:32b', api_base: 'http://127.0.0.1:11434/v1', tags: [local], quality: 55}\n"
         "tiers:\n"
         "  default:\n"
         "    router: mf\n"
@@ -656,7 +658,7 @@ def test_explain_exits_one_on_a_resolution_error(tmp_path):
     config = tmp_path / "config.yaml"
     config.write_text(
         "endpoints:\n"
-        "  local_fast: {model: 'ollama_chat/qwen3:8b', tags: [local]}\n"
+        "  local_fast: {model: 'ollama_chat/qwen3:8b', api_base: 'http://127.0.0.1:11434/v1', tags: [local]}\n"
         "tiers:\n"
         "  default:\n"
         "    strong: {select: 'tag:nowhere'}\n"
@@ -693,7 +695,7 @@ def test_explain_without_a_flag_reads_the_discovered_config(tmp_path):
     user.write_text(
         "endpoints:\n"
         "  cloud_strong: {model: gpt-4o, tags: [cloud], quality: 90}\n"
-        "  local_fast: {model: 'ollama_chat/qwen3:8b', tags: [local], quality: 40}\n"
+        "  local_fast: {model: 'ollama_chat/qwen3:8b', api_base: 'http://127.0.0.1:11434/v1', tags: [local], quality: 40}\n"
         "tiers:\n"
         "  default:\n"
         "    strong: {select: 'tag:cloud', order: quality_desc}\n"

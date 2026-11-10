@@ -56,8 +56,16 @@ PLAIN_PATH_KEYS = {
 BARE_CONFIG = {
     "endpoints": {
         "cloud_strong": {"model": "gpt-4o", "quality": 90},
-        "frontier_local": {"model": "ollama_chat/qwen3:32b", "tags": ["local"]},
-        "local_fast": {"model": "ollama_chat/qwen3:8b", "tags": ["local"]},
+        "frontier_local": {
+            "model": "ollama_chat/qwen3:32b",
+            "api_base": "http://127.0.0.1:11434/v1",
+            "tags": ["local"],
+        },
+        "local_fast": {
+            "model": "ollama_chat/qwen3:8b",
+            "api_base": "http://127.0.0.1:11434/v1",
+            "tags": ["local"],
+        },
     },
     "tiers": {
         "premium": {
