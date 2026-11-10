@@ -45,6 +45,7 @@ class FakeTranscriber:
         self.delay = 0.0
         self.media = b"fetched"  # served at GET /media/<name>
         self.gets = []
+        self.redirect_to = None  # answer GETs with a 302 to this URL
         self.hits = []  # dicts: path, headers, fields, filename, audio
         fake = self
 
@@ -63,6 +64,12 @@ class FakeTranscriber:
 
             def do_GET(self):
                 fake.gets.append(self.path)
+                if fake.redirect_to:
+                    self.send_response(302)
+                    self.send_header("location", fake.redirect_to)
+                    self.send_header("content-length", "0")
+                    self.end_headers()
+                    return
                 self._send(200, fake.media, "audio/wav")
 
             def do_POST(self):

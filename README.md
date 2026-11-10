@@ -480,7 +480,7 @@ For every `input_audio` part the server POSTs the decoded bytes as multipart to 
 
 **Language.** The request's language is the `X-RouteLLM-Transcribe-Language` header (a code such as `fr` or `pt-BR`), or `transcribe_language=` on `Controller.acompletion`; it wins over the config's `language`. With neither, the service detects it.
 
-**`audio_url`** parts are refused with a 400 unless `allow_urls: true`. Enabling it makes the server fetch client-supplied http(s) URLs (no redirects, capped at `max_audio_bytes`), which is a request-forgery risk: enable it only for a trusted caller on a network where that is acceptable.
+**`audio_url`** parts are refused with a 400 unless `allow_urls: true` **and** `allowed_url_hosts` lists the exact hostnames they may name (compared lower-cased, without a trailing dot; an empty list refuses every URL; credentials in the URL are refused). The host is resolved once and every address must be public: loopback, private, link-local, multicast, reserved, unspecified and IPv4-mapped forms of those are refused, and the connection is pinned to the checked address, so a second DNS answer cannot move it. Redirects are not followed, and the download is capped at `max_audio_bytes` while streaming and bounded by `timeout_ms`. `allow_private_url_hosts: true` lifts the public-address check and is **dangerous**: any allowlisted name that points inward then lets a client make the server reach internal services. Leave it off unless the allowlisted hosts are yours.
 
 **Fails closed.** A transcriber that is unreachable, errors, answers unreadably, times out (`timeout_ms`) or is sent audio over `max_audio_bytes` ends the request, before any model is called, with a JSON error carrying the request id and no upstream detail:
 

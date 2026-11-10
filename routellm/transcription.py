@@ -38,14 +38,18 @@ Neither the audio nor any transcript is ever logged above DEBUG; the
 INFO summary holds counts and latency only.
 """
 
+import asyncio
 import base64
 import binascii
+import ipaddress
 import logging
 import os
 import re
+import socket
 import string
 import time
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
@@ -148,6 +152,15 @@ class TranscriberConfig(BaseModel):
         `end`, `speaker`, `text`.
     format_no_speaker : str
         Template for a line whose segment carries no speaker.
+    allowed_url_hosts : list[str]
+        With `allow_urls`, the exact hostnames an `audio_url` may name
+        (compared lower-cased, without a trailing dot). Empty refuses
+        every URL.
+    allow_private_url_hosts : bool
+        DANGEROUS. Lets an allowlisted host resolve to loopback,
+        private, link-local or other non-public addresses. Off by
+        default; turning it on lets a client reach internal services
+        through any allowlisted name that points inward.
     allow_urls : bool
         Whether `audio_url` parts may be fetched. Default False: they
         are refused, because fetching a client-named URL from the
@@ -169,6 +182,8 @@ class TranscriberConfig(BaseModel):
     format: str = DEFAULT_FORMAT
     format_no_speaker: str = DEFAULT_FORMAT_NO_SPEAKER
     allow_urls: StrictBool = False
+    allowed_url_hosts: list[str] = Field(default_factory=list)
+    allow_private_url_hosts: StrictBool = False
     tags: list[str] = Field(default_factory=list)
 
     @field_validator("format", "format_no_speaker")
@@ -582,9 +597,80 @@ async def transcribe(
     return _replace(messages, replacements)
 
 
-def _fetch_sync(client: httpx.Client, url: str, config: TranscriberConfig):
+def _resolve(host: str, port: int) -> list[str]:
+    """Return every address `host` resolves to, as strings."""
     try:
-        with client.stream("GET", url) as response:
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise TranscriptionError(502, "audio_url could not be fetched", repr(exc)) from exc
+    return [info[4][0] for info in infos]
+
+
+def _public(address: str) -> bool:
+    """Return whether `address` is a global unicast address."""
+    ip = ipaddress.ip_address(address.split("%", 1)[0])
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return not (
+        ip.is_loopback
+        or ip.is_private
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+        or not ip.is_global
+    )
+
+
+def _pin(url: str, config: TranscriberConfig) -> tuple[str, dict[str, str], str]:
+    """Validate an `audio_url` and pin it to one checked address.
+
+    Returns `(pinned_url, headers, hostname)`: the URL with its host
+    replaced by the validated IP, the `Host` header to send, and the
+    name for TLS SNI and certificate checks. The name is resolved once,
+    here, so a second DNS answer cannot move the connection.
+
+    Raises
+    ------
+    TranscriptionError
+        On a host off the allowlist, credentials in the URL, or any
+        resolved address that is not public (unless the operator opted
+        in to private ones).
+    """
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").rstrip(".").lower()
+    allowed = {h.rstrip(".").lower() for h in config.allowed_url_hosts}
+    if not host or host not in allowed or parsed.username or parsed.password:
+        raise TranscriptionError(400, "audio_url host is not allowed", f"refused {host!r}")
+
+    try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError as exc:
+        raise TranscriptionError(400, "audio_url is malformed") from exc
+
+    addresses = _resolve(host, port)
+    if not addresses:
+        raise TranscriptionError(502, "audio_url could not be fetched", f"{host} did not resolve")
+    if not config.allow_private_url_hosts and not all(_public(a) for a in addresses):
+        raise TranscriptionError(
+            400, "audio_url host is not allowed", f"{host} resolves to {addresses}"
+        )
+
+    ip = sorted(addresses, key=lambda a: ":" in a)[0].split("%", 1)[0]
+    netloc = f"[{ip}]" if ":" in ip else ip
+    if parsed.port:
+        netloc += f":{parsed.port}"
+    pinned = parsed._replace(netloc=netloc).geturl()
+    header_host = host + (f":{parsed.port}" if parsed.port else "")
+    return pinned, {"Host": header_host}, host
+
+
+def _fetch_sync(client: httpx.Client, url: str, config: TranscriberConfig):
+    pinned, headers, host = _pin(url, config)
+    try:
+        with client.stream(
+            "GET", pinned, headers=headers, extensions={"sni_hostname": host}
+        ) as response:
             response.raise_for_status()
             body = bytearray()
             for chunk in response.iter_bytes():
@@ -598,8 +684,11 @@ def _fetch_sync(client: httpx.Client, url: str, config: TranscriberConfig):
 
 
 async def _fetch_async(client: httpx.AsyncClient, url: str, config: TranscriberConfig):
+    pinned, headers, host = await asyncio.to_thread(_pin, url, config)
     try:
-        async with client.stream("GET", url) as response:
+        async with client.stream(
+            "GET", pinned, headers=headers, extensions={"sni_hostname": host}
+        ) as response:
             response.raise_for_status()
             body = bytearray()
             async for chunk in response.aiter_bytes():

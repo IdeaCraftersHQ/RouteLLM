@@ -59,7 +59,8 @@ resilience:
 # `transcriber:`. `segments[].speaker` is used when the service sends it
 # and omitted when it does not. A tier whose endpoints are all tagged
 # `local` must use a transcriber tagged `local`, or the config is
-# rejected. `audio_url` parts are refused unless `allow_urls: true`.
+# rejected. `audio_url` parts are refused unless `allow_urls: true` and the
+# host is in `allowed_url_hosts`, and must resolve to public addresses.
 # Commented out: the sample should send audio nowhere by default.
 #
 # transcriber:
@@ -73,6 +74,8 @@ resilience:
 #   format: "[{start}-{end}] {speaker}: {text}"
 #   format_no_speaker: "[{start}-{end}] {text}"
 #   allow_urls: false
+#   allowed_url_hosts: []            # with allow_urls: exact hostnames; empty refuses all
+#   allow_private_url_hosts: false   # DANGEROUS: allows non-public addresses (SSRF)
 #   tags: [local]
 
 # Named endpoints. Each gives a reachable model a stable name that

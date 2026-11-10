@@ -382,9 +382,18 @@ def test_audio_url_is_refused_by_default(stt):
 
 
 def test_audio_url_is_fetched_only_when_allowed(stt):
-    part = {"type": "audio_url", "audio_url": {"url": f"{stt.base}/media/a.wav"}}
+    local = stt.base.replace("127.0.0.1", "localhost")
+    part = {"type": "audio_url", "audio_url": {"url": f"{local}/media/a.wav"}}
 
-    out = run(user(part), config(stt.base, allow_urls=True))
+    out = run(
+        user(part),
+        config(
+            stt.base,
+            allow_urls=True,
+            allowed_url_hosts=["localhost"],
+            allow_private_url_hosts=True,
+        ),
+    )
 
     assert stt.gets == ["/v1/media/a.wav"]
     assert stt.hits[0]["audio"] == b"fetched"
@@ -394,10 +403,20 @@ def test_audio_url_is_fetched_only_when_allowed(stt):
 
 def test_an_oversize_fetched_url_is_a_413(stt):
     stt.media = b"x" * 100
-    part = {"type": "audio_url", "audio_url": {"url": f"{stt.base}/media/a.wav"}}
+    local = stt.base.replace("127.0.0.1", "localhost")
+    part = {"type": "audio_url", "audio_url": {"url": f"{local}/media/a.wav"}}
 
     with pytest.raises(TranscriptionError) as err:
-        run(user(part), config(stt.base, allow_urls=True, max_audio_bytes=50))
+        run(
+            user(part),
+            config(
+                stt.base,
+                allow_urls=True,
+                max_audio_bytes=50,
+                allowed_url_hosts=["localhost"],
+                allow_private_url_hosts=True,
+            ),
+        )
 
     assert err.value.status_code == 413
     assert stt.hits == []
