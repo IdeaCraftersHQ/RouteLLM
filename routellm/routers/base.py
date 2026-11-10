@@ -40,6 +40,11 @@ class Router(abc.ABC):
 
     NO_PARALLEL = False
 
+    #: True for a router that embeds each prompt through the embedding
+    #: endpoint (`routellm.routers.embeddings.embed`). The controller then
+    #: needs one at startup and holds the router to the request's class.
+    requires_embedding = False
+
     @abc.abstractmethod
     def calculate_strong_win_rate(self, prompt):
         """Calculate confidence score for routing to strong model.

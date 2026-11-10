@@ -1,201 +1,210 @@
-"""Tests for the lazily built embedding client used by routers.
+"""Embeddings resolve through the registry; there is no implicit default.
 
-Covers the source order of `get_embedding_client` (configured
-`embedding` endpoint, then environment), its caching and reset, the
-error raised when neither source is present, and the guarantee that
-importing the router module and the server builds no client.
+Covers `routellm.routers.embeddings` (endpoint choice, refusal, the opt-in
+environment fallback), the controller's startup refusal for the routers
+and the semantic cache that embed, and that both really call the
+configured endpoint (a loopback fake; nothing leaves the host).
 """
 
 import importlib.util
+import logging
 import os
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
+from routellm.caching import Cache, CacheConfig
+from routellm.controller import Controller
 from routellm.endpoints import Endpoint, EndpointRegistry
+from routellm.routers.base import Router
 from routellm.routers.embeddings import (
     configure_embeddings,
-    get_embedding_client,
+    embed,
+    embedding_endpoint_name,
+    require_embeddings,
     reset_embedding_client,
 )
+from routellm.routers.routers import ROUTER_CLS
+from routellm.tests.fake_embedding_server import FakeEmbeddingServer
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture(autouse=True)
-def clean_embedding_state(monkeypatch):
-    """Reset module state and embedding env around every test."""
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
-    monkeypatch.delenv("EMBEDDING_KEY", raising=False)
+def clean_state(monkeypatch):
+    for var in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "EMBED_KEY"):
+        monkeypatch.delenv(var, raising=False)
     reset_embedding_client()
     yield
     reset_embedding_client()
 
 
 @pytest.fixture
-def fake_openai(monkeypatch):
-    """Patch `openai.OpenAI` and hand back the constructor mock."""
-    import openai
-
-    factory = MagicMock(name="OpenAI", return_value=MagicMock(name="client"))
-    monkeypatch.setattr(openai, "OpenAI", factory)
-    return factory
+def fake():
+    server = FakeEmbeddingServer()
+    yield server
+    server.close()
 
 
-def _registry(**spec):
-    """Build a registry holding one endpoint named `embedding`."""
-    return EndpointRegistry({"embedding": Endpoint(name="embedding", **spec)})
+def _registry(base=None, name="embedding", **spec):
+    spec.setdefault("model", "openai/embed-model")
+    spec.setdefault("api_key_env", "EMBED_KEY")
+    spec.setdefault("tags", ["local"])
+    endpoints = {
+        "strong": Endpoint(name="strong", model="openai/s", api_base="http://127.0.0.1:9/v1"),
+        "weak": Endpoint(name="weak", model="openai/w", api_base="http://127.0.0.1:9/v1"),
+    }
+    if base is not None:
+        endpoints[name] = Endpoint(name=name, api_base=base, **spec)
+    return EndpointRegistry(endpoints)
 
 
-def test_client_built_from_embedding_endpoint(fake_openai, monkeypatch):
-    monkeypatch.setenv("EMBEDDING_KEY", "endpoint-key")
-    configure_embeddings(
-        _registry(
-            model="text-embedding-3-small",
-            api_base="http://127.0.0.1:11500/v1",
-            api_key_env="EMBEDDING_KEY",
-        )
+class _EmbeddingRouter(Router):
+    requires_embedding = True
+
+    def calculate_strong_win_rate(self, prompt):
+        return 1.0 if embed(prompt) else 0.0
+
+
+@pytest.fixture
+def embedding_router(monkeypatch):
+    monkeypatch.setitem(ROUTER_CLS, "emb", _EmbeddingRouter)
+
+
+def _controller(registry, **kw):
+    return Controller(
+        routers=kw.pop("routers", ["random"]),
+        strong_model="strong",
+        weak_model="weak",
+        endpoints=registry,
+        **kw,
     )
 
-    client = get_embedding_client()
 
-    assert client is fake_openai.return_value
-    fake_openai.assert_called_once_with(
-        base_url="http://127.0.0.1:11500/v1", api_key="endpoint-key"
-    )
+# -- refusal ---------------------------------------------------------------
 
 
-def test_endpoint_wins_over_environment(fake_openai, monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
-    monkeypatch.setenv("EMBEDDING_KEY", "endpoint-key")
-    configure_embeddings(_registry(model="text-embedding-3-small", api_key_env="EMBEDDING_KEY"))
-
-    get_embedding_client()
-
-    fake_openai.assert_called_once_with(base_url=None, api_key="endpoint-key")
-
-
-def test_endpoint_missing_env_variable_raises(fake_openai, monkeypatch):
-    configure_embeddings(_registry(model="text-embedding-3-small", api_key_env="EMBEDDING_KEY"))
-
+def test_router_that_embeds_refuses_to_start_without_an_endpoint(embedding_router):
     with pytest.raises(ValueError) as excinfo:
-        get_embedding_client()
-
-    assert "embedding" in str(excinfo.value)
-    assert "EMBEDDING_KEY" in str(excinfo.value)
-
-
-def test_keyless_endpoint_keeps_its_base_with_the_environment_key(fake_openai, monkeypatch):
-    """A base without a key must not send embeddings to OpenAI.
-
-    Base URL and credential resolve independently: the endpoint's
-    `api_base` stands even when only the environment supplies the key.
-    """
-    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
-    configure_embeddings(
-        _registry(
-            model="text-embedding-3-small",
-            api_base="http://127.0.0.1:11500/v1",
-        )
-    )
-
-    get_embedding_client()
-
-    fake_openai.assert_called_once_with(base_url="http://127.0.0.1:11500/v1", api_key="env-key")
-
-
-def test_keyless_endpoint_without_a_base_still_uses_the_environment_base(fake_openai, monkeypatch):
-    """An endpoint setting neither leaves both to the environment."""
-    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
-    monkeypatch.setenv("OPENAI_BASE_URL", "http://localhost:9999/v1")
-    configure_embeddings(_registry(model="text-embedding-3-small"))
-
-    get_embedding_client()
-
-    fake_openai.assert_called_once_with(base_url="http://localhost:9999/v1", api_key="env-key")
-
-
-def test_keyless_endpoint_with_a_base_and_no_key_anywhere_raises(fake_openai):
-    """A base alone is not credentials; the error still names both."""
-    configure_embeddings(
-        _registry(
-            model="text-embedding-3-small",
-            api_base="http://127.0.0.1:11500/v1",
-        )
-    )
-
-    with pytest.raises(RuntimeError) as excinfo:
-        get_embedding_client()
-
-    assert "OPENAI_API_KEY" in str(excinfo.value)
-
-
-def test_registry_without_embedding_endpoint_falls_back_to_env(fake_openai, monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
-    configure_embeddings(EndpointRegistry({"other": Endpoint(name="other", model="m")}))
-
-    get_embedding_client()
-
-    fake_openai.assert_called_once_with(base_url=None, api_key="env-key")
-
-
-def test_environment_fallback_uses_base_url(fake_openai, monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
-    monkeypatch.setenv("OPENAI_BASE_URL", "http://localhost:9999/v1")
-
-    get_embedding_client()
-
-    fake_openai.assert_called_once_with(base_url="http://localhost:9999/v1", api_key="env-key")
-
-
-def test_no_endpoint_and_no_env_raises_naming_both(fake_openai):
-    with pytest.raises(RuntimeError) as excinfo:
-        get_embedding_client()
+        _controller(_registry(), routers=["emb"])
 
     message = str(excinfo.value)
-    assert "embedding" in message
-    assert "OPENAI_API_KEY" in message
+    assert "router 'emb'" in message
+    assert "embeddings.endpoint" in message
 
 
-def test_client_is_cached_across_calls(fake_openai, monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
+def test_semantic_cache_refuses_to_start_without_an_endpoint(tmp_path):
+    cache = CacheConfig(enabled=True, db_path=str(tmp_path / "c.db"), semantic_enabled=True)
 
-    first = get_embedding_client()
-    second = get_embedding_client()
+    with pytest.raises(ValueError) as excinfo:
+        _controller(_registry(), cache_config=cache)
 
-    assert first is second
-    assert fake_openai.call_count == 1
-
-
-def test_reset_clears_client_and_registry(fake_openai, monkeypatch):
-    monkeypatch.setenv("EMBEDDING_KEY", "endpoint-key")
-    configure_embeddings(_registry(model="text-embedding-3-small", api_key_env="EMBEDDING_KEY"))
-    get_embedding_client()
-
-    reset_embedding_client()
-    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
-    get_embedding_client()
-
-    assert fake_openai.call_count == 2
-    assert fake_openai.call_args_list[-1].kwargs == {
-        "base_url": None,
-        "api_key": "env-key",
-    }
+    message = str(excinfo.value)
+    assert "semantic cache" in message
+    assert "embeddings.endpoint" in message
 
 
-def test_configure_with_none_clears_registry(fake_openai, monkeypatch):
-    monkeypatch.setenv("EMBEDDING_KEY", "endpoint-key")
-    configure_embeddings(_registry(model="text-embedding-3-small", api_key_env="EMBEDDING_KEY"))
-    configure_embeddings(None)
-    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
+def test_exact_cache_and_plain_routers_need_no_endpoint(tmp_path):
+    cache = CacheConfig(enabled=True, db_path=str(tmp_path / "c.db"))
 
-    get_embedding_client()
+    _controller(_registry(), cache_config=cache)
 
-    fake_openai.assert_called_once_with(base_url=None, api_key="env-key")
+
+def test_named_endpoint_must_be_in_the_registry():
+    with pytest.raises(ValueError, match="not a registry endpoint"):
+        _controller(_registry(), embedding_endpoint="nope")
+
+
+def test_the_environment_alone_never_supplies_an_endpoint(embedding_router, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-env")
+
+    with pytest.raises(ValueError, match="embeddings.endpoint"):
+        _controller(_registry(), routers=["emb"])
+
+
+def test_embed_without_an_endpoint_raises():
+    with pytest.raises(RuntimeError, match="No embedding endpoint"):
+        embed("hello")
+
+
+def test_cache_config_refuses_the_removed_model_setting():
+    with pytest.raises(ValueError, match="embeddings.endpoint"):
+        CacheConfig(embedding_model="text-embedding-3-small")
+
+
+# -- opt-in fallback --------------------------------------------------------
+
+
+def test_allow_remote_embeddings_warns_naming_the_host(embedding_router, monkeypatch, caplog):
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://embeddings.example.test/v1")
+
+    with caplog.at_level(logging.WARNING):
+        _controller(_registry(), routers=["emb"], allow_remote_embeddings=True)
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("embeddings.example.test" in w for w in warnings)
+
+
+def test_allow_remote_embeddings_uses_the_environment(fake, monkeypatch):
+    monkeypatch.setenv("OPENAI_BASE_URL", fake.base)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-env")
+    configure_embeddings(_registry(), allow_remote=True)
+
+    assert embed("hello") == [1.0] * 8
+    assert len(fake.hits) == 1
+
+
+# -- the configured endpoint is the one called ------------------------------
+
+
+def test_embed_calls_the_endpoint_with_its_model(fake, monkeypatch):
+    monkeypatch.setenv("EMBED_KEY", "k")
+    configure_embeddings(_registry(fake.base))
+
+    assert embed("hello") == [1.0] * 8
+
+    assert [h["model"] for h in fake.hits] == ["embed-model"]
+    assert fake.hits[0]["path"].endswith("/embeddings")
+
+
+def test_a_named_endpoint_wins_over_the_default_name(fake, monkeypatch):
+    monkeypatch.setenv("EMBED_KEY", "k")
+    configure_embeddings(_registry(fake.base, name="vectors"), endpoint="vectors")
+
+    assert embedding_endpoint_name() == "vectors"
+    embed("hello")
+    assert len(fake.hits) == 1
+
+
+def test_semantic_cache_embeds_through_the_endpoint(fake, monkeypatch, tmp_path):
+    monkeypatch.setenv("EMBED_KEY", "k")
+    cache = CacheConfig(enabled=True, db_path=str(tmp_path / "c.db"), semantic_enabled=True)
+    _controller(_registry(fake.base), cache_config=cache)
+    store = Cache(cache)
+
+    store.put("what is up", "strong", {}, {"id": "r"})
+    assert store.get("what is up!", "strong", {}) == {"id": "r"}
+
+    assert [h["input"] for h in fake.hits] == [["what is up"], ["what is up!"]]
+
+
+def test_router_embeds_through_the_endpoint(fake, monkeypatch, embedding_router):
+    monkeypatch.setenv("EMBED_KEY", "k")
+    controller = _controller(_registry(fake.base), routers=["emb"])
+
+    assert controller.routers["emb"].calculate_strong_win_rate("hi") == 1.0
+    assert len(fake.hits) == 1
+
+
+def test_startup_logs_the_endpoint_and_its_reach(fake, caplog):
+    configure_embeddings(_registry(fake.base))
+
+    with caplog.at_level(logging.INFO):
+        assert require_embeddings([]) == "embedding"
+
+    assert any("embedding" in r.getMessage() and "local" in r.getMessage() for r in caplog.records)
 
 
 @pytest.mark.slow

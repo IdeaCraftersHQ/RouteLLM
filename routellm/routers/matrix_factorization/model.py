@@ -7,7 +7,7 @@ embeddings to predict win rates for model pairs.
 import torch
 from huggingface_hub import PyTorchModelHubMixin
 
-from routellm.routers.embeddings import get_embedding_client
+from routellm.routers.embeddings import embed
 
 # Mapping from model names to unique IDs for factorization
 MODEL_IDS = {
@@ -92,8 +92,6 @@ class MFModel(torch.nn.Module, PyTorchModelHubMixin):
         Projection layer from text_dim to dim (if use_proj=True).
     classifier : torch.nn.Sequential
         Linear classifier producing output score.
-    embedding_model : str
-        OpenAI embedding model ID for text encoding.
     """
 
     def __init__(
@@ -124,8 +122,6 @@ class MFModel(torch.nn.Module, PyTorchModelHubMixin):
         self._name = "TextMF"
         self.use_proj = use_proj
         self.P = torch.nn.Embedding(num_models, dim)
-
-        self.embedding_model = "text-embedding-3-small"
 
         if self.use_proj:
             self.text_proj = torch.nn.Sequential(torch.nn.Linear(text_dim, dim, bias=False))
@@ -169,12 +165,7 @@ class MFModel(torch.nn.Module, PyTorchModelHubMixin):
         model_embed = self.P(model_id)
         model_embed = torch.nn.functional.normalize(model_embed, p=2, dim=1)
 
-        prompt_embed = (
-            get_embedding_client()
-            .embeddings.create(input=[prompt], model=self.embedding_model)
-            .data[0]
-            .embedding
-        )
+        prompt_embed = embed(prompt)
         prompt_embed = torch.tensor(prompt_embed, device=self.get_device())
         prompt_embed = self.text_proj(prompt_embed)
 

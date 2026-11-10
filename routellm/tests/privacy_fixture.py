@@ -58,6 +58,7 @@ CASE_MODULES = [
     "routellm.tests.privacy_cases_class_policy",
     "routellm.tests.privacy_cases_egress_gate",
     "routellm.tests.privacy_cases_policy_routing",
+    "routellm.tests.privacy_cases_aux",
 ]
 
 #: The caller every class-policy case sends as, and its key.
@@ -208,6 +209,16 @@ GATE_CONFIG = {
 }
 
 
+#: The auxiliary-call world's extra config: a detector, and (added by
+#: the subprocess, which knows the fakes' ports) an `embedding` endpoint
+#: and a router-that-embeds tier, all pointing at the cloud fake. Every
+#: aux call is therefore a remote call a restricted class must never make.
+AUX_CONFIG = {
+    "aux": "cloud_main",
+    "intents": {"detector": "litellm", "model": "cloud_main", "tiers": {"code": "default"}},
+}
+
+
 #: Route world: header names, labels and projects of its `policy_routing:`.
 ROUTE_PROJECT_HEADER = "X-Route-Project"
 ROUTE_CLIENT_HEADER = "X-Route-Client"
@@ -313,6 +324,7 @@ class Case:
     policy: bool = False  # runs in the class-policy world (see `run_cases`)
     gate: bool = False  # runs in the egress-gate world (policy world plus gates)
     route: bool = False  # runs in the route world (two classes plus `policy_routing:`)
+    aux: bool = False  # runs in the auxiliary-call world (policy world plus `AUX_CONFIG`)
 
 
 CASES: dict[str, Case] = {}
@@ -327,6 +339,7 @@ def case(
     policy=False,
     gate=False,
     route=False,
+    aux=False,
 ):
     """Register a case. `status` and `local` are what the test asserts.
 
@@ -346,9 +359,10 @@ def case(
             None if total is not None else dict(local or {}),
             total,
             reaches_off_host,
-            policy or gate or route,
+            policy or gate or route or aux,
             gate,
             route,
+            aux,
         )
         return fn
 
@@ -447,6 +461,16 @@ from routellm.tests import privacy_fixture as pf
 fakes = {{n: pf.FakeUpstream(n) for n in pf.LEAVES}}
 cfg = pf.build_config({{n: f.base for n, f in fakes.items()}})
 cfg.update(json.loads({extra!r}))
+aux = cfg.pop("aux", None)
+if aux:
+    leaf = dict(cfg["endpoints"][aux])
+    cfg["endpoints"]["embedding"] = {{
+        "model": "openai/embed", "api_base": leaf["api_base"], "api_key_env": "FAKE_KEY",
+        "tags": ["cloud", "jur:us"], "extra": {{"max_retries": 0}},
+    }}
+    cfg["tiers"]["private_emb"] = {{
+        "router": "emb", "threshold": 0.5, "strong": "local_main", "weak": "local_small",
+    }}
 open({config!r}, "w").write(json.dumps(cfg))
 sys.argv = ["x", "--config", {config!r}, "--routers", "random"]
 from routellm.routers.routers import ROUTER_CLS
@@ -454,6 +478,13 @@ class _Pin:
     def route(self, prompt, threshold, pair):
         return pair.strong
 ROUTER_CLS["pin_strong"] = lambda **_: _Pin()
+from routellm.routers.base import Router
+from routellm.routers.embeddings import embed
+class _Emb(Router):
+    requires_embedding = True
+    def calculate_strong_win_rate(self, prompt):
+        return 1.0 if embed(prompt) else 0.0
+ROUTER_CLS["emb"] = _Emb
 for module in pf.CASE_MODULES:
     importlib.import_module(module)
 import routellm.openai_server as server

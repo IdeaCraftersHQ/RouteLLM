@@ -86,6 +86,35 @@ def class_denial(policy: Policy, registry, name: str, data_class: str | None) ->
     return None
 
 
+def check_decision_endpoint(policy: Policy, registry, endpoint: str) -> None:
+    """Refuse a decision endpoint some class may not reach.
+
+    The decision step reads a request before any class exists, so its
+    prompt goes to the endpoint whatever the request turns out to be.
+    The endpoint must therefore pass every class that can result; a
+    `vault` class allows nothing and is left out, as the step runs
+    before a request is known to be vaulted.
+
+    Raises
+    ------
+    PolicyError
+        Naming the endpoint and each class that refuses it.
+    """
+    refused = []
+    for name, spec in policy.classes.items():
+        if spec.refuses_all:
+            continue
+        denial = class_denial(policy, registry, endpoint, name)
+        if denial is not None:
+            refused.append(f"{name} ({denial.rsplit(':', 1)[-1]})")
+    if refused:
+        raise PolicyError(
+            f"decision endpoint {endpoint!r} reads every request before its class is known, "
+            f"but class {', '.join(refused)} may not reach it; use an endpoint every class allows "
+            "(a local one)"
+        )
+
+
 def route_error(plain: type[Exception]):
     """Return a factory for the error a failed candidate check raises.
 

@@ -1,8 +1,9 @@
 """Server settings read from the merged config file.
 
-Two top-level sections configure what the server builds around the
-router: `cache:` (the response cache) and `resilience:` (retries,
-timeouts, circuit breaker). Both are optional. An absent `cache:` means
+Top-level sections configure what the server builds around the
+router: `cache:` (the response cache), `resilience:` (retries,
+timeouts, circuit breaker) and `embeddings:` (which registry endpoint
+embeds prompts). All are optional. An absent `cache:` means
 no cache at all; an absent `resilience:` keeps the `ResilienceConfig`
 defaults.
 
@@ -23,7 +24,7 @@ from routellm.config import ConfigError
 from routellm.quality import FineTuneConfig, QualityManager
 from routellm.resilience import ResilienceConfig
 
-SERVER_SECTIONS = ("cache", "resilience", "comparison", "traces", "auth")
+SERVER_SECTIONS = ("cache", "resilience", "comparison", "traces", "auth", "embeddings")
 
 
 class _StrictCache(CacheConfig):
@@ -77,6 +78,18 @@ def build_cache_config(file_config: dict | None, config_path: str | None) -> Cac
     if not path.is_absolute() and config_path:
         path = Path(config_path).resolve().parent / path
     return CacheConfig(**{**config.model_dump(), "db_path": os.fspath(path)})
+
+
+def build_embedding_endpoint(file_config: dict | None) -> str | None:
+    """Return the `embeddings.endpoint` name, else None (the endpoint named `embedding`)."""
+    raw = _section(file_config, "embeddings")
+    unknown = sorted(set(raw) - {"endpoint"})
+    if unknown:
+        raise ConfigError(f"invalid `embeddings:` section: unknown key(s) {', '.join(unknown)}")
+    name = raw.get("endpoint")
+    if name is not None and (not isinstance(name, str) or not name):
+        raise ConfigError("`embeddings.endpoint` must name a registry endpoint")
+    return name
 
 
 def build_resilience_config(file_config: dict | None) -> ResilienceConfig:

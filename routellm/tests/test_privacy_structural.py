@@ -21,9 +21,14 @@ for _module in CASE_MODULES:
 
 BREAKER = ["breaker_open_on_every_local_leaf"]
 BATCH = [n for n in CASES if n not in BREAKER and not CASES[n].policy]
-POLICY_BATCH = [n for n in CASES if CASES[n].policy and not CASES[n].gate and not CASES[n].route]
+POLICY_BATCH = [
+    n
+    for n in CASES
+    if CASES[n].policy and not CASES[n].gate and not CASES[n].route and not CASES[n].aux
+]
 ROUTE_BATCH = [n for n in CASES if CASES[n].route]
 GATE_BATCH = [n for n in CASES if CASES[n].gate]
+AUX_BATCH = [n for n in CASES if CASES[n].aux]
 
 
 @pytest.fixture(scope="module")
@@ -89,6 +94,21 @@ def test_attribute_headers_are_not_forwarded(route_results):
 def test_the_route_control_reaches_the_cloud(route_results):
     got = route_results["route_control_open_project_general_reaches_the_cloud"]
     assert got["hits"]["cloud_main"] >= 1 and got["obs"]["policy"] == "open-project"
+
+
+@pytest.fixture(scope="module")
+def aux_results(tmp_path_factory):
+    return pf.run_cases(
+        tmp_path_factory.mktemp("privacy-aux"),
+        AUX_BATCH,
+        extra_config=pf.AUX_CONFIG,
+        class_policy=True,
+    )
+
+
+@pytest.mark.parametrize("name", AUX_BATCH)
+def test_an_auxiliary_call_takes_zero_hits_for_a_restricted_class(name, aux_results):
+    check(name, aux_results[name])
 
 
 @pytest.mark.parametrize("name", GATE_BATCH)
