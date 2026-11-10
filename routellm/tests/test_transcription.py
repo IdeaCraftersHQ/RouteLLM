@@ -23,6 +23,7 @@ from routellm.endpoints import EndpointRegistry
 from routellm.resilience import ResilienceConfig
 from routellm.tests.fake_transcriber import LEAK, FakeTranscriber
 from routellm.tests.fake_upstream import FakeUpstream
+from routellm.tests.subproc import SUBPROCESS_TIMEOUT
 from routellm.transcription import TranscriberConfig, TranscriptionError, format_transcript
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -632,6 +633,7 @@ def ask(raw, **extra):
 out = {{}}
 with TestClient(server.app, raise_server_exceptions=False) as client:
     server.CONTROLLER.resilience.config.max_retries = 0
+    server.CONTROLLER.resilience.config.timeout_ms = 600_000  # starved CPU is not an upstream timeout
     ok = ask(b"hello", headers={{"X-RouteLLM-Transcribe-Language": "fr"}})
     out["ok"] = [ok.status_code, STT.hits[-1]["fields"].get("language"), len(LLM.hits)]
 
@@ -671,7 +673,7 @@ def test_server_status_codes_request_ids_and_no_leaks(tmp_path):
             "LITELLM_LOCAL_MODEL_COST_MAP": "True",
             "FAKE_KEY": "sk-fake",
         },
-        timeout=120,
+        timeout=SUBPROCESS_TIMEOUT,
     )
     assert result.returncode == 0, result.stderr[-3000:]
     import json

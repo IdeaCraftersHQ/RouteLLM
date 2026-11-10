@@ -15,6 +15,7 @@ import pytest
 
 from routellm import auth
 from routellm.config import ConfigError
+from routellm.tests.subproc import SUBPROCESS_TIMEOUT
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 KEY_A = "sk-test-aaaa-1111"
@@ -194,6 +195,7 @@ async def probe(request, call_next):
 
 with TestClient(server.app, raise_server_exceptions=False) as client:
     server.CONTROLLER.resilience.config.max_retries = 0
+    server.CONTROLLER.resilience.config.timeout_ms = 600_000  # starved CPU is not an upstream timeout
     seen = []
     real = server.CONTROLLER.acompletion
     async def spy(**kw):
@@ -220,7 +222,7 @@ def _run(tmp_path, body, keys=True):
             "LITELLM_LOCAL_MODEL_COST_MAP": "True",
             "FAKE_KEY": "sk-fake",
         },
-        timeout=120,
+        timeout=SUBPROCESS_TIMEOUT,
     )
     assert result.returncode == 0, result.stderr[-3000:]
     line = next(ln for ln in reversed(result.stdout.splitlines()) if "@@RESULT@@" in ln)
@@ -344,7 +346,7 @@ def test_clear_text_key_file_stops_startup_without_echoing_it(tmp_path):
             "XDG_CONFIG_HOME": str(tmp_path / "xdg"),
             "LITELLM_LOCAL_MODEL_COST_MAP": "True",
         },
-        timeout=120,
+        timeout=SUBPROCESS_TIMEOUT,
     )
     assert result.returncode != 0
     assert "clear-text" in result.stderr

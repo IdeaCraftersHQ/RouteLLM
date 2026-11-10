@@ -38,6 +38,7 @@ from pathlib import Path
 from routellm.pairing import CATALOG_CACHE_ENV, write_snapshot
 from routellm.tests.audit_fixture import audit_section
 from routellm.tests.fake_upstream import FakeUpstream  # noqa: F401  used by the subprocess script
+from routellm.tests.subproc import SUBPROCESS_TIMEOUT
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -635,7 +636,7 @@ def run_cases(
             "LITELLM_LOCAL_MODEL_COST_MAP": "True",
             "FAKE_KEY": "sk-fake",
         },
-        timeout=180,
+        timeout=SUBPROCESS_TIMEOUT,
     )
     assert result.returncode == 0, result.stderr[-3000:]
     line = next(ln for ln in reversed(result.stdout.splitlines()) if "@@RESULT@@" in ln)

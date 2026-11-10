@@ -18,6 +18,7 @@ import pytest
 from routellm import config as cfg
 from routellm.config import ConfigError
 from routellm.endpoints import EndpointRegistry
+from routellm.tests.subproc import SUBPROCESS_TIMEOUT
 from routellm.tests.test_config_discovery import env  # noqa: F401  (fixture)
 
 
@@ -299,7 +300,7 @@ def test_interpolated_base_is_the_one_hit_on_the_wire(tmp_path):
             "LITELLM_LOCAL_MODEL_COST_MAP": "True",
             "FAKE_KEY": "sk-fake",
         },
-        timeout=120,
+        timeout=SUBPROCESS_TIMEOUT,
     )
     assert result.returncode == 0, result.stderr[-3000:]
     line = next(ln for ln in reversed(result.stdout.splitlines()) if "@@RESULT@@" in ln)

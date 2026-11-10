@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from routellm.tests.audit_fixture import HMAC_KEY, audit_section
+from routellm.tests.subproc import SUBPROCESS_TIMEOUT
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 KEY_A, KEY_B = "sk-test-aaaa", "sk-test-bbbb"
@@ -59,6 +60,7 @@ def emit(obj):
 
 with TestClient(server.app, raise_server_exceptions=False) as client:
     server.CONTROLLER.resilience.config.max_retries = 0
+    server.CONTROLLER.resilience.config.timeout_ms = 600_000  # starved CPU is not an upstream timeout
 """
 
 
@@ -140,7 +142,7 @@ keys:
             "LITELLM_LOCAL_MODEL_COST_MAP": "True",
             "FAKE_KEY": "sk-fake",
         },
-        timeout=120,
+        timeout=SUBPROCESS_TIMEOUT,
     )
     if not expect_ok:
         return result

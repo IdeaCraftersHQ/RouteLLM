@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+from routellm.tests.subproc import SUBPROCESS_TIMEOUT
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 pytestmark = pytest.mark.slow
@@ -74,7 +76,7 @@ def _run(tmp_path, body):
             "LITELLM_LOCAL_MODEL_COST_MAP": "True",
             "FAKE_KEY": "sk-fake",
         },
-        timeout=120,
+        timeout=SUBPROCESS_TIMEOUT,
     )
     assert result.returncode == 0, result.stderr[-3000:]
     return json.loads(result.stdout.strip().splitlines()[-1])
@@ -348,9 +350,9 @@ with client.stream("POST", "/v1/chat/completions",
     sse(r)
 # The trace is written off the event loop, a moment after the stream ends.
 import time
-for _ in range(100):
-    if traces:
-        break
+from routellm.tests.subproc import WAIT_DEADLINE
+deadline = time.monotonic() + WAIT_DEADLINE
+while not traces and time.monotonic() < deadline:
     time.sleep(0.05)
 t = traces[0] if traces else None
 print(json.dumps({{"n": len(traces), "model": t and t[0],

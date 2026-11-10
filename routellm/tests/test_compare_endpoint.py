@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from routellm.tests.subproc import SUBPROCESS_TIMEOUT
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 pytestmark = pytest.mark.slow
@@ -18,6 +20,7 @@ pytestmark = pytest.mark.slow
 _PREAMBLE = """
 import json, sys, time
 from routellm.tests.fake_upstream import FakeUpstream
+from routellm.tests.subproc import WAIT_DEADLINE
 sys.argv = ["x", "--config", {config!r}, "--routers", "random"]
 
 A, B, C = FakeUpstream("A"), FakeUpstream("B"), FakeUpstream("C")
@@ -44,7 +47,7 @@ def emit(obj):
     print("@@RESULT@@" + json.dumps(obj))
 
 
-def wait_for(predicate, seconds=10):
+def wait_for(predicate, seconds=WAIT_DEADLINE):
     end = time.time() + seconds
     while time.time() < end:
         if predicate():
@@ -55,6 +58,7 @@ def wait_for(predicate, seconds=10):
 
 with TestClient(server.app, raise_server_exceptions=False) as client:
     server.CONTROLLER.resilience.config.max_retries = 0
+    server.CONTROLLER.resilience.config.timeout_ms = 600_000  # starved CPU is not an upstream timeout
 """
 
 
@@ -84,7 +88,7 @@ def _run(tmp_path, body, comparison=None, tags=None, traces=None):
             "LITELLM_LOCAL_MODEL_COST_MAP": "True",
             "FAKE_KEY": "sk-fake",
         },
-        timeout=120,
+        timeout=SUBPROCESS_TIMEOUT,
     )
     assert result.returncode == 0, result.stderr[-3000:]
     line = next(ln for ln in reversed(result.stdout.splitlines()) if "@@RESULT@@" in ln)
