@@ -44,7 +44,8 @@ jobs:
         run: python -m pytest routellm/tests -q -rs
 
   # The two ends of the litellm range `pyproject.toml` declares: the
-  # oldest version verified, and the newest the range allows. A change
+  # oldest version verified, and the newest the range allows (capped
+  # below 1.107 by the release-age policy). A change
   # to the range there must change the matching entry here.
   litellm:
     runs-on: ubuntu-latest
@@ -55,7 +56,7 @@ jobs:
           - name: oldest
             litellm: "litellm==1.106.4"
           - name: newest
-            litellm: "litellm>=1.106.4,<1.109"
+            litellm: "litellm>=1.106.4,<1.107"
     name: litellm (${{ matrix.name }})
     steps:
       - uses: actions/checkout@v4

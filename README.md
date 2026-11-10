@@ -123,7 +123,7 @@ pip install "routellm[serve,ml]"
 If you installed the previous default (which bundled torch), add `ml` to keep
 the model-backed routers.
 
-Supported litellm versions: `>=1.106.4,<1.109`. CI runs the suite on the oldest
+Supported litellm versions: `>=1.106.4,<1.107`. CI runs the suite on the oldest
 and the newest version in that range.
 
 **Policy-based pairing (optional)**

@@ -25,10 +25,12 @@ dependencies = [
 	'tqdm',
 	'openai',
 	# Tested range: the lower bound is the oldest version the suite was
-	# verified against, the upper bound the first minor not yet verified.
+	# verified against, the upper bound the first minor not yet vetted.
+	# The cap is below 1.107 because later releases are younger than the
+	# 14-day release-age policy; raise it once one has aged in.
 	# CI runs both ends (.github/workflows/tests.yml); move the two
 	# together.
-	'litellm>=1.106.4,<1.109',
+	'litellm>=1.106.4,<1.107',
 	'x402[evm]>=2.0.0'
 ]
 
