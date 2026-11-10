@@ -21,6 +21,23 @@ bert:
 mf:
     checkpoint_path: routellm/mf_gpt4_augmented
 
+# Caller identity. Off unless this section exists: the server then stays
+# unauthenticated, bound to loopback by default. With `keys_file` set,
+# every route except /health needs `Authorization: Bearer <key>`; a
+# missing or unknown key is a 401. The file holds sha256 hashes, never
+# keys (an entry with a clear-text `key` stops startup):
+#
+#   keys:
+#     - key_sha256: "<printf %s "$KEY" | shasum -a 256>"
+#       principal: team-a              # name audit and cache key on
+#       profile: default               # optional
+#       allowed_classes: [public]      # data classes this caller may send
+#
+# A relative path resolves against this file's directory. Keep the file
+# owner-only (0600). The matched caller is on `request.state.principal`.
+# auth:
+#   keys_file: keys.yaml
+
 # Response cache. Off unless enabled: it answers from disk instead of
 # calling the model, which is wrong for most conversational traffic. The
 # key covers the whole request -- every message (images and tool calls

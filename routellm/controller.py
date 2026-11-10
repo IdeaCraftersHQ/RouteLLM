@@ -17,6 +17,7 @@ from tqdm import tqdm
 
 from routellm import requirements as requirements_module
 from routellm import transcription
+from routellm.auth import Principal, current_principal
 from routellm.caching import Cache, CacheConfig, context_key, conversation_key
 from routellm.capabilities import (
     build_tier_index,
@@ -1337,6 +1338,7 @@ class Controller:
         request_id: str | None = None,
         declared_class: str | None = None,
         conversation_id: str | None = None,
+        principal: Principal | None = None,
         **kwargs,
     ):
         """Synchronous completion with intelligent routing.
@@ -1381,6 +1383,10 @@ class Controller:
         conversation_id : str, optional
             Key for the decision step's sticky floor; derived from the
             conversation's opening message when absent.
+        principal : Principal, optional
+            The authenticated caller. Never forwarded upstream; it is
+            carried on `routellm.auth.current_principal` for policy,
+            audit and cache code on this request's call path.
         **kwargs
             Standard OpenAI completion parameters (messages, temperature,
             top_p, etc.). model field can encode router and threshold.
@@ -1398,6 +1404,8 @@ class Controller:
             If the addressed tier transcribes audio and that fails. The
             raw audio is never routed instead.
         """
+        if principal is not None:
+            current_principal.set(principal)
         tier = None
         request_name = kwargs.get("model")
         if request_name is not None:
@@ -1634,8 +1642,11 @@ class Controller:
         compare: str | None = None,
         declared_class: str | None = None,
         conversation_id: str | None = None,
+        principal: Principal | None = None,
         **kwargs,
     ):
+        if principal is not None:
+            current_principal.set(principal)
         tier = None
         request_name = kwargs.get("model")
         if request_name is not None:

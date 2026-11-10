@@ -20,6 +20,7 @@ from fastapi.concurrency import asynccontextmanager
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from routellm.auth import PrincipalResolver, bearer_token, build_auth, current_principal
 from routellm.capabilities import Capabilities, side_capabilities, union
 from routellm.comparison import COMPARE_HEADER
 from routellm.config import layer_summary, load_config
@@ -471,6 +472,12 @@ def payment_budget_for(payment_budget):
     return PaymentBudget(payment_budget)
 
 
+#: Resolver for `auth:`; None leaves the server unauthenticated.
+AUTH: PrincipalResolver | None = None
+
+LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+
 @asynccontextmanager
 async def lifespan(app):
     global CONTROLLER
@@ -557,6 +564,15 @@ async def lifespan(app):
         budget=budget,
     )
 
+    global AUTH
+    AUTH = build_auth(file_config, config_origin)
+    if AUTH is None and args.host not in LOOPBACK_HOSTS:
+        logging.warning(
+            "listening on %s with no `auth:` configured: anyone who can reach "
+            "this port can use it",
+            args.host,
+        )
+
     CONTROLLER = Controller(
         routers=args.routers,
         config=router_config,
@@ -581,9 +597,43 @@ async def lifespan(app):
     )
     yield
     CONTROLLER = None
+    AUTH = None
 
 
 app = fastapi.FastAPI(lifespan=lifespan)
+
+
+class Unauthorized(Exception):
+    """No bearer key, or one that maps to no principal."""
+
+
+def require_principal(http_request: Request):
+    """Authenticate the caller and expose it as `request.state.principal`.
+
+    A dependency, so it runs before the body is validated. With auth off
+    it does nothing and `request.state.principal` is None. The 401 is the
+    same for a missing and an unknown key, and never echoes the key.
+    """
+    http_request.state.principal = None
+    resolver = AUTH
+    if resolver is None:
+        return None
+    token = bearer_token(http_request.headers.get("authorization"))
+    principal = resolver.resolve(token) if token else None
+    if principal is None:
+        raise Unauthorized
+    http_request.state.principal = principal
+    current_principal.set(principal)
+    return principal
+
+
+@app.exception_handler(Unauthorized)
+async def _unauthorized(_request: Request, _exc: Unauthorized) -> JSONResponse:
+    return JSONResponse(
+        {"object": "error", "message": "Missing or invalid bearer key"},
+        status_code=401,
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 class ErrorResponse(BaseModel):
@@ -811,7 +861,10 @@ async def _loop_detected(_request: Request, _exc: LoopDetected) -> JSONResponse:
     )
 
 
-@app.post("/v1/chat/completions", dependencies=[fastapi.Depends(refuse_loops)])
+@app.post(
+    "/v1/chat/completions",
+    dependencies=[fastapi.Depends(require_principal), fastapi.Depends(refuse_loops)],
+)
 async def create_chat_completion(request: ChatCompletionRequest, http_request: Request):
     """Route one chat completion and return it in OpenAI's shape.
 
@@ -846,6 +899,7 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
             messages=request.messages,
             transcribe_language=language,
             request_id=request_id,
+            principal=http_request.state.principal,
             compare=http_request.headers.get(COMPARE_HEADER),
             **forwarded,
         )
@@ -899,7 +953,10 @@ class CompareRequest(ChatCompletionRequest):
     measure_ttft: bool | None = None
 
 
-@app.post("/v1/compare", dependencies=[fastapi.Depends(refuse_loops)])
+@app.post(
+    "/v1/compare",
+    dependencies=[fastapi.Depends(require_principal), fastapi.Depends(refuse_loops)],
+)
 async def create_comparison(request: CompareRequest):
     """Run one request on every named model and return the results side by side.
 
@@ -942,7 +999,7 @@ async def create_comparison(request: CompareRequest):
     return JSONResponse(content=body)
 
 
-@app.get("/v1/models")
+@app.get("/v1/models", dependencies=[fastapi.Depends(require_principal)])
 async def list_models():
     """List every model name this server answers to.
 
@@ -1067,8 +1124,9 @@ parser.add_argument("--port", type=int, default=6060)
 parser.add_argument(
     "--host",
     help=(
-        "Interface to bind. Defaults to 127.0.0.1: the server is "
-        "unauthenticated, so anything wider exposes it to that network."
+        "Interface to bind. Defaults to 127.0.0.1: unless the config has an "
+        "`auth:` section the server is unauthenticated, so anything wider "
+        "exposes it to that network (and logs a warning)."
     ),
     type=str,
     default="127.0.0.1",
