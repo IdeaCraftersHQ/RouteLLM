@@ -65,4 +65,4 @@ incident debugging.
 
 - US-0008 — trace collection (sister concern, distinct storage)
 - US-0100 — auth (provides tenant_id + user_id to row)
-- showcase scenario 3 — class-aware LLM gateway
+- class-aware LLM gateway deployment (consumer)

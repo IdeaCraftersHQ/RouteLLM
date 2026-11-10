@@ -6,8 +6,7 @@ function names.
 
 Convention: every story (existing + new) MUST link e2e tests by
 file::function. Failing tests are acceptable; "not yet implemented"
-prose without a planned test path is non-conforming. Pattern adopted
-from aps story 004.
+prose without a planned test path is non-conforming.
 
 ## Index
 

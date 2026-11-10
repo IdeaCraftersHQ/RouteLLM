@@ -15,19 +15,18 @@ it's safe.
 ## Context
 
 Caching today (US-0002 exact, US-0003 semantic) is global and
-binary: enabled or not. Showcase scenario 3 needs differentiated
+binary: enabled or not. A class-aware LLM gateway needs differentiated
 policy per request class. c12n classifies on PII / Domain /
 Complexity / CodeContent / Toxicity / Jailbreak / CostEstimate /
 OutputFormat — these labels should drive cache behavior.
 
 Primary namespace key = `workspace_id` (resolved from request auth
-token → aps profile → WorkspaceLink). Tenant-scoped is too coarse:
+token → caller profile → workspace). Tenant-scoped is too coarse:
 one tenant can hold multiple workspaces (client-A vs client-B);
 shared `tenant_id` namespace leaks `Domain: legal` / `PII` rows
-across client engagements within a single employee profile. See
-wsm audit T-0179. `tenant_id` remains a valid override when sister
-workspaces under one tenant want shared cache (analogous spec
-move: bus envelope T-0192 carries `workspace_id` from day one).
+across client engagements within a single employee profile.
+`tenant_id` remains a valid override when sibling workspaces under
+one tenant want shared cache.
 
 Hook point: a callable `cache_policy: Callable[[Request,
 ClassificationResult], CachePolicy]` invoked between request
@@ -38,7 +37,7 @@ CachePolicy:
   action: skip | lookup_only | lookup_and_store | store_only
   ttl: seconds (overrides config default)
   namespace: str (default: workspace_id; can override — e.g.
-              tenant_id for sister-workspace shared cache, or
+              tenant_id for sibling-workspace shared cache, or
               "global:domain:math" for cross-tenant reuse)
   match: exact | semantic | both
 ```
@@ -58,9 +57,9 @@ strategies). Custom policy fully overrides.
       behavior
 - [ ] Policy `ttl` overrides config TTL on store
 - [ ] Default cache namespace is `workspace_id` resolved from
-      request's auth token → aps profile → `WorkspaceLink.name`
+      request's auth token → caller profile → workspace name
 - [ ] Policy `namespace` overrides workspace default (e.g.,
-      `tenant_id` for sister-workspace shared cache;
+      `tenant_id` for sibling-workspace shared cache;
       `"global:domain:math"` for cross-tenant reuse)
 - [ ] Policy `match=exact` → semantic disabled for this request
       even if globally enabled
@@ -73,9 +72,8 @@ strategies). Custom policy fully overrides.
 
 - Touches `routellm/caching.py` + `routellm/controller.py`
 - Type: `routellm/types.py` adds `CachePolicy` dataclass
-- Reference impl in `extensions/policy_routing/` (showcase scenario
-  3 task T-0104) — wires c12n classifier + maps labels per the
-  table in scenario 3 spec
+- Reference impl in `extensions/policy_routing/` — wires c12n
+  classifier + maps labels per its cache policy table
 - Backwards compat: no hook → identical to current behavior
 
 ## E2E tests
@@ -93,10 +91,8 @@ strategies). Custom policy fully overrides.
 
 - US-0002 — exact-match cache (consumer of policy)
 - US-0003 — semantic cache (consumer of policy)
-- US-0100 — auth (provides profile + WorkspaceLink → workspace_id)
+- US-0100 — auth (provides profile + workspace → workspace_id)
 - US-0101 — audit (records `cache_namespace` + `workspace_id` per row)
 - c12n integration — classification produces `ClassificationResult`
   consumed by policy
-- showcase scenario 3 — class-aware LLM gateway (consumer)
-- wsm audit (T-0179): `~/.ops/docs/research/wsm-integration-audit-2026-04-30.md`
-- T-0192 — bus envelope `workspace_id` (analogous spec move)
+- class-aware LLM gateway deployment (consumer)

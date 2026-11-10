@@ -15,7 +15,7 @@ access without rotating shared secrets.
 
 Today the OpenAI-compatible server (US-0010) accepts any caller
 holding the upstream provider key. For LAN + VPN business
-deployment (showcase scenario 3), we need:
+deployment (class-aware LLM gateway), we need:
 
 - Per-employee bearer tokens issued by the gateway, not by upstream
 - Tenant scoping (a "tenant" = a company / squad; multiple
@@ -76,4 +76,4 @@ secrets in config; tenants never see them.
 - US-0008 — trace collection (rows tagged with tenant)
 - US-0101 — audit log (consumes auth identity)
 - US-0102 — cache policy hooks (refines cross-tenant rules)
-- showcase scenario 3 — class-aware LLM gateway
+- class-aware LLM gateway deployment (consumer)
