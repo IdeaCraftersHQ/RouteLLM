@@ -442,3 +442,11 @@ def test_server_default_config_makes_two_upstream_calls(tmp_path):
         assert len(fake.hits) == 2
     finally:
         fake.close()
+
+
+def test_bare_controller_has_the_cache_off_and_creates_no_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    controller = Controller(routers=["random"], strong_model="openai/m", weak_model="openai/m")
+    assert controller.cache.config.enabled is False
+    assert CacheConfig().enabled is False
+    assert not [p for p in os.listdir(tmp_path) if "cache" in p]

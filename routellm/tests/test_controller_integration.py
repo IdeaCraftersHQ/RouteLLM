@@ -20,7 +20,7 @@ def complex_controller(tmp_path):
         strong_model="gpt-4",
         weak_model="gpt-3.5-turbo",
         resilience_config=ResilienceConfig(max_retries=1),
-        cache_config=CacheConfig(db_path=db_path),
+        cache_config=CacheConfig(enabled=True, db_path=db_path),
         traffic_manager=TrafficManager(
             rules=[
                 TrafficRule(

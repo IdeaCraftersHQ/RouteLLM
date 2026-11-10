@@ -48,7 +48,7 @@ def test_circuit_breaker_rate_threshold():
 
 def test_cache_ttl(tmp_path):
     db_path = str(tmp_path / "test_cache.db")
-    config = CacheConfig(db_path=db_path, ttl_seconds=1)
+    config = CacheConfig(enabled=True, db_path=db_path, ttl_seconds=1)
     cache = Cache(config)
 
     prompt = "test prompt"
@@ -67,7 +67,9 @@ def test_cache_ttl(tmp_path):
 @patch("routellm.caching.Cache._get_embedding")
 def test_semantic_cache(mock_emb, tmp_path):
     db_path = str(tmp_path / "test_semantic.db")
-    config = CacheConfig(db_path=db_path, semantic_enabled=True, semantic_threshold=0.9)
+    config = CacheConfig(
+        enabled=True, db_path=db_path, semantic_enabled=True, semantic_threshold=0.9
+    )
     cache = Cache(config)
 
     # Mock embeddings

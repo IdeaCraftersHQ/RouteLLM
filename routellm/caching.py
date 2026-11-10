@@ -25,7 +25,7 @@ class CacheConfig(BaseModel):
     Attributes
     ----------
     enabled : bool
-        Whether caching is enabled. Default: True.
+        Whether caching is enabled. Default: False.
     db_path : str
         Path to SQLite cache database. Default: ".routellm_cache.db".
     ttl_seconds : int
@@ -39,7 +39,7 @@ class CacheConfig(BaseModel):
         Model name for generating embeddings. Default: "text-embedding-3-small".
     """
 
-    enabled: bool = True
+    enabled: bool = False
     db_path: str = ".routellm_cache.db"
     ttl_seconds: int = 86400  # 24 hours
     semantic_enabled: bool = False

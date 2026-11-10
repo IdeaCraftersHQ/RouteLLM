@@ -76,8 +76,8 @@ client = Controller(
     weak_model="gpt-3.5-turbo",
     # Resilience: 3 retries, 30s timeout, circuit breaker enabled
     resilience_config=ResilienceConfig(max_retries=3, timeout_ms=30000),
-    # Caching: Enable semantic caching with 95% similarity threshold
-    cache_config=CacheConfig(semantic_enabled=True, semantic_threshold=0.95),
+    # Caching: off by default; enable it, with semantic matching at 95% similarity
+    cache_config=CacheConfig(enabled=True, semantic_enabled=True, semantic_threshold=0.95),
     traffic_manager=traffic_manager,
     # Quality: 5% Canary traffic and record traces for fine-tuning
     quality_manager=QualityManager(
