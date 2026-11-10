@@ -239,11 +239,18 @@ class CallMixin:
         return res, ttft
 
     def _cost(self, name: str, prompt_tokens, completion_tokens) -> float | None:
-        record = (getattr(self.host, "_catalog_records", None) or {}).get(name)
-        if record is None:
-            return None
-        cost_in = getattr(record, "cost_input", None)
-        cost_out = getattr(record, "cost_output", None)
+        override = None
+        endpoints = getattr(self.host, "endpoints", None)
+        if endpoints is not None and name in endpoints.names():
+            override = endpoints.get(name).price_override
+        if override is not None:
+            cost_in, cost_out = override
+        else:
+            record = (getattr(self.host, "_catalog_records", None) or {}).get(name)
+            if record is None:
+                return None
+            cost_in = getattr(record, "cost_input", None)
+            cost_out = getattr(record, "cost_output", None)
         if cost_in is None and cost_out is None:
             return None
         return (

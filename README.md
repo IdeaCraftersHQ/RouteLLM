@@ -560,7 +560,15 @@ python -m routellm.pairing --config config.example.yaml
 
 Every selector is resolved to an endpoint name before the tier graph is validated a second time, so nothing downstream ever sees one.
 
-`free:true` keeps only endpoints whose models.dev record prices input and output at exactly 0; `free:false` keeps the rest. An endpoint the catalog does not list, or lists without a price, is not free: a missing price is not a price of zero, so an uncatalogued `:free` id fails `free:true`.
+`free:true` keeps only endpoints whose models.dev record prices input and output at exactly 0; `free:false` keeps the rest. An endpoint the catalog does not list, or lists without a price, is not free: a missing price is not a price of zero, so an uncatalogued `:free` id fails `free:true` unless the endpoint states its own price.
+
+**Price override.** An endpoint may carry `price: {input: 0, output: 0}` (USD per 1M tokens; both keys required, non-negative numbers, no other keys) or `free: true` (shorthand for 0 and 0; `free: false` and `price` together with `free` are rejected at load). It replaces the catalog price for that endpoint everywhere a price is read: the `free:` selector term, `cost_asc`/`cost_desc` ordering, and comparison `cost_usd` and budgets. An explicit override wins over the catalog, whether the catalog says paid or free. Use it for local and OpenAI-compatible models the catalog lacks, or new ids it has not listed yet.
+
+```yaml
+endpoints:
+  local_a: {model: ollama_chat/a, api_base: "http://127.0.0.1:11434", tags: [local], free: true}
+  gw_new:  {model: openrouter/vendor/new:free, tags: [cloud], price: {input: 0, output: 0}}
+```
 
 #### Candidate pools
 
