@@ -24,6 +24,7 @@ MESSAGES = [{"role": "user", "content": "hi"}]
 class Fake:
     model_counts = {}
     decision = None
+    policy_routing = None
 
     def __init__(self, error):
         self.error = error
