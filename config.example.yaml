@@ -251,8 +251,8 @@ tiers:
 #   {select: "tag:jur:ca|jur:fr"}        either jurisdiction
 #   {select: "tag:vpn !tag:jur:fr"}      vpn, not in fr
 # `|` alternatives share one namespace or are all reach labels
-# (`local|vpn|cloud`); anything else, or an unknown namespace in a
-# negated or `|` term, fails at startup.
+# (`local|vpn|cloud`); anything else, or an unknown namespace in any
+# `tag:` term, fails at startup.
 
 # `free:true` keeps endpoints the catalog prices at 0 for input and output
 # (unpriced or uncatalogued ones are not free). `pool: N` keeps the best N

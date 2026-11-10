@@ -84,6 +84,7 @@ def test_plain_tag_unchanged(registry):
         "!tag:|",
         "!tag:nope:x",  # negated unknown namespace
         "tag:nope:x|nope:y",  # or'd unknown namespace
+        "tag:nope:x",  # positive unknown namespace (likely a typo)
         "tag:jur:",  # empty value
         "!!tag:cloud",
         "!",

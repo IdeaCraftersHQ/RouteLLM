@@ -168,13 +168,12 @@ def parse_tag_term(term: str, select: str = "") -> TagTerm:
 
 
 def check_tag_term(term: TagTerm, known: frozenset[str], select: str = "") -> None:
-    """Refuse a negated or any-of term naming an unknown namespace.
+    """Refuse a term naming an unknown namespace.
 
-    A plain positive term with a typo matches nothing, which fails
-    closed; a negated or alternative one would widen the match.
+    A negated or alternative term with a typo would widen the match; a
+    plain positive one would silently match nothing, so it is refused
+    too, as endpoint tags are.
     """
-    if not term.negated and len(term.any_of) == 1:
-        return
     for alt in term.any_of:
         parts = split_tag(alt)
         if parts is not None and parts[0] not in known:
