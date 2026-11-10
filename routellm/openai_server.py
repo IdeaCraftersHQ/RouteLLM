@@ -4,22 +4,24 @@ It current only supports Chat Completions: https://platform.openai.com/docs/api-
 """
 
 import argparse
+import json
 import logging
 import os
 import time
 from collections.abc import AsyncGenerator
-from typing import Literal
+from typing import Any, Literal
 
 import fastapi
 import shortuuid
 import uvicorn
+from fastapi import Request
 from fastapi.concurrency import asynccontextmanager
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from routellm.capabilities import Capabilities, side_capabilities, union
 from routellm.config import load_config
-from routellm.controller import Controller, RoutingError
+from routellm.controller import HOP_HEADER, Controller, RoutingError
 from routellm.endpoints import Endpoint, EndpointRegistry, Tier
 from routellm.hints import TYPESAFE_INSTALL_HINT
 from routellm.middleware.intent_model_selector import (
@@ -512,11 +514,23 @@ class UsageInfo(BaseModel):
 
 
 class ChatCompletionRequest(BaseModel):
+    """The chat completion body this server accepts.
+
+    Agent clients send the full OpenAI chat shapes: nested `tools`,
+    `tool_choice` as a string or an object, messages with `tool_calls`,
+    `role: "tool"` turns, null or absent `content`, content parts
+    (text, image_url) and `response_format` of type `json_schema`. The
+    nested shapes belong to the provider, so they are typed as open
+    dicts and forwarded untouched.
+
+    Only the fields named here are forwarded. Anything else in a body is
+    dropped, which is deliberate: a parameter this server does not know
+    may be one a routed provider rejects. The allowlist is this class.
+    """
+
     # OpenAI fields: https://platform.openai.com/docs/api-reference/chat/create
     model: str
-    messages: (
-        str | list[dict[str, str]] | list[dict[str, str | list[dict[str, str | dict[str, str]]]]]
-    )
+    messages: str | list[dict[str, Any]]
     # Every optional field defaults to None so an unset one stays unset.
     # A default value here would be manufactured into the litellm call,
     # and a provider that does not accept the parameter rejects the whole
@@ -526,16 +540,21 @@ class ChatCompletionRequest(BaseModel):
     logprobs: bool | None = None
     top_logprobs: int | None = None
     max_tokens: int | None = None
+    max_completion_tokens: int | None = None
     n: int | None = None
     presence_penalty: float | None = None
-    response_format: dict[str, str] | None = None  # { "type": "json_object" } for json mode
+    # { "type": "json_object" } for json mode, or a `json_schema` object.
+    response_format: dict[str, Any] | None = None
     seed: int | None = None
     stop: str | list[str] | None = None
     stream: bool | None = None
+    stream_options: dict[str, Any] | None = None
     temperature: float | None = None
     top_p: float | None = None
-    tools: list[dict[str, str | int | float]] | None = None
-    tool_choice: str | None = None
+    tools: list[dict[str, Any]] | None = None
+    tool_choice: str | dict[str, Any] | None = None
+    parallel_tool_calls: bool | None = None
+    reasoning_effort: str | None = None
     user: str | None = None
 
 
@@ -560,13 +579,55 @@ class ChatCompletionResponse(BaseModel):
 
 
 async def stream_response(response) -> AsyncGenerator:
-    async for chunk in response:
-        yield f"data: {chunk.model_dump_json()}\n\n"
+    """Frame a chunk stream as server-sent events.
+
+    A stream that fails after its first chunk has already sent a 200, so
+    the status cannot carry the failure. An `error` event does, and the
+    stream then ends without `[DONE]`: a clean terminator would let a
+    client take a truncated answer for a complete one.
+    """
+    try:
+        async for chunk in response:
+            yield f"data: {chunk.model_dump_json()}\n\n"
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Stream failed after its first chunk: {e!s}")
+        error = {"error": {"message": str(e) or type(e).__name__, "type": type(e).__name__}}
+        yield f"data: {json.dumps(error)}\n\n"
+        return
+    finally:
+        # A client that disconnects cancels this generator mid-stream;
+        # without this the upstream connection (and the provider's
+        # generation) would run on until garbage collection.
+        closer = getattr(response, "aclose", None)
+        if closer is not None:
+            await closer()
     yield "data: [DONE]\n\n"
 
 
-@app.post("/v1/chat/completions")
-async def create_chat_completion(request: ChatCompletionRequest):
+class LoopDetected(Exception):
+    """A request that already carries the hop header."""
+
+
+def refuse_loops(http_request: Request) -> None:
+    """Refuse a request that has already been through a router.
+
+    A dependency, not a check in the handler, so it runs before the body
+    is validated: a loop is refused as a loop, whatever the body is.
+    """
+    if HOP_HEADER in http_request.headers:
+        raise LoopDetected
+
+
+@app.exception_handler(LoopDetected)
+async def _loop_detected(_request: Request, _exc: LoopDetected) -> JSONResponse:
+    return JSONResponse(
+        ErrorResponse(message=f"Loop detected: request already carries {HOP_HEADER}").model_dump(),
+        status_code=508,
+    )
+
+
+@app.post("/v1/chat/completions", dependencies=[fastapi.Depends(refuse_loops)])
+async def create_chat_completion(request: ChatCompletionRequest, http_request: Request):
     """Route one chat completion and return it in OpenAI's shape.
 
     The model field carries the routing parameters in any of four

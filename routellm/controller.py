@@ -11,7 +11,7 @@ import uuid
 from collections import defaultdict
 from typing import Any
 
-from litellm import acompletion, completion
+from litellm import acompletion, completion, stream_chunk_builder
 from tqdm import tqdm
 
 from routellm import requirements as requirements_module
@@ -38,6 +38,7 @@ from routellm.routing import (
     resolve_tier,
     sibling_of,
 )
+from routellm.streaming import RoutedStream
 from routellm.traffic import TrafficManager
 from routellm.types import Middleware, ModelPair
 
@@ -59,6 +60,39 @@ GPT_4_AUGMENTED_CONFIG = {
         "checkpoint_path": "routellm/causal_llm_gpt4_augmented",
     },
 }
+
+
+#: Header set on every outbound upstream call. A router that receives a
+#: request carrying it refuses it (HTTP 508): the request has already
+#: been through a router, so routing it again would loop. The name is
+#: fixed, not configurable: both ends of a hop must agree on it.
+HOP_HEADER = "X-RouteLLM-Hop"
+
+
+def outbound_headers(*sources: dict[str, str] | None) -> dict[str, str]:
+    """Merge header dicts for one upstream call, ending with the hop header.
+
+    Later sources win over earlier ones. The hop header is applied last
+    and replaces any variant of it (header names are case-insensitive),
+    so neither endpoint config nor a request can switch the guard off.
+
+    Parameters
+    ----------
+    *sources : dict or None
+        Header dicts, lowest precedence first; None is skipped.
+
+    Returns
+    -------
+    dict
+        The merged headers.
+    """
+    merged: dict[str, str] = {}
+    for source in sources:
+        if source:
+            merged.update(source)
+    merged = {k: v for k, v in merged.items() if k.lower() != HOP_HEADER.lower()}
+    merged[HOP_HEADER] = "1"
+    return merged
 
 
 class RoutingError(Exception):
@@ -1108,9 +1142,14 @@ class Controller:
 
         self.model_counts[request_name][model_to_use] += 1
 
+        # A stream is neither served from the cache nor stored in it, and
+        # `model_dump` on its wrapper would raise: the iterator goes
+        # straight back to the caller, with the path attached.
+        streaming = bool(kwargs.get("stream"))
+
         # Try cache
         cache_params = {k: v for k, v in kwargs.items() if k not in ["messages", "model"]}
-        cached_res = self.cache.get(prompt, model_to_use, cache_params)
+        cached_res = None if streaming else self.cache.get(prompt, model_to_use, cache_params)
         if cached_res:
             from litellm.utils import ModelResponse
 
@@ -1138,9 +1177,13 @@ class Controller:
             def _call():
                 kwargs_copy = {**extra, **kwargs}
                 kwargs_copy["model"] = model
+                kwargs_copy.pop("extra_headers", None)
                 return completion(
                     api_base=curr_api_base,
                     api_key=curr_api_key,
+                    extra_headers=outbound_headers(
+                        extra.get("extra_headers"), kwargs.get("extra_headers")
+                    ),
                     **kwargs_copy,
                 )
 
@@ -1149,6 +1192,9 @@ class Controller:
                 started = time.monotonic()
                 res = self.resilience.wrap_completion(model_name, _call)
                 latency_ms = int((time.monotonic() - started) * 1000)
+
+                if streaming:
+                    return self._attach_path(res, path, model_name, sibling, sibling_reference)
 
                 # Cache the response
                 try:
@@ -1184,6 +1230,50 @@ class Controller:
 
         if last_err:
             raise last_err
+
+    def _stream_ended(
+        self,
+        chunks,
+        error,
+        *,
+        prompt,
+        messages,
+        model_name,
+        is_canary,
+        path,
+        request_name,
+        session_id,
+        started,
+        area,
+    ):
+        """Record a streamed completion's trace once the stream is over.
+
+        Runs when the stream is exhausted or fails, never before: the
+        trace needs the whole answer. A failed stream records nothing,
+        since a partial answer is not one the quality data should learn
+        from; the failure itself is logged.
+        """
+        if error is not None:
+            logger.warning(f"Model {model_name} failed mid-stream. Error: {error!s}")
+            return
+
+        res = stream_chunk_builder(chunks, messages=messages)
+        if res is None:
+            return
+
+        self.quality_manager.record_trace(
+            prompt,
+            model_name,
+            res.model_dump(),
+            {"is_canary": is_canary},
+            path=path,
+            request_model=request_name,
+            endpoint=model_name,
+            session_id=session_id,
+            latency_ms=int((time.monotonic() - started) * 1000),
+            area=area,
+        )
+        logger.info("routing path at stream end: %s -> %s", path, model_name)
 
     # Matches OpenAI's Async Chat Completions interface, but also supports optional router and threshold args
     async def acompletion(
@@ -1222,9 +1312,15 @@ class Controller:
 
         self.model_counts[request_name][model_to_use] += 1
 
+        # A stream is neither served from the cache nor stored in it: the
+        # cache holds whole responses, and a stream has none to hold.
+        streaming = bool(kwargs.get("stream"))
+
         # Try cache
         cache_params = {k: v for k, v in kwargs.items() if k not in ["messages", "model"]}
-        cached_res = await self.cache.aget(prompt, model_to_use, cache_params)
+        cached_res = (
+            None if streaming else await self.cache.aget(prompt, model_to_use, cache_params)
+        )
         if cached_res:
             from litellm.utils import ModelResponse
 
@@ -1252,19 +1348,50 @@ class Controller:
             async def _call(extra_headers=None):
                 kwargs_copy = {**extra, **kwargs}
                 kwargs_copy["model"] = model
+                # The endpoint's headers, the request's, then a payment
+                # proof, merged into the one `extra_headers` litellm takes.
+                kwargs_copy.pop("extra_headers", None)
                 return await acompletion(
                     api_base=curr_api_base,
                     api_key=curr_api_key,
-                    extra_headers={} if extra_headers is None else extra_headers,
+                    extra_headers=outbound_headers(
+                        extra.get("extra_headers"), kwargs.get("extra_headers"), extra_headers
+                    ),
                     **kwargs_copy,
                 )
 
             try:
                 started = time.monotonic()
-                res = await self.resilience.wrap_acompletion(
-                    model_name, lambda: self._request_with_payment(_call, endpoint=model_name)
-                )
+
+                async def _open(_call=_call, model_name=model_name):
+                    res = await self._request_with_payment(_call, endpoint=model_name)
+                    if not streaming:
+                        return res
+                    # The sibling can only take over before the first
+                    # chunk, so the first chunk is read inside the same
+                    # guarded call that opened the stream.
+                    return await RoutedStream.open(
+                        res,
+                        on_end=lambda chunks, err, model_name=model_name: self._stream_ended(
+                            chunks,
+                            err,
+                            prompt=prompt,
+                            messages=kwargs["messages"],
+                            model_name=model_name,
+                            is_canary=is_canary and model_name == model_to_use,
+                            path=path,
+                            request_name=request_name,
+                            session_id=session_id,
+                            started=started,
+                            area=area,
+                        ),
+                    )
+
+                res = await self.resilience.wrap_acompletion(model_name, _open)
                 latency_ms = int((time.monotonic() - started) * 1000)
+
+                if streaming:
+                    return self._attach_path(res, path, model_name, sibling, sibling_reference)
 
                 # 4. Validate canary if needed
                 if is_canary and model_name == model_to_use:

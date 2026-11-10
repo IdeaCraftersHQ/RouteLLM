@@ -299,6 +299,10 @@ for entry in out._hidden_params["routellm_path"]:
 
 Over the HTTP server the same path arrives on a non-streamed response under a top-level `routellm` key, which OpenAI clients ignore. A streamed response carries it in the server logs only, since its chunks must keep the SSE shape the client parses.
 
+The chat endpoint accepts what agent clients send: nested `tools`, `tool_choice` as a string or object, `tool_calls` and `role: "tool"` turns, null or absent `content`, content parts including `image_url`, and `response_format` of type `json_schema`. These are forwarded unchanged. Besides the sampling fields, an explicit allowlist passes through: `stream_options`, `max_completion_tokens`, `parallel_tool_calls` and `reasoning_effort`. Any other field in a body is dropped.
+
+A streamed response is never cached. The first chunk is read before the routed leaf is committed to, so a leaf that fails before it hands over to its sibling; a failure after it ends the stream with an `error` event (no `[DONE]`) and the sibling is not called. The trace is recorded when the stream ends, and canary validation does not apply to streams. A request carrying an `X-RouteLLM-Hop` header is refused with 508 before any routing, so a leaf that fronts this server cannot loop back into it.
+
 Tier and endpoint names share one namespace and are validated together at load: every side must name a known endpoint or tier, the graph must be acyclic, and it may not nest deeper than four tier levels. A name that is both a tier and a router is rejected too.
 
 If a tier fails, the request falls back to the other side of the level it was decided at. A tier-valued sibling is descended by its `weak` side without running any router, so the failure path stays deterministic.
