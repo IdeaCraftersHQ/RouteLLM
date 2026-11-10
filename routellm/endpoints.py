@@ -514,6 +514,7 @@ class EndpointRegistry:
         audio_tokens_per_second: float = DEFAULT_AUDIO_TOKENS_PER_SECOND,
         governance: bool = False,
         tag_namespaces: list[str] | None = None,
+        strict_registry: bool = False,
     ):
         """Initialize the registry.
 
@@ -565,6 +566,11 @@ class EndpointRegistry:
         if not isinstance(governance, bool):
             raise ValueError("`governance:` must be true or false")
         self.governance: bool = governance
+        if not isinstance(strict_registry, bool):
+            raise ValueError("`strict_registry:` must be true or false")
+        # When set, `resolve` refuses any name the config did not
+        # declare instead of wrapping it as a raw litellm model.
+        self.strict_registry: bool = strict_registry
         self.known_namespaces: frozenset[str] = check_tag_namespaces_config(tag_namespaces)
 
         self._validate_governance_tags()
@@ -645,6 +651,7 @@ class EndpointRegistry:
             audio_tokens_per_second=rate,
             governance=config.get("governance", False),
             tag_namespaces=config.get("tag_namespaces"),
+            strict_registry=config.get("strict_registry", False),
         )
 
         # The sidecar merges HERE, on the built registry, so every
@@ -1129,7 +1136,8 @@ class EndpointRegistry:
         Raises
         ------
         ValueError
-            If `name_or_model` is empty or only whitespace.
+            If `name_or_model` is empty or only whitespace, or names no
+            endpoint while `strict_registry` is on.
         """
         if not name_or_model or not name_or_model.strip():
             raise ValueError("Endpoint name or model must be a non-empty string")
@@ -1137,6 +1145,13 @@ class EndpointRegistry:
         endpoint = self._endpoints.get(name_or_model)
         if endpoint is not None:
             return endpoint
+
+        if self.strict_registry:
+            known = ", ".join(self.names()) or "<none>"
+            raise ValueError(
+                f"Unknown endpoint: {name_or_model!r}. strict_registry forbids raw "
+                f"model names. Configured endpoints: {known}"
+            )
 
         if name_or_model not in self._warned:
             self._warned.add(name_or_model)

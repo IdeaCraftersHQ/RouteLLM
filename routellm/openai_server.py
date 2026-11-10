@@ -145,6 +145,13 @@ def build_registry(file_config: dict | None, config_path: str | None = None) -> 
         if flag in endpoints:
             sides[side] = flag
             continue
+        if registry.strict_registry:
+            known = ", ".join(registry.names()) or "<none>"
+            raise ValueError(
+                f"--{side}-model {flag!r} is not a registry endpoint and "
+                f"strict_registry forbids raw model names. Configured "
+                f"endpoints: {known}"
+            )
         endpoints[wrapper] = Endpoint(name=wrapper, model=flag)
         sides[side] = wrapper
 
@@ -170,6 +177,7 @@ def build_registry(file_config: dict | None, config_path: str | None = None) -> 
         registry.transcriber_raw,
         registry.intent_targets,
         audio_tokens_per_second=registry.audio_tokens_per_second,
+        strict_registry=registry.strict_registry,
     )
 
 
@@ -355,6 +363,7 @@ def build_router_config(file_config: dict | None) -> dict | None:
         "intents",
         "quality_from",
         "quality_from_override",
+        "strict_registry",
         *SERVER_SECTIONS,
     ):
         router_config.pop(key, None)
@@ -488,6 +497,10 @@ async def lifespan(app):
     # instead would leave the CLIs explaining a different ordering than
     # the one the server actually routes on.
     file_config = loaded.data
+    # `--strict-registry` is the flag form of `strict_registry: true`;
+    # either turns it on, and the flag cannot turn a config's on off.
+    if args.strict_registry:
+        file_config["strict_registry"] = True
     config_origin = str(loaded.layers[-1].path) if loaded.layers else None
     endpoints = build_registry(file_config, config_origin)
     intents = build_intents(file_config, endpoints)
@@ -497,7 +510,10 @@ async def lifespan(app):
     # with nothing to pair; fall back to the pair this server has always
     # used rather than refusing requests it used to answer.
     strong_model, weak_model = args.strong_model, args.weak_model
-    if not strong_model and not endpoints.has_tier("default"):
+    # Strict mode never invents it: the pair is raw model names, so the
+    # controller refuses to start without a `default` tier or two
+    # registry endpoints.
+    if not strong_model and not endpoints.has_tier("default") and not endpoints.strict_registry:
         strong_model, weak_model = legacy_pair()
 
     # Paying a 402 needs the challenge headers, the body and a replay of
@@ -552,6 +568,7 @@ async def lifespan(app):
         resilience_config=build_resilience_config(file_config),
         comparison_config=build_comparison_config(file_config),
         quality_manager=build_quality_manager(file_config, config_origin),
+        strict_registry=endpoints.strict_registry,
     )
     yield
     CONTROLLER = None
@@ -1048,6 +1065,16 @@ parser.add_argument(
     help="Endpoint name from the config, or a raw model name. See --strong-model.",
     type=str,
     default=None,
+)
+parser.add_argument(
+    "--strict-registry",
+    action="store_true",
+    help=(
+        "Refuse every model name that is not a registry endpoint: raw "
+        "--strong-model/--weak-model values, the legacy default pair, and "
+        "raw targets in traffic rules, canary and load balancers fail at "
+        "startup. Same as `strict_registry: true` in the config."
+    ),
 )
 parser.add_argument(
     "--default-threshold",
