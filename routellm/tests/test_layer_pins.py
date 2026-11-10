@@ -172,6 +172,7 @@ def test_deleting_then_readding_with_tags_stops_startup(layers, _env_layer):
         ("egress_gates", {"gated": {"allow": ["x"]}}),
         ("auth", {"keys_file": "k.yaml"}),
         ("decision", {"endpoint": "local_a"}),
+        ("audit", {"sink": "file", "path": "x.jsonl"}),
     ],
 )
 def test_pinned_key_in_a_higher_layer_stops_startup(layers, _env_layer, source, key, value):

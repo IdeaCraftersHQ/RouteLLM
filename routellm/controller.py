@@ -19,6 +19,7 @@ from tqdm import tqdm
 
 from routellm import requirements as requirements_module
 from routellm import transcription
+from routellm.audit import note as audit_note
 from routellm.auth import Principal, current_principal
 from routellm.caching import Cache, CacheConfig, cache_namespace, context_key, conversation_key
 from routellm.capabilities import (
@@ -1389,6 +1390,7 @@ class Controller:
 
         try:
             res._hidden_params["routellm_path"] = final
+            res._hidden_params["routellm_endpoint"] = used
         except (AttributeError, TypeError):
             logger.warning("response carries no _hidden_params; path not attached")
 
@@ -2181,6 +2183,7 @@ class Controller:
             tier, router, threshold = self._parse_model_name(request_name)
         else:
             request_name = router
+        audit_note(entry_tier=tier)
 
         # Audio becomes text before anything reads the messages, so the
         # router, the requirements and the cache key all see the
@@ -2209,6 +2212,10 @@ class Controller:
         decision = await self._decide(kwargs, declared_class, conversation_id)
         tier, effective, reqs, route_record = self._policy_route(
             tier, declared_class, decision, reqs, attributes, principal
+        )
+        audit_note(
+            effective_class=self._request_class(declared_class, decision, effective),
+            policy=route_record.policy if route_record is not None else None,
         )
         reqs = self._check_entry_tier(tier, declared_class, decision, reqs, effective)
 
@@ -2260,6 +2267,7 @@ class Controller:
             request_class,
             getattr(reqs, "route_policy", None),
         )
+        audit_note(cache="miss" if use_cache and self.cache.config.enabled else "bypass")
         cached_res = (
             await self.cache.aget(prompt, model_to_use, cache_params, cache_ns, fuzzy)
             if use_cache
@@ -2269,6 +2277,7 @@ class Controller:
             from litellm.utils import ModelResponse
 
             res = ModelResponse(**cached_res)
+            audit_note(cache="hit")
             # Record trace for cached response too
             self.quality_manager.record_trace(
                 prompt,
@@ -2443,4 +2452,5 @@ class Controller:
                 last_err = e
                 continue
 
+        audit_note(walk=walk)
         self._raise_exhausted(models_to_try, last_err, denied)

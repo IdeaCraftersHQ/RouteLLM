@@ -1066,6 +1066,45 @@ forward -> upstream call -> trace (transformed prompt + reply) -> inverse -> cli
 
 Traces hold the transformed prompt and the reply as the upstream returned it; streamed traces are built from the chunks as sent, before restore. A request that any transform `selects` is neither served from the cache nor stored in it, since a cached reply cannot be restored without the request's own state. Streams restore per choice and per field (content, reasoning, each tool call's arguments); text a restorer holds back is released on a chunk placed before the `finish_reason`, or at the end of a stream that has none. A shadow call is transformed as the primary is, and its judge and trace see the transformed form; a `/v1/compare` candidate's `output` is restored for the caller. Not covered: the router, decision and judge calls, which make their own egress decisions.
 
+### Audit events
+
+`audit:` writes one event per request recording what was decided and why. An event never holds content: no prompt, no response, no placeholder mapping, no key. The prompt (the last message, as the routers read it) appears only as a keyed HMAC-SHA256, so two events can be tied to one prompt by whoever holds the key and by nobody else.
+
+```yaml
+audit:
+  sink: file                         # the one built-in sink
+  path: /var/log/routellm/audit.jsonl
+  hmac_key_env: ROUTELLM_AUDIT_KEY   # or hmac_key_file: a 0600 file; never the key in config
+```
+
+With a [`policy:`](#policy-file) loaded, `audit:` is required (absent or `enabled: false` stops startup) and, like the policy, honoured from the system config layer only. Startup also fails when the key is missing or empty, when `hmac_key_file` is wider than 0600, or when the sink cannot be opened.
+
+The file sink appends one JSON object per line with `O_APPEND`, to a 0600 file in a 0700 directory; a wider file or directory, or a symlink, is refused. The path is reopened on every write, so logrotate or newsyslog can rename it with no signal: the next event creates a fresh 0600 file. The server does no rotation of its own.
+
+**Fields** (`v: 1`). Each event has all of them; unknown values are `null`.
+
+| field | meaning |
+|---|---|
+| `ts`, `request_id` | UTC time; the id in the server log and error bodies |
+| `phase` | `complete`, or for a stream `decision` then `outcome` |
+| `route` | `chat` or `compare` |
+| `principal`, `profile` | the authenticated caller |
+| `data_class`, `operation` | as declared; `effective_class` is the class the request was held to |
+| `policy`, `entry_tier` | the routing policy selected, the tier addressed |
+| `endpoint`, `reach`, `jur` | the endpoint that answered, its reach labels and jurisdiction |
+| `treatment` | egress gates the answering endpoint passed |
+| `outcome`, `status`, `reason` | `served`, `refused` or `failed`; the HTTP status; a short code (`unauthorized`, `class_refused`, `policy_denied`, `routing_error`, `invalid_request`, `loop_detected`, `endpoints_cooling`, `provider_error`, `stream_error`, ...) |
+| `cache` | `hit`, `miss` or `bypass` (streams, uncached classes) |
+| `tokens_in`, `tokens_out`, `latency_ms` | usage and time to the event |
+| `prompt_hmac` | keyed digest of the prompt |
+| `routing` | the decision step's class, source and intent; the routing policy record; the fallback walk; compare targets |
+
+Every request that reaches a route writes an event: served, refused (401, 400, 403, 422, 508) and failed (500, 502, 503), including the refusals made before the handler runs. A non-stream event is written before the response is returned. A stream writes its `decision` event once its route is final and before the first byte, and its `outcome` event as it ends (`failed` with `stream_error` or `client_disconnect` when it does not finish).
+
+**When a write fails.** With a `policy:` loaded the request is refused with a 503 and its answer withheld, since an unaudited decision is not allowed; a stream whose decision event cannot be written is closed before a byte is sent, while a stream's outcome event, written after the response has started, can only be logged. With no policy the failure is logged, counted and the request is served.
+
+A sink is any object with `emit(event)` (raising on failure) and `close()`; `routellm.audit.AuditSink` is the protocol.
+
 ### Threshold Calibration
 
 The threshold used for routing controls the cost-quality tradeoff. The range of meaningful thresholds varies depending on the type of router and the queries you receive. Therefore, we recommend calibrating thresholds using a sample of your incoming queries, as well as the % of queries you'd like to route to the stronger model.
@@ -1260,7 +1299,7 @@ Layers merge by key, so a project file could otherwise add `local` to a cloud en
 | Pinned | When |
 |---|---|
 | `policy:` | always system-only, whether or not the system layer sets one |
-| `governance`, `strict_registry`, `tag_namespaces`, `egress_gates`, `auth`, `decision` (whole sections) | while the system layer sets a `policy:` |
+| `governance`, `strict_registry`, `tag_namespaces`, `egress_gates`, `auth`, `decision`, `audit` (whole sections) | while the system layer sets a `policy:` |
 | governance tags of every endpoint: reach labels (`local`, `vpn`, `cloud`) and namespaced tags (`jur:ca`, `team:x`) | while the system layer sets a `policy:` |
 | every endpoint's `allow_public_base`, including on endpoints a higher layer adds | while the system layer sets a `policy:` |
 

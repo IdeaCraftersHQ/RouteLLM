@@ -22,6 +22,7 @@ from routellm.request_class import (
     check_policy_principals,
     declare,
 )
+from routellm.tests.audit_fixture import audit_section
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -342,6 +343,7 @@ keys:
         pfile = tmp_path / "policy.json"
         pfile.write_text(json.dumps(pol))
         extra["policy"] = str(pfile)
+        extra["audit"] = audit_section(tmp_path)
     extra.update(config_extra or {})
     preamble = _PREAMBLE.format(config=str(tmp_path / "config.json"), extra=extra)
     indented = "\n".join("    " + line for line in body.strip("\n").splitlines())
