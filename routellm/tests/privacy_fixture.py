@@ -224,6 +224,7 @@ ROUTE_PROJECT_HEADER = "X-Route-Project"
 ROUTE_CLIENT_HEADER = "X-Route-Client"
 OPEN_PROJECT = "open-project"
 RESTRICTED_PROJECT = "restricted-project"  # a policy the suite caller may not select
+TAGGED_PROJECT = "tagged-project"  # general class, but no `cloud`-tagged endpoint is a candidate
 
 
 def route_config() -> dict:
@@ -242,7 +243,9 @@ def route_config() -> dict:
             **tiers(),
             **policy_tiers(),
             "route_entry": {**pair, "strong": "local_main", "weak": "local_small"},
+            "general_local": {**pair, "strong": "local_main", "weak": "local_small"},
         },
+        "comparison": {"enabled": True, "compare_allowed_models": ["local_main", "cloud_main"]},
         "policy_routing": {
             "attributes": {
                 "project": {"header": ROUTE_PROJECT_HEADER},
@@ -259,6 +262,12 @@ def route_config() -> dict:
                 "default": {"data_class": "private", "tiers": ["private"], "fallback": "private"},
                 OPEN_PROJECT: {"data_class": "general", "tiers": ["private", "general"]},
                 RESTRICTED_PROJECT: {"data_class": "general", "tiers": ["private", "general"]},
+                TAGGED_PROJECT: {
+                    "data_class": "general",
+                    "tiers": ["private", "general_local"],
+                    "fallback": "general_local",
+                    "deny_tags": ["cloud"],
+                },
             },
         },
     }
@@ -292,11 +301,18 @@ def class_policy_files(tmp_path: Path, route: bool = False) -> dict:
     }
     if route:
         policy["classes"] = {
-            "general": {"treatment": "raw", "reach": ["local", "cloud"], "tiers": ["general"]},
+            "general": {
+                "treatment": "raw",
+                "reach": ["local", "cloud"],
+                "tiers": ["general", "general_local"],
+            },
             "private": policy["classes"]["private"],
         }
         policy["principals"] = {
-            "suite": {"classes": ["general", "private"], "projects": [OPEN_PROJECT]}
+            "suite": {
+                "classes": ["general", "private"],
+                "projects": [OPEN_PROJECT, TAGGED_PROJECT],
+            }
         }
     (tmp_path / "policy.json").write_text(json.dumps(policy))
     digest = hashlib.sha256(POLICY_KEY.encode()).hexdigest()
@@ -415,6 +431,12 @@ class World:
         body = {"model": model, "messages": messages or TEXT, **kw}
         return self.client.post(
             "/v1/chat/completions", json=body, headers=self._headers(data_class, headers)
+        )
+
+    def compare(self, models, data_class=None, headers=None, **kw):
+        body = {"models": models, "messages": kw.pop("messages", None) or TEXT, **kw}
+        return self.client.post(
+            "/v1/compare", json=body, headers=self._headers(data_class, headers)
         )
 
     def stream(self, model, messages=None, data_class=None, **kw):

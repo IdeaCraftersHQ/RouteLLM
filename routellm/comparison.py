@@ -381,6 +381,7 @@ class ComparisonManager(CallMixin):
         measure_ttft: bool | None = None,
         operator: bool = False,
         data_class: str | None = None,
+        route_policy: str | None = None,
     ) -> dict[str, Any]:
         """Run every model on one request and return the side-by-side results.
 
@@ -407,6 +408,9 @@ class ComparisonManager(CallMixin):
             The request's effective class. Under a loaded policy it is
             required for a client request: the named `tier` must be one
             of its tiers, and every model must be one it may use.
+        route_policy : str, optional
+            The routing policy the request selected. Every model is also
+            held to its `deny_tags` and its gate allow set.
 
         Raises
         ------
@@ -427,7 +431,7 @@ class ComparisonManager(CallMixin):
         messages = kwargs["messages"]
         prompt = requirements_module._prompt_text(messages)
         reqs = requirements_module.derive(messages, kwargs, None)
-        reqs = self._gate(reqs, names, tier, data_class, operator)
+        reqs = self._gate(reqs, names, tier, data_class, operator, route_policy)
         plan = Plan(names, "compare", None, tier, local_only)
         results = await asyncio.gather(
             *(
@@ -450,7 +454,15 @@ class ComparisonManager(CallMixin):
         )
         return {"object": "comparison", "id": plan.id, "results": list(results)}
 
-    def _gate(self, reqs, names: list[str], tier: str | None, data_class, operator: bool):
+    def _gate(
+        self,
+        reqs,
+        names: list[str],
+        tier: str | None,
+        data_class,
+        operator: bool,
+        route_policy=None,
+    ):
         """Hold an explicit comparison to the class policy and the egress gates.
 
         Returns `reqs` carrying the class. An operator run with no class
@@ -461,7 +473,7 @@ class ComparisonManager(CallMixin):
         if policy is not None and not (operator and data_class is None):
             if tier is not None or data_class is None:
                 check_entry_tier(policy, tier, data_class)
-            reqs = dataclasses.replace(reqs, data_class=data_class)
+            reqs = dataclasses.replace(reqs, data_class=data_class, route_policy=route_policy)
         denied = self.policy_reasons(names, reqs)
         if denied:
             name, reason = next(iter(denied.items()))

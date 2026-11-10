@@ -249,7 +249,7 @@ class CallMixin:
         )
         if match is None:
             return None if getattr(self.host, "policy", None) is None else "unregistered"
-        return denial(match, data_class)
+        return denial(match, data_class, getattr(reqs, "route_policy", None))
 
     async def _judge(self, prompt: str, output: str, local_only: bool, reqs=None) -> float | None:
         judge = self.config.judge

@@ -26,9 +26,10 @@ POLICY_BATCH = [
     for n in CASES
     if CASES[n].policy and not CASES[n].gate and not CASES[n].route and not CASES[n].aux
 ]
-ROUTE_BATCH = [n for n in CASES if CASES[n].route]
+ROUTE_BATCH = [n for n in CASES if CASES[n].route and not CASES[n].aux]
+ROUTE_AUX_BATCH = [n for n in CASES if CASES[n].route and CASES[n].aux]
 GATE_BATCH = [n for n in CASES if CASES[n].gate]
-AUX_BATCH = [n for n in CASES if CASES[n].aux]
+AUX_BATCH = [n for n in CASES if CASES[n].aux and not CASES[n].route]
 
 
 @pytest.fixture(scope="module")
@@ -65,6 +66,21 @@ def route_results(tmp_path_factory):
     return pf.run_cases(tmp_path_factory.mktemp("privacy-route"), ROUTE_BATCH, route=True)
 
 
+@pytest.fixture(scope="module")
+def route_aux_results(tmp_path_factory):
+    return pf.run_cases(
+        tmp_path_factory.mktemp("privacy-route-aux"),
+        ROUTE_AUX_BATCH,
+        route=True,
+        extra_config=pf.AUX_CONFIG,
+    )
+
+
+@pytest.mark.parametrize("name", ROUTE_AUX_BATCH)
+def test_a_route_policy_tag_list_holds_on_auxiliary_calls(name, route_aux_results):
+    check(name, route_aux_results[name])
+
+
 @pytest.mark.parametrize("name", ROUTE_BATCH)
 def test_a_route_policy_only_narrows_and_private_never_leaves_the_host(name, route_results):
     check(name, route_results[name])
@@ -89,6 +105,29 @@ def test_a_policy_that_would_widen_a_class_is_refused_naming_class_and_tier(rout
 def test_attribute_headers_are_not_forwarded(route_results):
     obs = route_results["route_attribute_headers_never_reach_an_upstream"]["obs"]
     assert obs["forwarded"] == []
+
+
+def test_the_floor_supplies_a_missing_class(route_results):
+    obs = route_results["route_no_declared_class_takes_the_project_floor_and_stays_local"]["obs"]
+    assert (obs["class"], obs["classes"]) == (
+        "private",
+        {"policy": "private", "declared": "private"},
+    )
+
+
+def test_a_compare_refusal_names_the_policy_reason(route_results):
+    assert (
+        "policy:private:reach"
+        in route_results["route_compare_under_a_restrictive_project_floor_takes_no_hit"]["obs"][
+            "message"
+        ]
+    )
+    assert (
+        "policy:tagged-project:tag:cloud"
+        in route_results["route_compare_under_a_tag_denying_project_takes_no_cloud_hit"]["obs"][
+            "message"
+        ]
+    )
 
 
 def test_the_route_control_reaches_the_cloud(route_results):

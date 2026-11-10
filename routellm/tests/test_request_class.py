@@ -100,6 +100,36 @@ def test_missing_class_with_null_default_is_400():
     assert refusal({}, None, A, POLICY).status == 400
 
 
+def test_missing_class_takes_the_routing_policy_floor():
+    rc = declare({}, None, A, POLICY, floor="internal")
+    assert rc == RequestClass("internal", None)
+
+
+def test_a_declared_class_stands_over_the_floor():
+    # The floor only supplies a missing class; raising to it is policy routing's job.
+    assert declare({"x-data-class": "open"}, None, A, POLICY, floor="internal").data_class == "open"
+
+
+def test_missing_class_without_a_floor_is_still_400():
+    assert refusal({}, None, A, POLICY, floor=None).status == 400
+
+
+def test_the_floor_class_is_held_to_the_caller_and_to_vaulting():
+    assert refusal({}, None, B, POLICY, floor="internal").status == 403
+    assert refusal({}, None, A, POLICY, floor="sealed").status == 403
+    assert refusal({}, None, A, POLICY, floor="nope").status == 400
+
+
+def test_the_default_class_stands_over_the_floor_here():
+    raw = {
+        "default_class": "open",
+        "classes": POLICY.model_dump()["classes"],
+        "principals": {"team-a": {"classes": ["open", "internal"]}},
+    }
+    pol = parse_policy(raw, "p.yaml")
+    assert declare({}, None, A, pol, floor="internal").data_class == "open"
+
+
 def test_missing_class_uses_default_class():
     raw = {
         "default_class": "open",
