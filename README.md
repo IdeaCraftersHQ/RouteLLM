@@ -1010,6 +1010,16 @@ The server does not take one config file; it discovers a chain of them and merge
 
 Layers 2-4 are discovered, so their absence is silence. Layers 5 and 6 were named by you, so a file that is not there is an error naming the variable or the flag. `Controller` still takes a `config` argument directly for library use.
 
+### Skipping the user layer
+
+An unrelated per-user file can leak endpoints into a pinned deployment. To leave layer 3 out, pass `--no-user-config` (server and `python -m routellm.config`) or set `ROUTELLM_NO_USER_CONFIG=1` (`1`, `true`, `yes`, `on`; anything else keeps the layer). The flag wins over the variable. Only the user layer is dropped: system, project, `ROUTELLM_CONFIG` and `--config` still apply, and the skip does not depend on whether they are set.
+
+`paths` and `show` list the user path as `[skipped]` (`"skipped": true` in JSON), and `show` omits its values. At startup the server logs at INFO which layers loaded and which were skipped, paths only:
+
+```
+config layers loaded: project=/srv/app/.routellm.yaml, flag=/etc/app.yaml; skipped: user=/home/u/.config/routellm/config.yaml
+```
+
 ### Merge rules
 
 - **Mappings merge by key, recursively.** `endpoints:`, `tiers:`, `intents:` and each router's section merge across layers, so a user file can define ten endpoints and a project file add one or retag another without restating the rest.
@@ -1039,7 +1049,7 @@ python -m routellm.config paths   # every searched location, lowest first, [used
 python -m routellm.config show    # the effective merged config, each top-level key commented with its origin
 ```
 
-`paths` and `show` also take `--format json`. All three honour `--config` and `ROUTELLM_CONFIG`. `python -m routellm.pairing` with no `--config` explains the discovered config the same way. `--format json` on `paths` lists only the entries that actually resolved to a path — an absent project layer has no marker to name, so it is left out rather than represented with a synthetic project line; the text output is where `[absent] project` is always shown for a stable six-layer read.
+`paths` and `show` also take `--format json`. All three honour `--config`, `ROUTELLM_CONFIG` and `--no-user-config`. `python -m routellm.pairing` with no `--config` explains the discovered config the same way. `--format json` on `paths` lists only the entries that actually resolved to a path — an absent project layer has no marker to name, so it is left out rather than represented with a synthetic project line; the text output is where `[absent] project` is always shown for a stable six-layer read.
 
 A project-local `.routellm.yaml` is gitignored: real configuration belongs outside the repo. `config.example.yaml` and `examples/multitier.yaml` are samples to copy from, never the instance config.
 

@@ -309,3 +309,8 @@ def test_server_endpoint_flags_keep_strict(server, monkeypatch):
 def test_server_cli_flag_exists(server):
     assert server.parser.parse_args(["--strict-registry"]).strict_registry is True
     assert server.parser.parse_args([]).strict_registry is False
+
+
+def test_server_no_user_config_flag_exists(server):
+    assert server.parser.parse_args(["--no-user-config"]).no_user_config is True
+    assert server.parser.parse_args([]).no_user_config is False

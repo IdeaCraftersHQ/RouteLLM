@@ -313,3 +313,89 @@ def test_explain_lists_every_location_and_marks_used(env):
     # The effective config follows, each top-level key naming its origin.
     assert f"a: user  # from {env.user}" in text
     assert f"b: 1  # from {env.user}" in text
+
+
+# ---------------------------------------------------------------------------
+# skipping the user layer
+# ---------------------------------------------------------------------------
+
+
+def test_skip_user_param_drops_user_layer(env):
+    """`skip_user=True` never reads the user file; the other layers merge."""
+    env.write(env.user, {"a": "user", "u": 1})
+    env.write(env.project / "routellm.yaml", {"a": "project"})
+
+    loaded = cfg.load_config(skip_user=True)
+
+    assert loaded.data["a"] == "project"
+    assert "u" not in loaded.data
+    assert [e.source for e in loaded.layers] == ["project"]
+
+
+def test_skip_user_is_reported_in_chain(env):
+    """The chain still names the user path, flagged skipped, not absent."""
+    env.write(env.user, {"a": 1})
+
+    chain = cfg.config_paths(skip_user=True)
+
+    user = next(e for e in chain if e.source == "user")
+    assert user.skipped is True
+    assert user.exists is False
+    assert user.path == env.user
+
+
+@pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on"])
+def test_env_var_skips_user_layer(env, monkeypatch, value):
+    """ROUTELLM_NO_USER_CONFIG truthy skips the user layer."""
+    env.write(env.user, {"u": 1})
+    monkeypatch.setenv("ROUTELLM_NO_USER_CONFIG", value)
+
+    assert "u" not in cfg.load_config().data
+
+
+@pytest.mark.parametrize("value", ["", "0", "false", "no", "off"])
+def test_env_var_falsy_keeps_user_layer(env, monkeypatch, value):
+    """Empty/falsy values leave the user layer on."""
+    env.write(env.user, {"u": 1})
+    monkeypatch.setenv("ROUTELLM_NO_USER_CONFIG", value)
+
+    assert cfg.load_config().data["u"] == 1
+
+
+def test_param_false_overrides_env(env, monkeypatch):
+    """An explicit `skip_user=False` wins over the env var."""
+    env.write(env.user, {"u": 1})
+    monkeypatch.setenv("ROUTELLM_NO_USER_CONFIG", "1")
+
+    assert cfg.load_config(skip_user=False).data["u"] == 1
+
+
+def test_skip_user_keeps_env_and_flag_layers(env, monkeypatch):
+    """Only the user layer goes; ROUTELLM_CONFIG and --config still apply."""
+    env.write(env.user, {"u": 1})
+    envfile = env.write(env.home / "e.yaml", {"e": 1})
+    flagfile = env.write(env.home / "f.yaml", {"f": 1})
+    monkeypatch.setenv("ROUTELLM_CONFIG", str(envfile))
+
+    data = cfg.load_config(explicit=flagfile, skip_user=True).data
+
+    assert data["e"] == 1 and data["f"] == 1 and "u" not in data
+
+
+def test_layer_summary_names_loaded_and_skipped_paths_not_values(env):
+    """Startup log line: paths of loaded + skipped layers, never values."""
+    env.write(env.user, {"secret": "hunter2"})
+    proj = env.write(env.project / "routellm.yaml", {"secret": "s3cret"})
+
+    line = cfg.layer_summary(cfg.load_config(skip_user=True))
+
+    assert f"project={proj}" in line
+    assert f"skipped: user={env.user}" in line
+    assert "hunter2" not in line and "s3cret" not in line
+
+
+def test_layer_summary_without_skip_or_files(env):
+    """No files, no skip: defaults-only wording, no skipped clause."""
+    line = cfg.layer_summary(cfg.load_config())
+
+    assert "none" in line and "skipped" not in line
