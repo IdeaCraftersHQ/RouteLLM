@@ -91,7 +91,7 @@ client = Controller(
 
 **From PyPI**
 ```
-pip install "routellm[serve,eval]"
+pip install "routellm[serve]"
 ```
 
 **From source**
@@ -99,8 +99,29 @@ pip install "routellm[serve,eval]"
 ```
 git clone https://github.com/lm-sys/RouteLLM.git
 cd RouteLLM
-pip install -e .[serve,eval]
+pip install -e ".[serve]"
 ```
+
+**Optional extras**
+
+| Extra | Adds | Needed for |
+|-------|------|------------|
+| `serve` | fastapi, uvicorn | the OpenAI-compatible server |
+| `ml` | torch, transformers, datasets, huggingface_hub | the `mf`, `bert`, `causal_llm` and `sw_ranking` routers; calibration |
+| `eval` | matplotlib, pandarallel, sglang, tiktoken, psutil | the evaluation scripts |
+| `pairing` | `hop-top-aim` (models.dev client) | policy-based tier selectors |
+
+The base install and `serve` run the `random` router and threshold routing
+over config tiers with none of the ML stack (the install is hundreds of MB
+rather than several GB). A router that runs a model fails at start-up with an
+error naming the missing extra; install it with:
+
+```
+pip install "routellm[serve,ml]"
+```
+
+If you installed the previous default (which bundled torch), add `ml` to keep
+the model-backed routers.
 
 **Policy-based pairing (optional)**
 

@@ -12,20 +12,21 @@ classifiers = ["Programming Language :: Python :: 3"]
 dependencies = [
 	'pyyaml',
 	'pydantic',
-	"numpy<2",
+	'numpy<2',
 	'pandas',
-	'torch',
 	'scikit-learn',
 	'tqdm',
 	'openai',
-	'transformers',
-	'datasets',
 	'litellm',
 	'x402[evm]>=2.0.0'
 ]
 
 [project.optional-dependencies]
 serve = ["fastapi", "shortuuid", "uvicorn"]
+# The `bert`, `mf`, `causal_llm` and `sw_ranking` routers run a model.
+# The `random` router, threshold routing over config tiers and the
+# server need none of it, so none of it is a core dependency.
+ml = ["torch", "transformers", "datasets", "huggingface_hub"]
 eval = ["matplotlib", "pandarallel", "sglang", 'tiktoken', "psutil"]
 dev = [
 	"pre-commit",
