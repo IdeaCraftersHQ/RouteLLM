@@ -9,6 +9,8 @@ which is either a string or a callable taking the parsed body:
 - `die_first`: HTTP 200, then the connection drops before any chunk.
 - `die_after`: one content chunk, then the connection drops mid-body.
 
+`delay` holds every answer back, before the first byte.
+
 Nothing here leaves the loopback interface.
 """
 
@@ -22,6 +24,7 @@ class FakeUpstream:
     def __init__(self, name, mode="ok"):
         self.name = name
         self.mode = mode
+        self.delay = 0.0  # seconds to wait before answering anything
         self.hits = []  # (path, headers, body)
         fake = self
 
@@ -43,6 +46,8 @@ class FakeUpstream:
                 body = json.loads(self.rfile.read(length) or b"{}")
                 fake.hits.append((self.path, dict(self.headers), body))
                 mode = fake.mode(body) if callable(fake.mode) else fake.mode
+                if fake.delay:
+                    time.sleep(fake.delay)
                 model = body.get("model", "m")
 
                 if mode == "500":

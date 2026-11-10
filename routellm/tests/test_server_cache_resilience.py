@@ -225,7 +225,16 @@ def test_stream_requests_are_never_cached(upstream, tmp_path, monkeypatch):
     reply = MagicMock()
     reply.choices = [MagicMock()]
     reply.model_dump.return_value = {"id": "c", "choices": []}
-    calls = AsyncMock(return_value=reply)
+
+    async def one_chunk():
+        yield MagicMock()
+
+    # A stream comes back as an iterator that yields at least one chunk;
+    # the controller reads the first one before it hands the stream out.
+    async def answer(**kwargs):
+        return one_chunk() if kwargs.get("stream") else reply
+
+    calls = AsyncMock(side_effect=answer)
     monkeypatch.setattr("routellm.controller.acompletion", calls)
 
     controller = _controller(upstream, cache=_cache(tmp_path))
