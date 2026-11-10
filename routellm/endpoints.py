@@ -85,11 +85,13 @@ from pydantic import (
     BaseModel,
     Field,
     StrictBool,
+    ValidationError,
     field_validator,
     model_validator,
 )
 
 from routellm.capabilities import Capabilities
+from routellm.transcription import LOCAL_TAG, TranscriberConfig
 
 logger = logging.getLogger(__name__)
 
@@ -323,6 +325,10 @@ class Tier(BaseModel):
         or a `Selector` resolved to one at controller construction.
     weak : str or Selector
         Endpoint or tier taken otherwise, or a `Selector`.
+    transcriber : dict, optional
+        Keys of the top-level `transcriber:` section this tier
+        overrides, key by key. Validated, merged with the global
+        section, when the registry is built.
     """
 
     name: str
@@ -331,6 +337,7 @@ class Tier(BaseModel):
     intent_routing: bool | None = None
     strong: str | Selector
     weak: str | Selector
+    transcriber: dict[str, Any] | None = None
 
     def accepts_intent_routing(self) -> bool:
         """Return whether an intent may choose a tier in place of this one.
@@ -417,6 +424,7 @@ class EndpointRegistry:
         self,
         endpoints: dict[str, Endpoint] | None = None,
         tiers: dict[str, Tier] | None = None,
+        transcriber: dict[str, Any] | None = None,
     ):
         """Initialize the registry.
 
@@ -452,7 +460,11 @@ class EndpointRegistry:
         # area, and pairing then orders on overall quality as always.
         self.areas: dict[str, str] = {}
 
+        self._transcriber_raw: dict[str, Any] | None = transcriber
+        self._transcribers: dict[str | None, TranscriberConfig] = {}
+
         self._validate_tiers()
+        self._validate_transcribers()
 
     @classmethod
     def from_config(
@@ -508,7 +520,11 @@ class EndpointRegistry:
         raw_tiers = config.get("tiers") or {}
         tiers = {name: Tier(name=name, **(spec or {})) for name, spec in raw_tiers.items()}
 
-        registry = cls(endpoints, tiers)
+        raw_transcriber = config.get("transcriber")
+        if raw_transcriber is not None and not isinstance(raw_transcriber, dict):
+            raise ValueError("`transcriber:` must be a mapping")
+
+        registry = cls(endpoints, tiers, raw_transcriber)
 
         # The sidecar merges HERE, on the built registry, so every
         # consumer that goes through from_config -- the server and both
@@ -571,6 +587,7 @@ class EndpointRegistry:
             On the same conditions as construction.
         """
         self._validate_tiers()
+        self._validate_transcribers()
 
     def _validate_tiers(self) -> None:
         """Check the tier namespace, its references, cycles, and depth."""
@@ -639,6 +656,110 @@ class EndpointRegistry:
         for reference in (tier.strong, tier.weak):
             if not isinstance(reference, Selector) and reference in self._tiers:
                 self._walk(reference, path)
+
+    @property
+    def transcriber_raw(self) -> dict[str, Any] | None:
+        """Return the raw `transcriber:` section the registry was built with."""
+        return self._transcriber_raw
+
+    def transcriber_for(self, tier: str | None) -> TranscriberConfig | None:
+        """Return the transcriber settings a request to `tier` runs under.
+
+        The tier's own `transcriber:` keys are laid over the global
+        section. A request addressing no tier gets the global section.
+
+        Parameters
+        ----------
+        tier : str, optional
+            The tier the request addresses.
+
+        Returns
+        -------
+        TranscriberConfig or None
+            None when neither the tier nor the config names a
+            transcriber. A config in mode `passthrough` is returned as
+            is; its `active` is False.
+        """
+        return self._transcribers.get(tier)
+
+    def _validate_transcribers(self) -> None:
+        """Build every tier's transcriber config and apply the local-only rule.
+
+        A tier is local-only when every endpoint it can reach carries
+        the `local` tag, the label endpoints already use for `tag:local`
+        selection. Such a tier may not transcribe through a service not
+        tagged `local` either: its audio would leave the place its text
+        is confined to. A tier whose sides are still unresolved
+        selectors cannot be judged yet; `revalidate` judges it once
+        pairing has named them.
+
+        Raises
+        ------
+        ValueError
+            On an invalid transcriber section, or a local-only tier
+            using a non-local transcriber that would transcribe.
+        """
+        built: dict[str | None, TranscriberConfig] = {}
+        base = self._transcriber_raw or {}
+
+        def build(label: str, spec: dict[str, Any]) -> TranscriberConfig:
+            try:
+                return TranscriberConfig(**spec)
+            except ValidationError as exc:
+                problems = "; ".join(
+                    f"{'.'.join(str(p) for p in err['loc']) or '<section>'}: {err['msg']}"
+                    for err in exc.errors()
+                )
+                raise ValueError(f"invalid {label}: {problems}") from exc
+
+        if self._transcriber_raw is not None:
+            built[None] = build("`transcriber:` section", base)
+
+        for name, tier in self._tiers.items():
+            if self._transcriber_raw is None and tier.transcriber is None:
+                continue
+            built[name] = build(
+                f"`transcriber:` of tier {name!r}", {**base, **(tier.transcriber or {})}
+            )
+
+        for name, config in built.items():
+            if name is None or not config.active or config.is_local:
+                continue
+            leaves = self._leaves(name)
+            if leaves and all(LOCAL_TAG in self._endpoints[leaf].tags for leaf in leaves):
+                raise ValueError(
+                    f"Tier {name!r} is local-only (every endpoint it can reach is "
+                    f"tagged {LOCAL_TAG!r}) but its transcriber is not tagged "
+                    f"{LOCAL_TAG!r}, so audio would leave the machine to be "
+                    f"transcribed. Point the tier at a local transcriber and tag it "
+                    f"`tags: [{LOCAL_TAG}]`, or set `mode: passthrough`."
+                )
+
+        self._transcribers = built
+
+    def _leaves(self, name: str) -> set[str] | None:
+        """Return the endpoint names reachable from tier `name`.
+
+        Returns None when the tier still has an unresolved selector
+        below it, because its leaves are not yet known.
+        """
+        leaves: set[str] = set()
+        stack = [name]
+        seen: set[str] = set()
+        while stack:
+            current = stack.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            tier = self._tiers[current]
+            for side in (tier.strong, tier.weak):
+                if isinstance(side, Selector):
+                    return None
+                if side in self._tiers:
+                    stack.append(side)
+                else:
+                    leaves.add(side)
+        return leaves
 
     @property
     def tiers(self) -> dict[str, Tier]:

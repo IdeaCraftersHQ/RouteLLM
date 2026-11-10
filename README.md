@@ -437,6 +437,66 @@ Audio is **fail-closed**, unlike the other requirements: an endpoint that says n
 
 Transport matters. litellm's native `ollama_chat/` and `ollama/` providers drop audio parts (and `ollama_chat/` fails while counting tokens over them), so routellm treats those endpoints as not audio capable and logs a warning if you declared otherwise. Reach an audio-capable Ollama model through its OpenAI-compatible route: `openai/<model>` with `api_base: http://host:11434/v1`. The audio payload is skipped when estimating prompt tokens.
 
+#### Transcribe-then-route
+
+Instead of finding an audio-capable model, a tier can turn each audio part into text first and route the result as an ordinary text request. Any side may then serve it, and the tier's usual rules apply to the transcript. Configure a speech-to-text service that speaks OpenAI's `/v1/audio/transcriptions`:
+
+```yaml
+transcriber:                      # global default; omit to keep audio routing as above
+  mode: transcribe                # transcribe | passthrough (default transcribe)
+  api_base: http://127.0.0.1:9000/v1
+  api_key_env: TRANSCRIBER_API_KEY   # optional; the variable's NAME, read per call
+  model: whisper-1                # default whisper-1
+  timeout_ms: 60000               # one call; default 60000
+  max_audio_bytes: 26214400       # per audio part, decoded; default 25 MiB
+  language: null                  # default language hint; null lets the service detect it
+  format: "[{start}-{end}] {speaker}: {text}"     # a line with a speaker (the default)
+  format_no_speaker: "[{start}-{end}] {text}"     # a line without one (the default)
+  allow_urls: false               # fetch audio_url parts? default false: refused
+  tags: [local]                   # `local` declares the service runs on your own machine/network
+
+tiers:
+  default:
+    strong: cloud_strong
+    weak: local_glm
+    transcriber:                  # per tier: overrides the global keys it names
+      language: fr
+  keep_audio:
+    strong: local_audio
+    weak: local_audio2
+    transcriber: {mode: passthrough}   # this tier routes audio to an audio-capable side
+```
+
+Unknown keys under `transcriber:` are a load error, as are unknown placeholders in a template. A tier's keys are laid over the global section; `mode: passthrough` (or no `transcriber:` at all) leaves audio routing exactly as described above. The transcriber used is the one on the tier the request **addresses** (the global section when it addresses none), decided before any intent re-routing.
+
+For every `input_audio` part the server POSTs the decoded bytes as multipart to `<api_base>/audio/transcriptions` with `response_format=verbose_json` and `timestamp_granularities[]=segment`, plus `language` when one applies, and replaces the part with a text part, one line per segment:
+
+```
+[00:01.2-00:04.8] Speaker 1: Shall we start?
+[00:05.0-00:06.5] Speaker 2: Yes.
+```
+
+`{start}` and `{end}` are `MM:SS.t` (`H:MM:SS.t` from an hour up). `{speaker}` is read from `segments[].speaker`, a diarization extension some services add and the OpenAI API does not; speakers are renumbered `Speaker 1`, `Speaker 2`... by first appearance within each audio part. A segment with no speaker, or a service that sends none, is rendered with `format_no_speaker`. A service that returns no segments yields its bare `text`; silence yields `[no speech detected]`. Several audio parts are transcribed in order, each becoming its own text part in place, so surrounding text and image parts are untouched.
+
+**Language.** The request's language is the `X-RouteLLM-Transcribe-Language` header (a code such as `fr` or `pt-BR`), or `transcribe_language=` on `Controller.acompletion`; it wins over the config's `language`. With neither, the service detects it.
+
+**`audio_url`** parts are refused with a 400 unless `allow_urls: true`. Enabling it makes the server fetch client-supplied http(s) URLs (no redirects, capped at `max_audio_bytes`), which is a request-forgery risk: enable it only for a trusted caller on a network where that is acceptable.
+
+**Fails closed.** A transcriber that is unreachable, errors, answers unreadably, times out (`timeout_ms`) or is sent audio over `max_audio_bytes` ends the request, before any model is called, with a JSON error carrying the request id and no upstream detail:
+
+| Cause | Status |
+|---|---|
+| unreachable, error, unreadable answer | 502 |
+| timeout | 504 |
+| audio over `max_audio_bytes` | 413 |
+| malformed part, bad language, `audio_url` refused | 400 |
+
+The raw audio is never forwarded to a model instead, and no other transcriber is tried: only the one configured for the addressed tier is ever called, and there is no retry. What the transcriber said goes to the server log under the request id.
+
+**Private tiers.** A tier is *local-only* when every endpoint it can reach carries the `local` tag (the label `tag:local` selectors already use). Such a tier whose transcriber is not tagged `local` fails at load, so its audio cannot leave for a cloud transcriber; tag the transcriber `local`, point the tier at one, or set `mode: passthrough`. A tier whose sides are selectors is judged once they resolve. The tag is a declaration, like an endpoint's own.
+
+**Logging and caching.** Audio and transcript text are never logged at INFO. One INFO line gives counts and latency: `transcribed audio: parts=1 seconds=6.5 segments=2 speakers=2 latency_ms=120 request_id=...`. Transcription runs before routing, so the router, the capability check and the cache key all see the transcript: two clips that transcribe differently never share a cache entry, and a cache hit still costs one transcription. (In `passthrough`, the raw audio is part of the key by value.) A stream request is transcribed first and then streams as usual.
+
 #### Three outcomes
 
 Each level of the tier walk checks both its sides before running its router:

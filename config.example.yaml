@@ -51,6 +51,30 @@ resilience:
   cb_rate_interval_ms: 60000
   cb_rate_minimum: 10
 
+# Transcribe-then-route: turn audio parts into text before routing, so a
+# text-only tier can answer a request that carries audio. Point it at any
+# OpenAI `/v1/audio/transcriptions`-compatible service. Omit this section
+# (or set `mode: passthrough`) to route audio to an audio-capable
+# endpoint instead. A tier may override any key under its own
+# `transcriber:`. `segments[].speaker` is used when the service sends it
+# and omitted when it does not. A tier whose endpoints are all tagged
+# `local` must use a transcriber tagged `local`, or the config is
+# rejected. `audio_url` parts are refused unless `allow_urls: true`.
+# Commented out: the sample should send audio nowhere by default.
+#
+# transcriber:
+#   mode: transcribe
+#   api_base: http://127.0.0.1:9000/v1
+#   api_key_env: TRANSCRIBER_API_KEY
+#   model: whisper-1
+#   timeout_ms: 60000
+#   max_audio_bytes: 26214400
+#   language: null          # per request: X-RouteLLM-Transcribe-Language header
+#   format: "[{start}-{end}] {speaker}: {text}"
+#   format_no_speaker: "[{start}-{end}] {text}"
+#   allow_urls: false
+#   tags: [local]
+
 # Named endpoints. Each gives a reachable model a stable name that
 # routing, caching, and traces refer to instead of a raw litellm model
 # string. Names match [A-Za-z0-9_]+: hyphens are reserved for the

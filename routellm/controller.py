@@ -16,6 +16,7 @@ from litellm import acompletion, completion, stream_chunk_builder
 from tqdm import tqdm
 
 from routellm import requirements as requirements_module
+from routellm import transcription
 from routellm.caching import Cache, CacheConfig, context_key, conversation_key
 from routellm.capabilities import (
     build_tier_index,
@@ -481,6 +482,22 @@ class Controller:
             return instance.route(prompt, threshold, pair), None
 
         return scored(prompt, threshold, pair)
+
+    def _transcriber_for(self, kwargs: dict[str, Any], tier: str | None):
+        """Return the transcriber to run on this request, or None.
+
+        The transcriber is the one the ADDRESSED tier names (the global
+        section for no tier), read before any intent re-routing, so the
+        decision to send audio anywhere is made by the tier the client
+        chose. None when the request carries no audio, nothing is
+        configured, or the mode is `passthrough`.
+        """
+        if not transcription.has_audio(kwargs.get("messages")):
+            return None
+        config = self.endpoints.transcriber_for(tier)
+        if config is None or not config.active:
+            return None
+        return config
 
     def _can_serve(self, name: str, reqs) -> str | None:
         """Return the first requirement `name` cannot serve, or None.
@@ -1093,6 +1110,8 @@ class Controller:
         *,
         router: str | None = None,
         threshold: float | None = None,
+        transcribe_language: str | None = None,
+        request_id: str | None = None,
         **kwargs,
     ):
         """Synchronous completion with intelligent routing.
@@ -1125,6 +1144,12 @@ class Controller:
         threshold : float, optional
             Routing threshold in [0, 1]. Parsed from model name if not
             provided.
+        transcribe_language : str, optional
+            Language hint for audio transcription, used only when the
+            addressed tier transcribes audio parts. Overrides the
+            configured `language`.
+        request_id : str, optional
+            Correlates the transcription log line with the caller's own.
         **kwargs
             Standard OpenAI completion parameters (messages, temperature,
             top_p, etc.). model field can encode router and threshold.
@@ -1138,6 +1163,9 @@ class Controller:
         ------
         RoutingError
             If router/threshold invalid or model name malformed.
+        TranscriptionError
+            If the addressed tier transcribes audio and that fails. The
+            raw audio is never routed instead.
         """
         tier = None
         request_name = kwargs.get("model")
@@ -1145,6 +1173,17 @@ class Controller:
             tier, router, threshold = self._parse_model_name(request_name)
         else:
             request_name = router
+
+        # Audio becomes text before anything reads the messages, so the
+        # router, the requirements and the cache key all see the transcript.
+        transcriber = self._transcriber_for(kwargs, tier)
+        if transcriber is not None:
+            kwargs = {
+                **kwargs,
+                "messages": transcription.transcribe_sync(
+                    kwargs["messages"], transcriber, transcribe_language, request_id
+                ),
+            }
 
         # A vision request's content is a list; routers want a string.
         prompt = requirements_module._prompt_text(kwargs["messages"])
@@ -1331,6 +1370,8 @@ class Controller:
         *,
         router: str | None = None,
         threshold: float | None = None,
+        transcribe_language: str | None = None,
+        request_id: str | None = None,
         **kwargs,
     ):
         tier = None
@@ -1339,6 +1380,18 @@ class Controller:
             tier, router, threshold = self._parse_model_name(request_name)
         else:
             request_name = router
+
+        # Audio becomes text before anything reads the messages, so the
+        # router, the requirements and the cache key all see the
+        # transcript. Streaming is unaffected: this finishes before routing.
+        transcriber = self._transcriber_for(kwargs, tier)
+        if transcriber is not None:
+            kwargs = {
+                **kwargs,
+                "messages": await transcription.transcribe(
+                    kwargs["messages"], transcriber, transcribe_language, request_id
+                ),
+            }
 
         # A vision request's content is a list; routers want a string.
         prompt = requirements_module._prompt_text(kwargs["messages"])

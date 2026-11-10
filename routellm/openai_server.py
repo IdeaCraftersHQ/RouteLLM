@@ -30,6 +30,7 @@ from routellm.middleware.intent_model_selector import (
 )
 from routellm.routers.routers import ROUTER_CLS
 from routellm.server_config import SERVER_SECTIONS, build_cache_config, build_resilience_config
+from routellm.transcription import TranscriptionError
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 CONTROLLER = None
@@ -156,7 +157,7 @@ def build_registry(file_config: dict | None, config_path: str | None = None) -> 
         args.default_threshold,
         args.routers[0] if args.routers else "<none>",
     )
-    return EndpointRegistry(endpoints, tiers)
+    return EndpointRegistry(endpoints, tiers, registry.transcriber_raw)
 
 
 #: Detector backends the `intents:` section may ask for.
@@ -637,6 +638,30 @@ def _error_body(request_id: str) -> dict:
     }
 
 
+#: Request header naming the language of any audio in the request.
+TRANSCRIBE_LANGUAGE_HEADER = "X-RouteLLM-Transcribe-Language"
+
+
+def _transcription_failure(exc: TranscriptionError, request_id: str) -> JSONResponse:
+    """Answer a failed transcription: a generic message and the request id.
+
+    What the transcriber said stays in the server log under the same id.
+    """
+    logging.getLogger(__name__).error(
+        f"Transcription failed (request id {request_id}): {exc.detail}"
+    )
+    kind = "invalid_request_error" if exc.status_code < 500 else "server_error"
+    return JSONResponse(
+        {
+            "object": "error",
+            "message": f"Audio transcription failed: {exc.public} (request id {request_id})",
+            "type": kind,
+            "request_id": request_id,
+        },
+        status_code=exc.status_code,
+    )
+
+
 async def stream_response(response, request_id: str | None = None) -> AsyncGenerator:
     """Frame a chunk stream as server-sent events.
 
@@ -719,10 +744,14 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
     for handled in ("model", "messages"):
         forwarded.pop(handled, None)
 
+    language = http_request.headers.get(TRANSCRIBE_LANGUAGE_HEADER)
+
     try:
         res = await CONTROLLER.acompletion(
             model=request.model,
             messages=request.messages,
+            transcribe_language=language,
+            request_id=request_id,
             **forwarded,
         )
     except RoutingError as e:
@@ -730,6 +759,8 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
             ErrorResponse(message=str(e)).model_dump(),
             status_code=400,
         )
+    except TranscriptionError as e:
+        return _transcription_failure(e, request_id)
     except Exception as e:
         # Whatever an upstream raised can name it and echo its text: the
         # client gets a generic message and an id; the detail stays here.
