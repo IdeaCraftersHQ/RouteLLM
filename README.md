@@ -261,6 +261,17 @@ Names match `[A-Za-z0-9_]+`; hyphens are reserved for the model-name grammar bel
 
 Endpoint names are also the cache, resilience, and trace keys. Adopting them therefore changes existing SQLite cache keys, and entries written under the old raw model names go unread.
 
+#### Governance tags
+
+Tags are free-form, with one rule: a tag written `<ns>:<value>` is namespaced, and its namespace must be known. Two conventions are parsed, not just matched:
+
+- **reach**: the subset of `local`, `vpn`, `cloud` an endpoint carries (an endpoint on your own box that is also reachable over a private network is `local` and `vpn`);
+- **`jur:<cc>`**: at most one, a lowercase ISO 3166-1 alpha-2 code (`jur:ca`, never `jur:CA`).
+
+`jur` is the built-in namespace; add your own with `tag_namespaces: [team]`. An unknown namespace (`jurr:ca`), a second `jur:` tag or a malformed code fails the config load, naming the endpoint and the tag. `Endpoint.reach` and `Endpoint.jur` expose the parsed view.
+
+Setting `governance: true` (top-level, off by default) additionally requires every endpoint to carry at least one reach tag and exactly one `jur:` tag.
+
 ### Tiers
 
 A tier is a named strong/weak pair whose sides may themselves be tiers, so a request addressed to a tier walks a tree, one router call per level on the original prompt:
