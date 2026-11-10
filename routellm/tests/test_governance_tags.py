@@ -7,6 +7,10 @@ from routellm.endpoints import EndpointRegistry
 
 def _load(tags_by_name, **top):
     endpoints = {n: {"model": f"m_{n}", "tags": t} for n, t in tags_by_name.items()}
+    for spec in endpoints.values():
+        # A `local` endpoint must name where it lives.
+        if "local" in spec["tags"]:
+            spec["api_base"] = "http://127.0.0.1:11434/v1"
     return EndpointRegistry.from_config({"endpoints": endpoints, **top})
 
 

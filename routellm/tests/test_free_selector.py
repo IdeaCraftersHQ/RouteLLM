@@ -28,7 +28,12 @@ CONFIG = {
             "model": "openrouter/vendor/new-m:free",
             "tags": ["cloud", "openrouter", "free"],
         },
-        "local_a": {"model": "ollama_chat/a", "tags": ["local"], "quality": 50},
+        "local_a": {
+            "model": "ollama_chat/a",
+            "api_base": "http://127.0.0.1:11434",
+            "tags": ["local"],
+            "quality": 50,
+        },
     }
 }
 
