@@ -19,6 +19,7 @@ import pytest
 from pydantic import ValidationError
 
 from routellm.endpoints import Endpoint
+from routellm.tests.subproc import SUBPROCESS_TIMEOUT
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -64,6 +65,7 @@ TOOLS = [{{"type": "function", "function": {{
 with TestClient(server.app) as client:
     server.CONTROLLER.cache.config.enabled = False
     server.CONTROLLER.resilience.config.max_retries = 0
+    server.CONTROLLER.resilience.config.timeout_ms = 600_000  # starved CPU is not an upstream timeout
 """
 
 
@@ -92,7 +94,7 @@ def _run(tmp_path, body, o_extra="", a_extra=""):
             "LITELLM_LOCAL_MODEL_COST_MAP": "True",
             "FAKE_KEY": "sk-fake",
         },
-        timeout=120,
+        timeout=SUBPROCESS_TIMEOUT,
     )
     assert result.returncode == 0, result.stderr[-3000:]
     return json.loads(result.stdout.strip().splitlines()[-1])

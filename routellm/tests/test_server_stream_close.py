@@ -9,6 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from routellm.tests.subproc import SUBPROCESS_TIMEOUT
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 _PREAMBLE = """
@@ -50,7 +52,7 @@ def _run(tmp_path, body):
         capture_output=True,
         text=True,
         env={"PYTHONPATH": ".", "PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
-        timeout=120,
+        timeout=SUBPROCESS_TIMEOUT,
     )
     assert result.returncode == 0, result.stderr[-3000:]
     return json.loads(result.stdout.strip().splitlines()[-1])

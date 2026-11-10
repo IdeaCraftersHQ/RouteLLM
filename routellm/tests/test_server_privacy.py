@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from routellm.tests.subproc import SUBPROCESS_TIMEOUT
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 pytestmark = pytest.mark.slow
@@ -61,6 +63,7 @@ with TestClient(server.app, raise_server_exceptions=False) as client:
     server.CONTROLLER.cache.config.db_path = {db!r}
     server.CONTROLLER.cache._init_db()
     server.CONTROLLER.resilience.config.max_retries = 0
+    server.CONTROLLER.resilience.config.timeout_ms = 600_000  # starved CPU is not an upstream timeout
 """
 
 
@@ -85,7 +88,7 @@ def _run(tmp_path, body, level="logging.INFO", cache=False):
             "LITELLM_LOCAL_MODEL_COST_MAP": "True",
             "FAKE_KEY": "sk-fake",
         },
-        timeout=120,
+        timeout=SUBPROCESS_TIMEOUT,
     )
     assert result.returncode == 0, result.stderr[-3000:]
     line = next(ln for ln in reversed(result.stdout.splitlines()) if "@@RESULT@@" in ln)

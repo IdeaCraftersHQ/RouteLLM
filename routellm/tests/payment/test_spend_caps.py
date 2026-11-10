@@ -27,6 +27,8 @@ import httpx
 import litellm
 import pytest
 
+from routellm.tests.subproc import SUBPROCESS_TIMEOUT
+
 USDC_BASE_SEPOLIA = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
 PAY_TO = "0x" + "22" * 20
 TEST_KEY = "0x" + "11" * 32
@@ -784,6 +786,7 @@ def test_the_server_builds_limits_from_the_flag_and_the_config():
         capture_output=True,
         text=True,
         cwd=repo_root,
+        timeout=SUBPROCESS_TIMEOUT,
     )
     assert result.returncode == 0, result.stderr
 
@@ -853,6 +856,7 @@ def test_the_server_hands_the_limits_to_both_seams():
         capture_output=True,
         text=True,
         cwd=repo_root,
+        timeout=SUBPROCESS_TIMEOUT,
     )
     assert result.returncode == 0, result.stderr
 
