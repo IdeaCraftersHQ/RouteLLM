@@ -26,6 +26,7 @@ from routellm.capabilities import (
     usable_sibling,
 )
 from routellm.comparison import ComparisonConfig, ComparisonManager
+from routellm.decision import DecisionRefused, set_decision
 from routellm.endpoints import EndpointRegistry, Selector
 from routellm.hints import TYPESAFE_INSTALL_HINT
 from routellm.leaf_params import drop_kwargs, log_dropped
@@ -149,6 +150,7 @@ class Controller:
         default_threshold: float = 0.5,
         comparison_config: ComparisonConfig | None = None,
         strict_registry: bool = False,
+        decision=None,
     ):
         """Initialize controller with routers and configuration.
 
@@ -269,6 +271,9 @@ class Controller:
         self._trace_writes: set[asyncio.Future] = set()
         self.progress_bar = progress_bar
         self.middleware = middleware or []
+        self.decision = decision
+        if decision is not None:
+            decision.bind(self._decision_transport)
         self.payment_gateway = payment_gateway
         self.payment_limits = payment_limits
         self.payment_budget = payment_budget
@@ -392,6 +397,55 @@ class Controller:
                 "pair; evals need --strong-model/--weak-model."
             )
         return self.default_model_pair
+
+    async def _decision_transport(self, endpoint, messages, response_format, timeout_ms):
+        """Call the decision endpoint like any leaf: registry, resilience, timeout."""
+        model, api_base, api_key, extra = self._endpoint_call_params(endpoint)
+
+        async def _call():
+            kwargs = {**extra, "messages": messages, "response_format": response_format}
+            kwargs.update(model=model, temperature=0, stream=False)
+            self._no_inner_retries(kwargs)
+            return await acompletion(api_base=api_base, api_key=api_key, **kwargs)
+
+        res = await self.resilience.wrap_acompletion(endpoint, _call, timeout_ms=timeout_ms)
+        return res.choices[0].message.content
+
+    async def _decide(self, kwargs, declared_class, conversation_id):
+        """Run the decision step; None when no `decision:` section is configured.
+
+        Raises
+        ------
+        RoutingError
+            If the step failed and `on_error` is `refuse`.
+        """
+        if self.decision is None:
+            return None
+        try:
+            decision = await self.decision.classify(
+                kwargs["messages"],
+                declared_class=declared_class,
+                conversation_id=conversation_id,
+                user=kwargs.get("user"),
+            )
+        except DecisionRefused as refusal:
+            raise RoutingError(str(refusal)) from refusal
+        set_decision(decision)
+        return decision
+
+    def _decide_sync(self, kwargs, declared_class, conversation_id):
+        """`_decide` for the synchronous entry point, on a loop of its own."""
+        if self.decision is None:
+            return None
+        coro = self._decide(kwargs, declared_class, conversation_id)
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coro)
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result()
 
     def _get_model_pair_for_prompt(self, prompt: str) -> ModelPair | None:
         """Get the model pair a middleware asks for, or None."""
@@ -585,6 +639,7 @@ class Controller:
         router: str | None,
         threshold: float | None,
         reqs=None,
+        decision=None,
     ) -> tuple[str, list[dict[str, Any]], ModelPair | None]:
         """Choose one endpoint for a prompt and record how it was chosen.
 
@@ -656,6 +711,8 @@ class Controller:
                 check=self._can_serve,
                 error_cls=RoutingError,
             )
+            if decision is not None:
+                path[0]["decision"] = decision.as_dict()
             if ignored_tier is not None:
                 path[0]["intent_ignored"] = ignored_tier
             elif tier_from is not None:
@@ -714,6 +771,8 @@ class Controller:
             entry["capability_requirement"] = forced[2]
         if overridden is not None:
             entry["pair_from"] = pair_from
+        if decision is not None:
+            entry["decision"] = decision.as_dict()
 
         return picked, [entry], pair
 
@@ -1276,6 +1335,8 @@ class Controller:
         threshold: float | None = None,
         transcribe_language: str | None = None,
         request_id: str | None = None,
+        declared_class: str | None = None,
+        conversation_id: str | None = None,
         **kwargs,
     ):
         """Synchronous completion with intelligent routing.
@@ -1314,6 +1375,12 @@ class Controller:
             configured `language`.
         request_id : str, optional
             Correlates the transcription log line with the caller's own.
+        declared_class : str, optional
+            Data class the caller declares; the decision step never
+            lowers it. Read only when `decision:` is configured.
+        conversation_id : str, optional
+            Key for the decision step's sticky floor; derived from the
+            conversation's opening message when absent.
         **kwargs
             Standard OpenAI completion parameters (messages, temperature,
             top_p, etc.). model field can encode router and threshold.
@@ -1359,11 +1426,14 @@ class Controller:
         )
         session_id = kwargs.get("user") or str(uuid.uuid4())
 
+        # 0. Decide: label the request before anything routes it.
+        decision = self._decide_sync(kwargs, declared_class, conversation_id)
+
         # 1. Route: traffic rules and middleware bypass the tree, a tier
         #    walks it, and a bare pair routes flat. Each side is checked
         #    for fitness before its router runs.
         routed_model, path, effective_pair = self._route(
-            prompt, kwargs, tier, router, threshold, reqs
+            prompt, kwargs, tier, router, threshold, reqs, decision=decision
         )
         area = self._area_of(path)
 
@@ -1562,6 +1632,8 @@ class Controller:
         transcribe_language: str | None = None,
         request_id: str | None = None,
         compare: str | None = None,
+        declared_class: str | None = None,
+        conversation_id: str | None = None,
         **kwargs,
     ):
         tier = None
@@ -1593,11 +1665,15 @@ class Controller:
         )
         session_id = kwargs.get("user") or str(uuid.uuid4())
 
+        # 0. Decide: label the request before anything routes it. Awaited,
+        #    so a slow decision model never holds the event loop.
+        decision = await self._decide(kwargs, declared_class, conversation_id)
+
         # 1. Route: traffic rules and middleware bypass the tree, a tier
         #    walks it, and a bare pair routes flat. Each side is checked
         #    for fitness before its router runs.
         routed_model, path, effective_pair = self._route(
-            prompt, kwargs, tier, router, threshold, reqs
+            prompt, kwargs, tier, router, threshold, reqs, decision=decision
         )
         area = self._area_of(path)
 

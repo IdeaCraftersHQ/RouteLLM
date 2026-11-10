@@ -221,6 +221,29 @@ endpoints:
 #   tiers:
 #     code: default
 
+# Decision step (optional; off without it). Labels each request with a
+# data class, an intent and an optional area, using a registry endpoint;
+# `require_tags` makes the load fail unless that endpoint carries them,
+# which is how a deployment forces a local decision model. Classes are
+# ordered least to most restrictive. Failures resolve through `on_error`.
+# decision:
+#   provider: llm
+#   endpoint: local_box
+#   require_tags: [local]
+#   data_classes:
+#     general: nothing sensitive
+#     private: personal or secret data
+#   intents:
+#     code: writing or debugging software
+#     chat: small talk
+#   input: {messages: last_user, max_chars: 4000}
+#   timeout_ms: 2000
+#   min_confidence: 0.6
+#   on_error: most_restrictive
+#   recognizers:
+#     - {name: key_material, type: regex, class: private, patterns: ['-----BEGIN [A-Z ]*PRIVATE KEY-----']}
+#   sticky: {enabled: true, ttl_s: 3600}
+
 # Tiers: named strong/weak pairs whose sides may themselves be tiers, so
 # a request addressed to a tier walks a tree, one router call per level.
 # A tier naming no router or threshold inherits them from the level

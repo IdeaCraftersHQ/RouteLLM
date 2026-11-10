@@ -813,6 +813,45 @@ Intent detection never reaches a provider outside the registry, and there is no 
 
 `detector: jev` classifies with one TypeSafe Jev question and needs the extension: `pip install -e extensions/typesafe`. `detector: litellm` asks the `model` to classify in a prompt built from the `descriptions`, and needs nothing extra. Both read the same `descriptions`, so the wording that tells the classifier what an intent means lives in one place. `python -m routellm.pairing --config` prints one `intent <label> -> tier <name>` line per mapping.
 
+### Decision step
+
+A `decision:` section labels every routed request with a data class, an intent and optionally a topic area, using a model that is itself a registry endpoint. Nothing is routed on the labels here; the result is the request's `Decision`, recorded on the routing path (`path[0]["decision"]`) and readable during routing through `routellm.decision.current_decision()`, for policy routing and egress gates to consume. Without the section nothing runs and no call is made.
+
+```yaml
+decision:
+  provider: llm              # built in; others register under the `routellm.decision_providers` entry-point group
+  endpoint: decider          # a registry endpoint (not a tier)
+  require_tags: [local]      # load error naming endpoint and tag when it lacks one
+  data_classes:              # ordered, least to most restrictive; the last is the fail-closed class
+    general: nothing sensitive
+    private: personal or secret data
+  intents:
+    code: writing or debugging software
+    chat: small talk
+  areas: {}                  # optional topic areas, same shape
+  input: {messages: last_user, max_chars: 4000, keep: tail}   # last_user | user | all
+  timeout_ms: 2000
+  min_confidence: 0.6
+  on_error: most_restrictive # or refuse (the request fails with a 400)
+  recognizers:               # ordered, deterministic, run before the model over the whole conversation
+    - {name: key_material, type: regex, class: private, patterns: ['-----BEGIN [A-Z ]*PRIVATE KEY-----']}
+    - {name: markers, type: markers, class: private, markers: ["internal use only"]}
+  sticky: {enabled: true, ttl_s: 3600}
+  eval_min_recall: {private: 0.95}
+```
+
+Effective class is the most restrictive of the caller's `declared_class`, the sticky floor, a recognizer hit and the model's answer; no source lowers it. A recognizer hit, or a declared or sticky class already at the strictest level, answers without a model call. The model is asked for a typed answer (a JSON schema whose fields are enums of the configured labels) and any label outside the sets is an error. A timeout, a transport failure, an invalid answer or a confidence under `min_confidence` resolves through `on_error` and is recorded as `error` on the Decision; failure-derived classes are not made sticky. The decision call goes through the endpoint's own resilience and timeout like any leaf, and is awaited, so a slow decision model holds up only its own request.
+
+Sticky keeps a conversation's class from dropping below the strictest seen for `ttl_s`; the key is the `conversation_id` the caller passes, else a hash of the opening message and `user`. A heavier recognizer plugs in as any object with `recognize(text, language=None)`; `routellm.decision.SpanRecognizer` adapts an analyzer exposing `analyze(text, language)` that returns spans.
+
+Measure it on your own prompts with labelled JSONL (`{"text": ..., "data_class": ...}`):
+
+```
+python -m routellm.decision.eval --config config.yaml --data labelled.jsonl --min-recall private=0.95
+```
+
+It prints recall and precision per class, a confusion table and latency percentiles, and exits 1 when a named class's recall is under its floor (`--model-only` skips the recognizers).
+
 ### Threshold Calibration
 
 The threshold used for routing controls the cost-quality tradeoff. The range of meaningful thresholds varies depending on the type of router and the queries you receive. Therefore, we recommend calibrating thresholds using a sample of your incoming queries, as well as the % of queries you'd like to route to the stronger model.
