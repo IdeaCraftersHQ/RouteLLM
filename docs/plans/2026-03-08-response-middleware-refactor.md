@@ -1,8 +1,5 @@
 # Response Middleware Refactor + x402 Separate Package
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement
-> this plan task-by-task.
-
 **Goal:** Replace the ad-hoc `PaymentGateway` in `routellm/payment/` with a general
 `ResponseMiddleware` protocol in core, then move the x402 implementation into a
 separate installable package `routellm-x402`.

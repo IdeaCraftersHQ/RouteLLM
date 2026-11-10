@@ -1,8 +1,5 @@
 # RouteLLM x402 Integration — Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement
-> this plan task-by-task.
-
 **Goal:** Enable RouteLLM to pay x402-gated LLM endpoints on behalf of the caller,
 using a `PaymentGateway` interface with a concrete `X402Adapter` wrapping the
 official `x402` PyPI package.
