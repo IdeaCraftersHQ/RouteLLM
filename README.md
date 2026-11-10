@@ -310,6 +310,19 @@ Unknown keys under an endpoint are a load error naming the endpoint and the key,
 
 An endpoint tagged `local` must set `api_base`. Without one the call would go to the provider's default (public) base, so a leaf meant to stay on your machine would send its prompts to the cloud; the config is refused instead. Drop the tag if the endpoint is meant to be remote.
 
+The host of that `api_base` must also be non-public, judged as written (after `${VAR}` expansion, no DNS lookup, so a load never touches the network): loopback (`127.0.0.0/8`, `::1`, `localhost`), private and link-local ranges (RFC 1918, `fc00::/7`, `169.254.0.0/16`, `fe80::/10`), overlay-VPN space (`100.64.0.0/10`), names ending `.local`, `.internal`, `.lan` or `.localhost`, and single-label names such as a compose service (`http://ollama:11434`). Any other host is refused at load, because a `local` tag on a public host would send prompts off the network. A tunnel that reaches a local server through a public name needs an explicit opt-out:
+
+```yaml
+endpoints:
+  tunnelled:
+    model: openai/some-model
+    api_base: https://tunnel.example.com/v1
+    tags: [local]
+    allow_public_base: true   # dangerous: `local` no longer means the prompt stays on your network
+```
+
+`allow_public_base` defaults to `false`. Prefer a private address or a `.internal` name to the opt-out.
+
 #### Strict registry mode
 
 By default a model name that is not a registry endpoint is passed to litellm as a raw model string, with the controller's `api_base`/`api_key`. `strict_registry: true` (top-level) or `--strict-registry` closes that on every path; it is off by default. Either one turns it on; the flag cannot turn a config's `true` off.
