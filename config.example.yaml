@@ -193,8 +193,8 @@ endpoints:
   # message, `$$` is a literal `$`. A bare `$NAME` is left alone. Only
   # string values are expanded, never keys. Never put a secret here: keys
   # stay in `api_key_env`. An endpoint tagged `local` must set `api_base`
-  # naming a loopback, private, link-local, `.local`, `.internal`, `.lan`
-  # or single-label host, so it can never fall back to or reach a public
+  # naming a loopback, private, link-local, `.local`, `.internal` or
+  # `.localhost` host, so it can never fall back to or reach a public
   # provider. `allow_public_base: true` lifts that check; it is dangerous.
   local_box:
     model: openai/<your-model>

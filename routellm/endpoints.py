@@ -164,18 +164,35 @@ class Selector(BaseModel):
         return value
 
 
-_LOCAL_SUFFIXES = (".local", ".internal", ".lan", ".localhost")
+_LOCAL_SUFFIXES = (".local", ".internal", ".localhost")
+
+# Loopback, RFC 1918, ULA and link-local only. Shared (100.64/10),
+# unspecified, documentation and reserved space are not "this machine or
+# its private network", so they are refused like any public host.
+_LOCAL_NETWORKS = tuple(
+    ipaddress.ip_network(n)
+    for n in (
+        "127.0.0.0/8",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "169.254.0.0/16",
+        "::1/128",
+        "fc00::/7",
+        "fe80::/10",
+    )
+)
 
 
 def is_non_public_base(api_base: str) -> bool:
-    """Whether `api_base` names a host that is not on the public internet.
+    """Whether `api_base` names a host on this machine or its private network.
 
-    True for loopback, RFC 1918, ULA, link-local and other non-global
-    IP literals (including 100.64/10 overlay-VPN space), `localhost`,
-    names ending `.local`, `.internal`, `.lan` or `.localhost`, and
-    single-label names (a compose service, a LAN hostname). Anything
-    else, or an unparseable or hostless value, is False. Purely
-    syntactic: no DNS.
+    True for IP literals in loopback, RFC 1918, ULA or link-local space,
+    `localhost`, and names ending `.local`, `.internal` or `.localhost`.
+    Anything else is False: other IP space, other names (including
+    single-label names, which a resolver search domain can send
+    anywhere), and unparseable or hostless values. Purely syntactic: no
+    DNS.
     """
     text = api_base.strip()
     if "://" not in text:
@@ -192,10 +209,10 @@ def is_non_public_base(api_base: str) -> bool:
     try:
         ip = ipaddress.ip_address(host.split("%", 1)[0])
     except ValueError:
-        return host == "localhost" or host.endswith(_LOCAL_SUFFIXES) or "." not in host
+        return host == "localhost" or host.endswith(_LOCAL_SUFFIXES)
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
         ip = ip.ipv4_mapped
-    return not ip.is_global
+    return any(ip in net for net in _LOCAL_NETWORKS if net.version == ip.version)
 
 
 class Endpoint(BaseModel):

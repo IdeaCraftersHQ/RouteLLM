@@ -25,13 +25,10 @@ def _load(base, **extra):
         "http://169.254.10.10",
         "http://[fd12:3456::1]:80",
         "http://[fe80::1]",
-        "http://100.100.1.1:80",  # CGNAT / overlay VPN range
         "http://box.local:80",
         "http://box.local./v1",
         "http://gpu.internal/v1",
-        "http://gpu.lan/v1",
         "http://app.localhost:3000",
-        "http://ollama:11434",  # single-label: compose/service name
         "localhost:11434",  # scheme-less
         "http://user:pw@127.0.0.1:1/v1",
     ],
@@ -47,6 +44,12 @@ def test_local_hosts_load(base):
         "https://api.openai.com",
         "http://8.8.8.8/v1",
         "http://172.32.0.1",  # just outside RFC1918 172.16/12
+        "http://100.100.1.1:80",  # shared/CGNAT space: not this network
+        "http://gpu.lan/v1",  # .lan: unreserved, resolver-defined
+        "http://ollama:11434",  # single-label: search domains may resolve it anywhere
+        "http://0.0.0.0:11434",  # unspecified
+        "http://192.0.2.1",  # documentation range, not private
+        "http://[::ffff:8.8.8.8]",  # mapped public v4
         "http://192.169.0.1",
         "http://[2001:4860:4860::8888]",
         "https://evil.example.com/v1",
