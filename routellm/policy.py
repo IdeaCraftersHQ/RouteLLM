@@ -53,9 +53,11 @@ __all__ = [
     "parse_policy",
 ]
 
-#: Whether a `redact` class may reach the cloud. It may once a redaction
-#: treatment exists to run first; until then such a policy is refused.
-REDACTION_AVAILABLE = False
+#: Whether a `redact` class may reach the cloud: it may, because the
+#: redact transform (`routellm.redact.transform`) runs first. A policy
+#: that lets a redact class off the host without a `redact:` config is
+#: refused when the controller starts, not here (this file reads no config).
+REDACTION_AVAILABLE = True
 
 _LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$")
 _JUR = re.compile(r"^[a-z]{2}$")

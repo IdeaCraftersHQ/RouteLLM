@@ -613,7 +613,7 @@ async def lifespan(app):
         policy_routing=build_policy_routing(file_config, POLICY),
         embedding_endpoint=build_embedding_endpoint(file_config),
         allow_remote_embeddings=args.allow_remote_embeddings,
-        transforms=build_transforms(file_config),
+        transforms=build_transforms(file_config, config_origin),
     )
     yield
     CONTROLLER = None

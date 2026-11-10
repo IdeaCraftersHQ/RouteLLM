@@ -132,7 +132,9 @@ and the newest version in that range.
 data (person, location, email, phone, IBAN, card, Canadian SIN, RAMQ,
 postal code, amounts, date of birth, your own client ids), fully offline.
 Pattern recognizers work on a base install; the named-entity tier needs
-the `redact` extra and two spaCy models. See [docs/redact.md](docs/redact.md).
+the `redact` extra and two spaCy models. A policy class with `treatment: redact`
+reaches cloud leaves as reversible placeholders restored locally; the optional
+`redact-encrypt` extra encrypts the local token store. See [docs/redact.md](docs/redact.md).
 
 **Policy-based pairing (optional)**
 
@@ -343,11 +345,11 @@ principals:
 ```
 
 - `cache` defaults to `exact` for `raw` and `none` for the other treatments.
-- `cache` is enforced per request: `none` makes no lookup and no store; `exact` serves only an identical conversation and never asks for an embedding; `both` also allows the semantic match, when `cache.semantic_enabled` is on. Whatever a `block` or `redact` class sets, it is never cached: there is no redacted form to store yet, and a blocked class is never stored.
+- `cache` is enforced per request: `none` makes no lookup and no store; `exact` serves only an identical conversation and never asks for an embedding; `both` also allows the semantic match, when `cache.semantic_enabled` is on. Whatever a `block` or `redact` class sets, it is never cached: a redact class's replies cannot be restored without that request's own mapping, and a blocked class is never stored.
 - `reach` and `tiers` need at least one entry on every class except `vault`; an empty list would allow nothing.
 - `vault`: every request is refused with no model call; it takes no `reach`, `jur`, `tiers`, and `cache` must be `none`.
 - `block`: `cloud` in `reach` is a load error.
-- `redact`: `cloud` in `reach` is a load error until a redaction treatment is available.
+- `redact`: `cloud` in `reach` is allowed: the main call to a non-local leaf goes out as placeholders and the reply is restored locally (see [docs/redact.md](docs/redact.md#the-redact-treatment)). Without a `redact:` config section the server refuses to start; every auxiliary call that carries the class's content stays local-only.
 - An unknown class on a request is refused; so is a missing class when `default_class` is null. A principal reaches only the classes listed for it; an unlisted principal reaches none.
 
 #### Class to tiers

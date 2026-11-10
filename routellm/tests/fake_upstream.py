@@ -5,6 +5,9 @@ which is either a string or a callable taking the parsed body:
 
 - `ok`: a normal answer, streamed when the body says `stream`.
 - `tools`: the answer is a tool call (streamed as deltas when asked).
+- `echo`: the answer repeats the last message's text (`echo: <text>`); a
+  stream carries it in 4-character pieces, so any placeholder in it is
+  split over several chunks.
 - `500`: HTTP 500 before any body.
 - `die_first`: HTTP 200, then the connection drops before any chunk.
 - `die_after`: one content chunk, then the connection drops mid-body.
@@ -24,6 +27,14 @@ import json
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+def _last_text(body) -> str:
+    """The text of the request's last message, parts joined."""
+    content = (body.get("messages") or [{}])[-1].get("content")
+    if isinstance(content, list):
+        return " ".join(p.get("text", "") for p in content if isinstance(p, dict))
+    return content or ""
 
 
 class FakeUpstream:
@@ -57,6 +68,9 @@ class FakeUpstream:
                 if fake.delay:
                     time.sleep(fake.delay)
                 model = body.get("model", "m")
+                reply = f"hello from {fake.name}"
+                if mode == "echo":
+                    reply = "echo: " + _last_text(body)
 
                 if mode in ("429", "429_daily"):
                     daily = mode == "429_daily"
@@ -123,9 +137,7 @@ class FakeUpstream:
                             ],
                         }
                         if mode == "stream_error_after":
-                            self._event(
-                                chunk({"role": "assistant", "content": f"hello from {fake.name}"})
-                            )
+                            self._event(chunk({"role": "assistant", "content": reply}))
                         self._event(error_event)
                         self._chunk(b"data: [DONE]\n\n")
                         self._chunk(b"")
@@ -151,10 +163,13 @@ class FakeUpstream:
                                 )
                             )
                         self._event(chunk({}, finish="tool_calls"))
+                    elif mode == "echo":
+                        self._event(chunk({"role": "assistant", "content": ""}))
+                        for i in range(0, len(reply), 4):
+                            self._event(chunk({"content": reply[i : i + 4]}))
+                        self._event(chunk({}, finish="stop"))
                     else:
-                        self._event(
-                            chunk({"role": "assistant", "content": f"hello from {fake.name}"})
-                        )
+                        self._event(chunk({"role": "assistant", "content": reply}))
                         if mode == "die_after":
                             self.close_connection = True
                             return
@@ -176,7 +191,7 @@ class FakeUpstream:
                     self._chunk(b"")
                     return
 
-                message = {"role": "assistant", "content": f"hello from {fake.name}"}
+                message = {"role": "assistant", "content": reply}
                 finish = "stop"
                 if mode == "tools":
                     message = {

@@ -44,6 +44,7 @@ __all__ = [
     "check_entry_tier",
     "class_denial",
     "reachable_leaves",
+    "redact_aux_denial",
     "route_error",
 ]
 
@@ -86,6 +87,30 @@ def class_denial(policy: Policy, registry, name: str, data_class: str | None) ->
     return None
 
 
+def redact_aux_denial(policy: Policy, registry, name: str, data_class: str | None) -> str | None:
+    """Return `redact:<class>:aux_not_local` when a redact class's content may not go to `name`.
+
+    A redact class reaches the cloud only through the redact transform
+    on the main call. Every other call that carries its content (hosted
+    and embedding routers, the semantic cache's embedding, the intent
+    detector, the comparison judge, the decision classifier) is not
+    transformed, so it is local-only: every leaf `name` can reach must
+    carry the `local` reach label and no other. None for any other class.
+    """
+    spec = policy.classes.get(data_class) if data_class is not None else None
+    if spec is None or spec.treatment != "redact":
+        return None
+    leaves = list(reachable_leaves(registry, name)) if registry.has_tier(name) else [name]
+    for leaf in leaves:
+        try:
+            reach = registry.resolve(leaf).reach
+        except Exception:
+            return f"redact:{data_class}:aux_not_local"
+        if not reach or not set(reach) <= {"local"}:
+            return f"redact:{data_class}:aux_not_local"
+    return None
+
+
 def check_decision_endpoint(policy: Policy, registry, endpoint: str) -> None:
     """Refuse a decision endpoint some class may not reach.
 
@@ -104,7 +129,9 @@ def check_decision_endpoint(policy: Policy, registry, endpoint: str) -> None:
     for name, spec in policy.classes.items():
         if spec.refuses_all:
             continue
-        denial = class_denial(policy, registry, endpoint, name)
+        denial = class_denial(policy, registry, endpoint, name) or redact_aux_denial(
+            policy, registry, endpoint, name
+        )
         if denial is not None:
             refused.append(f"{name} ({denial.rsplit(':', 1)[-1]})")
     if refused:
