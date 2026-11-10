@@ -293,3 +293,19 @@ tiers:
 # areas:
 #   coding:      [coding, coding_quality, coding_fast]
 #   copywriting: [copywriting, copywriting_quality, copywriting_fast]
+
+# --- PII analysis ------------------------------------------------------
+# Local detection of personal data, `routellm.redact.analyze(text,
+# language)`. Needs the `redact` extra and the spaCy models; see
+# docs/redact.md. Both keys are optional.
+#
+# redact:
+#   # Regexes for your own identifiers; each match is a `client_id` span.
+#   # A pattern that fails to compile or can match nothing is a load error.
+#   client_id_patterns:
+#     - 'CLI-\d{6}'
+#     - '\bACCT[A-Z]{2}\d{4}\b'
+#   # spaCy model per language. These are the defaults.
+#   models:
+#     fr: fr_core_news_lg
+#     en: en_core_web_lg
