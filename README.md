@@ -799,7 +799,7 @@ areas:
   coding: [coding, coding_quality, coding_fast]   # per-area numbers, used inside those tiers
 ```
 
-Traces keep ids, scores, token usage, and a SHA-256 and length of the prompt and of the output; no prompt or response text unless `capture_content: true` (logs a startup WARNING). Scoring reads text, so it needs a capturing store and refuses digest-only traces naming the trace. Trace directory is `0700`, files `0600`. Record traces, score them offline against a rubric, aggregate, and restart: `python -m routellm.quality_scores score --traces .routellm_traces --scorer rubric:./rubric.yaml` then `aggregate --scores scores.jsonl --out quality.yaml`. Scoring needs the `fit` extra; aggregation needs nothing. An endpoint the sidecar does not name keeps the number it has, and each override logs one line naming both. The whole loop is in [docs/runbooks/traces-to-quality.md](docs/runbooks/traces-to-quality.md).
+Traces keep ids, scores, token usage, and a SHA-256 and length of the prompt and of the output; no prompt or response text unless `capture_content: true` (logs a startup WARNING). With a [policy](#policy-file) loaded, `capture_content: true` stores text only for a request whose effective class (the decision's, else the declared one) has treatment `raw`; a `redact`, `block` or `vault` class, or one the policy does not list, keeps digests, and the trace records `metadata.content_captured: false` with `metadata.content_withheld_reason` (`class_treatment:<treatment>` or `class_unknown`). Shadow and comparison traces follow the class of the request they ran for. Scoring reads text, so it needs a capturing store and refuses digest-only traces naming the trace. Trace directory is `0700`, files `0600`. Record traces, score them offline against a rubric, aggregate, and restart: `python -m routellm.quality_scores score --traces .routellm_traces --scorer rubric:./rubric.yaml` then `aggregate --scores scores.jsonl --out quality.yaml`. Scoring needs the `fit` extra; aggregation needs nothing. An endpoint the sidecar does not name keeps the number it has, and each override logs one line naming both. The whole loop is in [docs/runbooks/traces-to-quality.md](docs/runbooks/traces-to-quality.md).
 
 ### Comparison routing
 
@@ -828,7 +828,7 @@ traces:                       # the trace store; off unless enabled
   trace_dir: .routellm_traces # relative to this file
   max_files: 10000
   max_bytes: 536870912
-  capture_content: false      # true stores prompt and response text in plaintext
+  capture_content: false      # true stores prompt and response text in plaintext (raw classes only under a policy)
 ```
 
 `config.example.yaml` carries the same section, commented, with every key.

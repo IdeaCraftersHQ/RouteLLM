@@ -86,6 +86,7 @@ class CallMixin:
                 latency_ms=result["metrics"]["latency_ms"],
                 comparison=comparison,
                 score=result["score"],
+                request_ctx=reqs,
             )
         except Exception as exc:
             logger.warning("recording comparison trace failed: %s", exc)
