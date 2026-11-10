@@ -25,7 +25,7 @@ class DomainIntentDetector:
     def __init__(
         self,
         intent_mappings: list[IntentModelMapping],
-        embedding_model: str = "text-embedding-ada-002",
+        embedding_model: str | None = None,
         examples_per_intent: int = 5,
         cache_path: str | None = None,
     ):
@@ -36,8 +36,8 @@ class DomainIntentDetector:
         intent_mappings : list[IntentModelMapping]
             List of intent mappings.
         embedding_model : str, optional
-            Model to use for generating embeddings (default
-            "text-embedding-ada-002").
+            litellm model name to embed with. None (the default) embeds
+            through the registry embedding endpoint, like the routers.
         examples_per_intent : int, optional
             Number of examples to use per intent for fine-tuning (default 5).
         cache_path : str, optional
@@ -95,14 +95,16 @@ class DomainIntentDetector:
             return self.embedding_cache[text]
 
         try:
-            # Import here to avoid circular imports
-            from litellm import embedding
+            if self.embedding_model is None:
+                from routellm.routers.embeddings import embed
 
-            # Get embedding
-            response = embedding(model=self.embedding_model, input=text)
+                embedding_vector = np.array(embed(text))
+            else:
+                # Import here to avoid circular imports
+                from litellm import embedding
 
-            # Extract embedding
-            embedding_vector = np.array(response["data"][0]["embedding"])
+                response = embedding(model=self.embedding_model, input=text)
+                embedding_vector = np.array(response["data"][0]["embedding"])
 
             # Cache embedding
             self.embedding_cache[text] = embedding_vector
@@ -111,7 +113,7 @@ class DomainIntentDetector:
         except Exception as e:
             print(f"Error getting embedding: {e}")
             # Return zero vector as fallback
-            return np.zeros(1536)  # Default size for text-embedding-ada-002
+            return np.zeros(1536)  # Default embedding width
 
     def _update_intent_embeddings(self, intent: str) -> None:
         """Update embeddings for a specific intent.

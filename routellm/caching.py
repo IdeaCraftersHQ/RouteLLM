@@ -14,7 +14,7 @@ import time
 from typing import Any
 
 import numpy as np
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +35,10 @@ class CacheConfig(BaseModel):
     semantic_threshold : float
         Cosine similarity threshold for semantic matching in [0, 1].
         Default: 0.95.
-    embedding_model : str
-        Model name for generating embeddings. Default: "text-embedding-3-small".
+
+    Semantic matching embeds prompts through the embedding endpoint
+    (`embeddings.endpoint`, else the endpoint named `embedding`); there is
+    no model setting here and no default.
     """
 
     enabled: bool = False
@@ -44,7 +46,16 @@ class CacheConfig(BaseModel):
     ttl_seconds: int = 86400  # 24 hours
     semantic_enabled: bool = False
     semantic_threshold: float = 0.95
-    embedding_model: str = "text-embedding-3-small"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_embedding_model(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "embedding_model" in data:
+            raise ValueError(
+                "embedding_model is gone: semantic matching embeds through the registry; "
+                "name the endpoint with `embeddings.endpoint` or define one named 'embedding'"
+            )
+        return data
 
 
 def conversation_key(messages: Any) -> str:
@@ -374,7 +385,7 @@ class Cache:
         )
 
     def _get_embedding(self, text: str) -> np.ndarray:
-        """Generate embedding vector for text via LiteLLM.
+        """Generate embedding vector for text through the embedding endpoint.
 
         Parameters
         ----------
@@ -386,7 +397,6 @@ class Cache:
         np.ndarray
             Embedding vector (float32).
         """
-        from litellm import embedding
+        from routellm.routers.embeddings import embed
 
-        res = embedding(model=self.config.embedding_model, input=[text])
-        return np.array(res.data[0]["embedding"], dtype=np.float32)
+        return np.array(embed(text), dtype=np.float32)

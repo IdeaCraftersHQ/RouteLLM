@@ -8,6 +8,7 @@ import pytest
 
 from routellm.caching import CacheConfig
 from routellm.controller import Controller
+from routellm.endpoints import Endpoint, EndpointRegistry
 from routellm.quality import CanaryConfig, FineTuneConfig, QualityManager
 from routellm.resilience import ResilienceConfig
 from routellm.traffic import (
@@ -97,6 +98,18 @@ def e2e_controller(tmp_path):
         routers=["random"],
         strong_model="gpt-4",
         weak_model="gpt-3.5-turbo",
+        # Semantic matching embeds through the registry; the embedding
+        # call itself is stubbed by `_offline_embeddings`.
+        endpoints=EndpointRegistry(
+            {
+                "embedding": Endpoint(
+                    name="embedding",
+                    model="openai/embed-model",
+                    api_base="http://127.0.0.1:9/v1",
+                    tags=["local"],
+                )
+            }
+        ),
         resilience_config=ResilienceConfig(max_retries=1, initial_backoff_ms=0),
         cache_config=CacheConfig(db_path=db_path, enabled=True, semantic_enabled=True),
         traffic_manager=tm,

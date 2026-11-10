@@ -46,6 +46,7 @@ from routellm.server_config import (
     SERVER_SECTIONS,
     build_cache_config,
     build_comparison_config,
+    build_embedding_endpoint,
     build_quality_manager,
     build_resilience_config,
 )
@@ -605,6 +606,8 @@ async def lifespan(app):
         strict_registry=endpoints.strict_registry,
         policy=POLICY,
         egress_gates=build_egress_gates(file_config),
+        embedding_endpoint=build_embedding_endpoint(file_config),
+        allow_remote_embeddings=args.allow_remote_embeddings,
     )
     yield
     CONTROLLER = None
@@ -1222,6 +1225,17 @@ parser.add_argument(
         "--strong-model/--weak-model values, the legacy default pair, and "
         "raw targets in traffic rules, canary and load balancers fail at "
         "startup. Same as `strict_registry: true` in the config."
+    ),
+)
+parser.add_argument(
+    "--allow-remote-embeddings",
+    action="store_true",
+    help=(
+        "When the `mf` or `sw_ranking` router or the semantic cache is in use "
+        "and the config names no embedding endpoint (`embeddings.endpoint`, or "
+        "an endpoint called `embedding`), embed through OPENAI_BASE_URL / "
+        "OPENAI_API_KEY instead of refusing to start. Logs a WARNING naming "
+        "the host; no policy can gate that call."
     ),
 )
 parser.add_argument(

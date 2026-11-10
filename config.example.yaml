@@ -47,6 +47,9 @@ mf:
 # hits. Stream requests are never cached. The database holds prompts and
 # completions in plaintext and is created owner-only (0600). A relative
 # `db_path` resolves against this file's directory.
+# `semantic_enabled: true` also matches near-identical last turns by
+# embedding (see `embeddings:` below), and refuses to start with no
+# embedding endpoint.
 cache:
   enabled: false
   db_path: .routellm_cache.db
@@ -255,14 +258,25 @@ endpoints:
     api_base: ${ROUTE_LOCAL_BASE:-http://127.0.0.1:11434/v1}
     tags: [local]
 
-  # The `mf` and `sw_ranking` routers embed each prompt before scoring
-  # it. This endpoint supplies the base URL and the credential for those
-  # calls and nothing else: each router keeps its own `embedding_model`,
-  # so the `model` written here is never sent. Without this endpoint the
-  # embedding client falls back to OPENAI_BASE_URL / OPENAI_API_KEY.
+  # The `mf` and `sw_ranking` routers and the semantic cache embed prompt
+  # text. All three send it to ONE registry endpoint, so its `model`,
+  # `api_base`, `api_key_env`, `extra` and its reach/`jur:` tags apply like
+  # any call's and a class policy or egress gate can name it. There is no
+  # default endpoint or model: a server using any of them and having no
+  # endpoint called `embedding` (or the one `embeddings.endpoint` names)
+  # refuses to start. `mf` expects 1536-wide vectors. Point it at a local
+  # embedding server to keep prompts on the host; tag it `local`.
   embedding:
-    model: text-embedding-3-small
-    api_key_env: OPENAI_API_KEY
+    model: openai/<your-embedding-model>
+    api_base: ${ROUTE_EMBED_BASE:-http://127.0.0.1:11434/v1}
+    api_key_env: ROUTE_EMBED_KEY
+    tags: [local]
+
+# Which endpoint embeds prompts (optional; the one named `embedding` when
+# unset). `--allow-remote-embeddings` instead falls back to OPENAI_BASE_URL
+# / OPENAI_API_KEY when there is none, with a WARNING naming the host.
+# embeddings:
+#   endpoint: embedding
 
 # Intent detection (optional; off unless `model` is set). It picks a
 # tier from the prompt. `model` must name an endpoint above: there is

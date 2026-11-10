@@ -14,7 +14,7 @@ import numpy as np
 from routellm.routers._ml import require_ml
 from routellm.routers.base import Router, no_parallel
 from routellm.routers.causal_llm.configs import RouterModelConfig
-from routellm.routers.embeddings import get_embedding_client
+from routellm.routers.embeddings import embed
 from routellm.routers.registry import (
     ROUTER_CLS,
     discover_routers,
@@ -47,6 +47,8 @@ class CausalLLMRouter(Router):
 
     Non-parallelizable: maintains model state during inference.
     """
+
+    requires_embedding = True
 
     def __init__(
         self,
@@ -215,6 +217,8 @@ class SWRankingRouter(Router):
     on expected strong model win rate relative to weak model.
     """
 
+    requires_embedding = True
+
     def __init__(
         self,
         arena_battle_datasets,
@@ -259,7 +263,6 @@ class SWRankingRouter(Router):
             for dataset in arena_embedding_datasets
         ]
         self.arena_conv_embedding = np.concatenate(embeddings)
-        self.embedding_model = "text-embedding-3-small"
 
         assert len(self.arena_df) == len(self.arena_conv_embedding), (
             "Number of battle embeddings is mismatched to data"
@@ -306,11 +309,7 @@ class SWRankingRouter(Router):
         float
             Strong model expected win rate in [0, 1].
         """
-        prompt_emb = (
-            (get_embedding_client().embeddings.create(input=[prompt], model=self.embedding_model))
-            .data[0]
-            .embedding
-        )
+        prompt_emb = embed(prompt)
         similarities = np.dot(self.arena_conv_embedding, prompt_emb) / (
             np.linalg.norm(self.arena_conv_embedding, axis=1) * np.linalg.norm(prompt_emb)
         )

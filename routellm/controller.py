@@ -39,7 +39,7 @@ from routellm.payment.types import PaymentChallenge
 from routellm.policy import Policy, PolicyDenied
 from routellm.quality import QualityManager
 from routellm.resilience import EndpointsCooling, Resilience, ResilienceConfig
-from routellm.routers.embeddings import configure_embeddings
+from routellm.routers.embeddings import configure_embeddings, require_embeddings
 from routellm.routers.routers import ROUTER_CLS
 from routellm.routing import (
     forced_side,
@@ -125,6 +125,10 @@ def _has_selector(registry: EndpointRegistry) -> bool:
     )
 
 
+def _needs_embedding(router_cls) -> bool:
+    return bool(getattr(router_cls, "requires_embedding", False))
+
+
 class Controller:
     """Main router controller for intelligent model routing.
 
@@ -158,6 +162,8 @@ class Controller:
         decision=None,
         policy: Policy | None = None,
         egress_gates: EgressGates | None = None,
+        embedding_endpoint: str | None = None,
+        allow_remote_embeddings: bool = False,
     ):
         """Initialize controller with routers and configuration.
 
@@ -200,6 +206,14 @@ class Controller:
             Configuration for circuit breaker and retry logic.
         cache_config : CacheConfig, optional
             Configuration for completion caching.
+        embedding_endpoint : str, optional
+            Registry endpoint the `mf` and `sw_ranking` routers and the
+            semantic cache embed prompts through; the endpoint named
+            `embedding` when None. There is no default model: startup
+            fails when one of them is in use and no endpoint exists.
+        allow_remote_embeddings : bool
+            Fall back to OPENAI_BASE_URL / OPENAI_API_KEY when no
+            endpoint exists, with a WARNING naming the host. Default False.
         traffic_manager : TrafficManager, optional
             Traffic management and load balancing.
         quality_manager : QualityManager, optional
@@ -342,9 +356,7 @@ class Controller:
         if config is None:
             config = GPT_4_AUGMENTED_CONFIG
 
-        # Routers that embed prompts build their client on first use;
-        # point it at the `embedding` endpoint before any is constructed.
-        configure_embeddings(self.endpoints)
+        configure_embeddings(self.endpoints, embedding_endpoint, allow_remote_embeddings)
 
         # A tier's router must exist too, but it is named in the config
         # file rather than on the command line, so it is checked here
@@ -372,6 +384,13 @@ class Controller:
                 f"{', '.join(collisions)}. Tier and router names must be "
                 "distinct."
             )
+
+        # Anything that embeds prompts needs an explicit endpoint, checked
+        # before a router loads its datasets.
+        embedders = [f"router {r!r}" for r in to_build if _needs_embedding(ROUTER_CLS[r])]
+        if cache_config is not None and cache_config.enabled and cache_config.semantic_enabled:
+            embedders.append("the semantic cache")
+        self.embedding_endpoint = require_embeddings(embedders)
 
         router_pbar = None
         if self.progress_bar:

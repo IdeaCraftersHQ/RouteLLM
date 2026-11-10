@@ -1,23 +1,30 @@
-"""Lazily built OpenAI client for the routers that embed prompts.
+"""Prompt embeddings, resolved through the endpoint registry.
 
-Only two routers embed at route time, and both do so inside a method.
-Building the client at import made `import routellm.routers.routers`
-fail without `OPENAI_API_KEY`, even for a server whose routers never
-embed. The client is therefore built on first use and cached here.
+Three things embed prompt text at request time: the `mf` and
+`sw_ranking` routers, and the semantic cache. All three call `embed`,
+which sends the text to one registry endpoint, so the call carries that
+endpoint's reach and jurisdiction tags like any model call and a class
+policy or egress gate can name it.
 
-The controller calls `configure_embeddings` with its endpoint registry
-before constructing routers, so an endpoint named `embedding` can point
-the embedding calls at a different provider than the completions. Its
-base URL and its credential are taken independently, each falling back
-to `OPENAI_BASE_URL` / `OPENAI_API_KEY` on its own, so an endpoint
-naming a host but no key still reaches that host.
+There is no default endpoint and no default model. The endpoint is the
+one named by the config's `embeddings.endpoint`, else the one named
+`embedding`; its `model`, `api_base`, `api_key_env` and `extra` are used
+as written. A server that needs embeddings and has neither refuses to
+start (`require_embeddings`).
+
+`--allow-remote-embeddings` restores the legacy path for a server with no
+such endpoint: the `OPENAI_BASE_URL` / `OPENAI_API_KEY` environment and
+the embedding model that path always used. It logs a WARNING naming the
+host the prompts go to, and no tag describes that call, so no policy can
+gate it.
+
+The controller calls `configure_embeddings` before building its routers
+and its cache. Importing this module builds nothing.
 """
 
 import logging
 import os
-from typing import Optional
-
-import openai
+from urllib.parse import urlparse
 
 from routellm.endpoints import EndpointRegistry
 
@@ -25,97 +32,140 @@ logger = logging.getLogger(__name__)
 
 EMBEDDING_ENDPOINT = "embedding"
 
+#: Model sent on the opt-in environment path only; a registry endpoint
+#: always supplies its own.
+LEGACY_ENV_MODEL = "openai/text-embedding-3-small"
+LEGACY_ENV_HOST = "api.openai.com"
+
 _registry: EndpointRegistry | None = None
-_client: Optional["openai.OpenAI"] = None
+_endpoint: str | None = None
+_allow_remote: bool = False
 
 
-def configure_embeddings(registry: EndpointRegistry | None) -> None:
-    """Set the registry consulted for the `embedding` endpoint.
-
-    Called by the controller before it constructs its routers. Does not
-    build a client; the next `get_embedding_client` call does.
+def configure_embeddings(
+    registry: EndpointRegistry | None,
+    endpoint: str | None = None,
+    allow_remote: bool = False,
+) -> None:
+    """Set where embeddings go. Builds and checks nothing.
 
     Parameters
     ----------
     registry : EndpointRegistry, optional
-        Registry to search for an endpoint named `embedding`. None
-        clears any previously configured registry, leaving the
-        environment as the only source.
+        Registry searched for the embedding endpoint. None clears it.
+    endpoint : str, optional
+        Name of the registry endpoint to use; `embedding` when None.
+    allow_remote : bool
+        Permit the environment fallback when no endpoint exists.
     """
-    global _registry, _client
+    global _registry, _endpoint, _allow_remote
 
     _registry = registry
-    _client = None
+    _endpoint = endpoint
+    _allow_remote = allow_remote
 
 
 def reset_embedding_client() -> None:
-    """Drop the cached client and the configured registry.
-
-    Intended for tests, which need each case to build its own client.
-    """
-    global _registry, _client
-
-    _registry = None
-    _client = None
+    """Forget the registry, endpoint name and fallback flag. For tests."""
+    configure_embeddings(None)
 
 
-def get_embedding_client() -> "openai.OpenAI":
-    """Return the shared embedding client, building it on first use.
+def embedding_endpoint_name() -> str | None:
+    """Return the registry endpoint embeddings go to, or None when there is none."""
+    if _registry is None:
+        return None
+    name = _endpoint or EMBEDDING_ENDPOINT
+    return name if name in _registry.names() else None
 
-    Sources, per field: an endpoint named `embedding` in the configured
-    registry, then the `OPENAI_BASE_URL` / `OPENAI_API_KEY` environment
-    variables. Base URL and key resolve separately, so an endpoint may
-    supply either one alone. The result is cached until
-    `configure_embeddings` or `reset_embedding_client` is called.
+
+def require_embeddings(consumers: list[str]) -> str | None:
+    """Fail startup unless embeddings can be sent somewhere explicit.
+
+    Parameters
+    ----------
+    consumers : list[str]
+        What needs embeddings (`"router 'mf'"`, `"the semantic cache"`).
+        Empty means nothing does; a configured name is still checked.
 
     Returns
     -------
-    openai.OpenAI
-        Client to use for embedding calls.
+    str or None
+        The registry endpoint in use, or None on the opt-in environment
+        path.
 
     Raises
     ------
     ValueError
-        If the `embedding` endpoint names an environment variable that
-        is not set.
-    RuntimeError
-        If neither source supplies a key.
+        If the configured endpoint is not in the registry, or a
+        consumer needs one and there is none and the fallback is off.
     """
-    global _client
-
-    if _client is not None:
-        return _client
-
-    base_url, api_key = _resolve_credentials()
-    if api_key is None:
-        raise RuntimeError(
-            "No credentials for prompt embedding. Configure an endpoint "
-            f"named {EMBEDDING_ENDPOINT!r} in the `endpoints:` section of "
-            "the config, or set OPENAI_API_KEY (with OPENAI_BASE_URL for a "
-            "non-OpenAI provider)."
+    if _registry is not None and _endpoint and _endpoint not in _registry.names():
+        raise ValueError(
+            f"`embeddings.endpoint: {_endpoint}` is not a registry endpoint. "
+            f"Configured endpoints: {', '.join(_registry.names()) or '<none>'}"
         )
-
-    _client = openai.OpenAI(base_url=base_url, api_key=api_key)
-    return _client
-
-
-def _resolve_credentials() -> tuple[str | None, str | None]:
-    """Return the `(base_url, api_key)` pair for the embedding client."""
-    env_base = os.environ.get("OPENAI_BASE_URL")
-    env_key = os.environ.get("OPENAI_API_KEY")
-
-    if _registry is None or EMBEDDING_ENDPOINT not in _registry.names():
-        return env_base, env_key
-
-    endpoint = _registry.get(EMBEDDING_ENDPOINT)
-    # Base URL and credential are resolved independently: an endpoint
-    # naming a host but no key must keep that host, or the environment's
-    # key would send the embeddings to OpenAI instead.
-    base_url, api_key = endpoint.credentials(env_base, env_key)
-    if api_key is None:
-        logger.debug(
-            "endpoint %s carries no credential and none is in the environment",
-            EMBEDDING_ENDPOINT,
+    name = embedding_endpoint_name()
+    if name is not None:
+        endpoint = _registry.get(name)
+        logger.info(
+            "embeddings via endpoint %s (reach: %s)",
+            name,
+            ", ".join(sorted(endpoint.reach)) or "untagged",
         )
+        return name
+    if not consumers:
+        return None
+    if not _allow_remote:
+        raise ValueError(
+            f"{', '.join(consumers)} embed(s) prompts and no embedding endpoint is "
+            f"configured. Define an endpoint named {EMBEDDING_ENDPOINT!r} under "
+            "`endpoints:`, or name one with `embeddings.endpoint: <endpoint>`. "
+            "`--allow-remote-embeddings` falls back to OPENAI_BASE_URL / OPENAI_API_KEY."
+        )
+    logger.warning(
+        "--allow-remote-embeddings: %s embed(s) prompts through the environment, "
+        "sending them to %s; no tag describes this call, so no policy can gate it",
+        ", ".join(consumers),
+        _env_host(),
+    )
+    return None
 
-    return base_url, api_key
+
+def _env_host() -> str:
+    base = os.environ.get("OPENAI_BASE_URL")
+    return (urlparse(base).hostname if base else None) or LEGACY_ENV_HOST
+
+
+def _call_params() -> tuple[str, str | None, str | None, dict]:
+    """Return `(model, api_base, api_key, extra)` for one embedding call."""
+    name = embedding_endpoint_name()
+    if name is not None:
+        endpoint = _registry.get(name)
+        base, key = endpoint.credentials(None, None)
+        return endpoint.model, base, key, dict(endpoint.extra)
+    if _allow_remote:
+        return (
+            LEGACY_ENV_MODEL,
+            os.environ.get("OPENAI_BASE_URL"),
+            os.environ.get("OPENAI_API_KEY"),
+            {},
+        )
+    raise RuntimeError(
+        "No embedding endpoint is configured: define an endpoint named "
+        f"{EMBEDDING_ENDPOINT!r} or set `embeddings.endpoint`."
+    )
+
+
+def embed(text: str) -> list[float]:
+    """Embed one text through the configured endpoint.
+
+    Raises
+    ------
+    RuntimeError
+        If no endpoint is configured and the fallback is off.
+    """
+    from litellm import embedding
+
+    model, base, key, extra = _call_params()
+    res = embedding(model=model, input=[text], api_base=base, api_key=key, **extra)
+    return list(res.data[0]["embedding"])

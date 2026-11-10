@@ -229,7 +229,7 @@ In the above examples, GPT-4 and Mixtral 8x7B are used as the model pair, but yo
 
 We leverage [LiteLLM](https://github.com/BerriAI/litellm) to support chat completions from a wide-range of open-source and closed models. In general, you need a setup an API key and point to the provider with the appropriate model name. Alternatively, you can also use **any OpenAI-compatible endpoint** by prefixing the model name with `openai/` and setting the `--base-url` and `--api-key` flags.
 
-Note that regardless of the model pair used, an `OPENAI_API_KEY` will currently still be required to generate embeddings for the `mf` and `sw_ranking` routers.
+The `mf` and `sw_ranking` routers and the semantic cache embed prompts through a registry endpoint (see [How a router embeds a prompt](#how-a-router-embeds-a-prompt)); there is no default embedding provider.
 
 Instructions for setting up your API keys for popular providers:
 - Local models with Ollama: see [this guide](examples/routing_to_local_models.md)
@@ -1224,25 +1224,24 @@ register_router("myrouter", MyRouterClass)
 
 A plugin that fails to import is skipped with a warning and shown in the error when its name is requested.
 
-### How a router gets the embedding client
+### How a router embeds a prompt
 
-A router that embeds the prompt before scoring it — `mf` and `sw_ranking` do — must not build an OpenAI client at import: that made `import routellm.routers.routers` fail without `OPENAI_API_KEY` even for a server whose routers never embed. Call `get_embedding_client()` from `routellm/routers/embeddings.py` inside the method that embeds instead:
+A router that embeds the prompt before scoring it — `mf` and `sw_ranking` do — sets `requires_embedding = True` and calls `embed(text)` from `routellm/routers/embeddings.py` inside the method that embeds:
 
 ```python
-from routellm.routers.embeddings import get_embedding_client
+from routellm.routers.embeddings import embed
 
 class MyRouter(Router):
-    def __init__(self):
-        self.embedding_model = "text-embedding-3-small"
+    requires_embedding = True
 
     def calculate_strong_win_rate(self, prompt):
-        vector = get_embedding_client().embeddings.create(
-            input=[prompt], model=self.embedding_model
-        )
+        vector = embed(prompt)
         ...
 ```
 
-The client is built on first call and cached. The controller calls `configure_embeddings` with its endpoint registry before constructing any router, so an endpoint named `embedding` in the config points those calls at a different provider than the completions; with no such endpoint, the client falls back to `OPENAI_BASE_URL` / `OPENAI_API_KEY`. The two fields resolve independently, so an endpoint naming an `api_base` but no `api_key_env` keeps that base and takes only the key from the environment. That endpoint supplies the base URL and the credential only — the model each router embeds with stays the router's own `embedding_model`. When neither source supplies a key, the first embedding call raises a `RuntimeError` naming both ways to fix it. Tests that need their own client call `reset_embedding_client()`.
+`embed` sends the text to one registry endpoint: the one `embeddings.endpoint` names, else the endpoint called `embedding`. The endpoint's `model`, `api_base`, `api_key_env` and `extra` are used as written, so the call carries its reach and `jur:` tags like any model call. The semantic cache embeds through the same endpoint. There is no default endpoint and no default model: a server that loads such a router, or enables `cache.semantic_enabled`, with no endpoint refuses to start and names the missing key. The startup log names the endpoint and its reach.
+
+`--allow-remote-embeddings` falls back, for a server with no endpoint, to `OPENAI_BASE_URL` / `OPENAI_API_KEY`, with a WARNING naming the host the prompts go to. No tag describes that call, so no policy can gate it. Tests that need their own configuration call `configure_embeddings(registry, endpoint)` and `reset_embedding_client()`.
 
 ### Adding a new benchmark
 
