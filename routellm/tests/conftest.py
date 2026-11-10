@@ -27,18 +27,36 @@ def _pairing_installed() -> bool:
     return True
 
 
+def _redact_installed() -> bool:
+    """The `redact` extra and both default spaCy models are present."""
+    try:
+        import presidio_analyzer  # noqa: F401
+        import spacy.util
+    except ImportError:
+        return False
+    from routellm.redact.presidio_adapter import DEFAULT_MODELS
+
+    return all(spacy.util.is_package(m) for m in DEFAULT_MODELS.values())
+
+
 def pytest_collection_modifyitems(config, items):
-    """Skip `@pytest.mark.pairing` tests when the `pairing` extra is absent.
+    """Skip tests that need an optional extra when it is absent.
 
     A test that needs an optional extra must skip, naming the extra,
     rather than fail with a bare `ModuleNotFoundError`.
     """
-    if _pairing_installed():
-        return
-    skip = pytest.mark.skip(reason="needs the 'pairing' extra: pip install 'routellm[pairing]'")
-    for item in items:
-        if item.get_closest_marker("pairing"):
-            item.add_marker(skip)
+    if not _pairing_installed():
+        skip = pytest.mark.skip(reason="needs the 'pairing' extra: pip install 'routellm[pairing]'")
+        for item in items:
+            if item.get_closest_marker("pairing"):
+                item.add_marker(skip)
+    if not _redact_installed():
+        skip = pytest.mark.skip(
+            reason="needs the 'redact' extra and its spaCy models: see docs/redact.md"
+        )
+        for item in items:
+            if item.get_closest_marker("redact"):
+                item.add_marker(skip)
 
 
 @pytest.fixture(autouse=True)

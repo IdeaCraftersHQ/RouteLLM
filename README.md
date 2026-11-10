@@ -126,6 +126,14 @@ the model-backed routers.
 Supported litellm versions: `>=1.106.4,<1.107`. CI runs the suite on the oldest
 and the newest version in that range.
 
+**PII analysis (optional)**
+
+`routellm.redact.analyze(text, "fr")` returns character spans for personal
+data (person, location, email, phone, IBAN, card, Canadian SIN, RAMQ,
+postal code, amounts, date of birth, your own client ids), fully offline.
+Pattern recognizers work on a base install; the named-entity tier needs
+the `redact` extra and two spaCy models. See [docs/redact.md](docs/redact.md).
+
 **Policy-based pairing (optional)**
 
 A tier side may select over the configured endpoints instead of naming
