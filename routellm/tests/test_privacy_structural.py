@@ -21,7 +21,8 @@ for _module in CASE_MODULES:
 
 BREAKER = ["breaker_open_on_every_local_leaf"]
 BATCH = [n for n in CASES if n not in BREAKER and not CASES[n].policy]
-POLICY_BATCH = [n for n in CASES if CASES[n].policy and not CASES[n].gate]
+POLICY_BATCH = [n for n in CASES if CASES[n].policy and not CASES[n].gate and not CASES[n].route]
+ROUTE_BATCH = [n for n in CASES if CASES[n].route]
 GATE_BATCH = [n for n in CASES if CASES[n].gate]
 
 
@@ -52,6 +53,42 @@ def gate_results(tmp_path_factory):
         extra_config=pf.GATE_CONFIG,
         class_policy=True,
     )
+
+
+@pytest.fixture(scope="module")
+def route_results(tmp_path_factory):
+    return pf.run_cases(tmp_path_factory.mktemp("privacy-route"), ROUTE_BATCH, route=True)
+
+
+@pytest.mark.parametrize("name", ROUTE_BATCH)
+def test_a_route_policy_only_narrows_and_private_never_leaves_the_host(name, route_results):
+    check(name, route_results[name])
+
+
+def test_a_missing_unknown_or_invalid_project_takes_the_default_policy(route_results):
+    froms = {
+        "route_no_project_header_takes_the_default_policy_and_stays_local": "absent",
+        "route_unknown_project_takes_the_default_policy_and_stays_local": "unknown",
+        "route_invalid_project_takes_the_default_policy_and_stays_local": "invalid",
+    }
+    for name, why in froms.items():
+        obs = route_results[name]["obs"]
+        assert (obs["policy"], obs["from"]) == ("default", why), name
+
+
+def test_a_policy_that_would_widen_a_class_is_refused_naming_class_and_tier(route_results):
+    message = route_results["route_a_policy_cannot_widen_a_class"]["obs"]["message"]
+    assert "'private'" in message and "'general'" in message
+
+
+def test_attribute_headers_are_not_forwarded(route_results):
+    obs = route_results["route_attribute_headers_never_reach_an_upstream"]["obs"]
+    assert obs["forwarded"] == []
+
+
+def test_the_route_control_reaches_the_cloud(route_results):
+    got = route_results["route_control_open_project_general_reaches_the_cloud"]
+    assert got["hits"]["cloud_main"] >= 1 and got["obs"]["policy"] == "open-project"
 
 
 @pytest.mark.parametrize("name", GATE_BATCH)

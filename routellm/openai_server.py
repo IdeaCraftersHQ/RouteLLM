@@ -34,6 +34,7 @@ from routellm.middleware.intent_model_selector import (
     IntentModelSelector,
 )
 from routellm.policy import PolicyDenied, build_policy, check_decision_classes
+from routellm.policy_routing import build_policy_routing, current_attributes
 from routellm.request_class import (
     RequestClassRefusal,
     check_policy_principals,
@@ -376,6 +377,7 @@ def build_router_config(file_config: dict | None) -> dict | None:
         "strict_registry",
         "policy",
         "egress_gates",
+        "policy_routing",
         *SERVER_SECTIONS,
     ):
         router_config.pop(key, None)
@@ -605,6 +607,7 @@ async def lifespan(app):
         strict_registry=endpoints.strict_registry,
         policy=POLICY,
         egress_gates=build_egress_gates(file_config),
+        policy_routing=build_policy_routing(file_config, POLICY),
     )
     yield
     CONTROLLER = None
@@ -867,6 +870,20 @@ def _declare(request: "ChatCompletionRequest", http_request: Request):
     return rc
 
 
+def _attributes(http_request: Request):
+    """The request's routing attributes, attached to its context; None without policy routing.
+
+    Read from headers only and never forwarded: no header is copied upstream.
+    """
+    router = CONTROLLER.policy_routing
+    if router is None:
+        return None
+    attrs = router.attributes(http_request.headers)
+    http_request.state.attributes = attrs
+    current_attributes.set(attrs)
+    return attrs
+
+
 def _class_refusal(exc: RequestClassRefusal) -> JSONResponse:
     return JSONResponse(ErrorResponse(message=str(exc)).model_dump(), status_code=exc.status)
 
@@ -934,6 +951,7 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
             request_id=request_id,
             principal=http_request.state.principal,
             declared_class=declared.data_class,
+            attributes=_attributes(http_request),
             compare=http_request.headers.get(COMPARE_HEADER),
             **forwarded,
         )

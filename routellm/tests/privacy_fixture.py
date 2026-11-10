@@ -57,6 +57,7 @@ CASE_MODULES = [
     "routellm.tests.privacy_cases_selectors",
     "routellm.tests.privacy_cases_class_policy",
     "routellm.tests.privacy_cases_egress_gate",
+    "routellm.tests.privacy_cases_policy_routing",
 ]
 
 #: The caller every class-policy case sends as, and its key.
@@ -207,8 +208,56 @@ GATE_CONFIG = {
 }
 
 
-def class_policy_files(tmp_path: Path) -> dict:
-    """Write the policy and the keys file; return the config keys naming them."""
+#: Route world: header names, labels and projects of its `policy_routing:`.
+ROUTE_PROJECT_HEADER = "X-Route-Project"
+ROUTE_CLIENT_HEADER = "X-Route-Client"
+OPEN_PROJECT = "open-project"
+
+
+def route_config() -> dict:
+    """The route world's extra config: an entry tier and a `policy_routing:` section.
+
+    The default policy is the fail-closed one: its floor is `private` and
+    it may use the private tier only, so a request with no project, an
+    unknown one or a malformed one stays on the host. `open-project`
+    lowers the floor to `general` and may also use `general`. The client
+    rule is listed before the class rule on purpose: it is how a
+    misconfigured policy would try to send a private request to the cloud.
+    """
+    pair = {"router": "random", "threshold": 0.0}
+    return {
+        "tiers": {
+            **tiers(),
+            **policy_tiers(),
+            "route_entry": {**pair, "strong": "local_main", "weak": "local_small"},
+        },
+        "policy_routing": {
+            "attributes": {
+                "project": {"header": ROUTE_PROJECT_HEADER},
+                "client": {"header": ROUTE_CLIENT_HEADER},
+            },
+            "key": "project",
+            "entry": ["route_entry"],
+            "rules": [
+                {"when": {"client": "ci"}, "tier": "general"},
+                {"when": {"class": "private"}, "tier": "private"},
+            ],
+            "else": "general",
+            "policies": {
+                "default": {"data_class": "private", "tiers": ["private"], "fallback": "private"},
+                OPEN_PROJECT: {"data_class": "general", "tiers": ["private", "general"]},
+            },
+        },
+    }
+
+
+def class_policy_files(tmp_path: Path, route: bool = False) -> dict:
+    """Write the policy and the keys file; return the config keys naming them.
+
+    `route` writes the two-class policy of the route world, ordered least
+    to most restrictive (`general`, `private`), which is the order policy
+    routing reads restrictiveness from.
+    """
     leaky = list(policy_tiers())
     gate = list(gate_tiers())
     policy = {
@@ -228,6 +277,12 @@ def class_policy_files(tmp_path: Path) -> dict:
         },
         "principals": {"suite": {"classes": ["private", "leaky", "general"]}},
     }
+    if route:
+        policy["classes"] = {
+            "general": {"treatment": "raw", "reach": ["local", "cloud"], "tiers": ["general"]},
+            "private": policy["classes"]["private"],
+        }
+        policy["principals"] = {"suite": {"classes": ["general", "private"]}}
     (tmp_path / "policy.json").write_text(json.dumps(policy))
     digest = hashlib.sha256(POLICY_KEY.encode()).hexdigest()
     (tmp_path / "keys.yaml").write_text(
@@ -253,13 +308,21 @@ class Case:
     reaches_off_host: bool = False  # the control: off-host leaves ARE expected to be hit
     policy: bool = False  # runs in the class-policy world (see `run_cases`)
     gate: bool = False  # runs in the egress-gate world (policy world plus gates)
+    route: bool = False  # runs in the route world (two classes plus `policy_routing:`)
 
 
 CASES: dict[str, Case] = {}
 
 
 def case(
-    name, status=None, local=None, total=None, reaches_off_host=False, policy=False, gate=False
+    name,
+    status=None,
+    local=None,
+    total=None,
+    reaches_off_host=False,
+    policy=False,
+    gate=False,
+    route=False,
 ):
     """Register a case. `status` and `local` are what the test asserts.
 
@@ -268,7 +331,8 @@ def case(
     which local leaf answers. Off-host leaves are expected at zero unless
     the case is a control (`reaches_off_host=True`). `policy=True` runs
     it only in the class-policy world, `gate=True` only in the egress-gate
-    world (which is the policy world plus `GATE_CONFIG`).
+    world (which is the policy world plus `GATE_CONFIG`), `route=True` only
+    in the route world (see `route_config`).
     """
 
     def deco(fn):
@@ -278,8 +342,9 @@ def case(
             None if total is not None else dict(local or {}),
             total,
             reaches_off_host,
-            policy or gate,
+            policy or gate or route,
             gate,
+            route,
         )
         return fn
 
@@ -321,13 +386,17 @@ class World:
         for name in names or LOCAL:
             self.fakes[name].mode = mode
 
-    def _headers(self, data_class):
-        return {**self.headers, **({"X-Data-Class": data_class} if data_class else {})}
+    def _headers(self, data_class, extra=None):
+        return {
+            **self.headers,
+            **({"X-Data-Class": data_class} if data_class else {}),
+            **(extra or {}),
+        }
 
-    def post(self, model, messages=None, data_class=None, **kw):
+    def post(self, model, messages=None, data_class=None, headers=None, **kw):
         body = {"model": model, "messages": messages or TEXT, **kw}
         return self.client.post(
-            "/v1/chat/completions", json=body, headers=self._headers(data_class)
+            "/v1/chat/completions", json=body, headers=self._headers(data_class, headers)
         )
 
     def stream(self, model, messages=None, data_class=None, **kw):
@@ -401,7 +470,7 @@ print("@@RESULT@@" + json.dumps(out))
 """
 
 
-def run_cases(tmp_path, names, extra_config=None, resilience=None, class_policy=False):
+def run_cases(tmp_path, names, extra_config=None, resilience=None, class_policy=False, route=False):
     """Run the named cases in one subprocess; return {case: {obs, hits}}.
 
     `extra_config` is merged over the fixture config (top-level keys),
@@ -409,8 +478,11 @@ def run_cases(tmp_path, names, extra_config=None, resilience=None, class_policy=
     `class_policy` starts the app under a policy file and an auth key, with
     the extra tiers of `policy_tiers`; cases then declare a class.
     """
+    if route:
+        class_policy = True
+        extra_config = {**route_config(), **(extra_config or {})}
     if class_policy:
-        extra_config = {**class_policy_files(tmp_path), **(extra_config or {})}
+        extra_config = {**class_policy_files(tmp_path, route), **(extra_config or {})}
     # Selector tiers consult the models.dev catalog on construction; an
     # empty snapshot keeps that off the network (tags need no catalog).
     catalog = tmp_path / "models_dev.json"

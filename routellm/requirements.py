@@ -100,6 +100,9 @@ class Requirements:
         carries one is never empty: every candidate is then checked
         against the class's reach and jurisdiction. None (no policy)
         leaves the request exactly as it was.
+    route_policy : str, optional
+        The name of the routing policy policy routing selected, set with
+        `data_class`. Tag lists and `require_policy_allow` gates read it.
     """
 
     vision: bool = False
@@ -108,6 +111,7 @@ class Requirements:
     structured_output: bool = False
     context_needed: int | None = None
     data_class: str | None = None
+    route_policy: str | None = None
 
     def is_empty(self) -> bool:
         """Return whether this request needs nothing in particular.
@@ -128,6 +132,7 @@ class Requirements:
             and not self.structured_output
             and self.context_needed is None
             and self.data_class is None
+            and self.route_policy is None
         )
 
 
