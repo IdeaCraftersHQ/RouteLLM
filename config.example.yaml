@@ -86,6 +86,15 @@ audio_tokens_per_second: 32
 #   allow_private_url_hosts: false   # DANGEROUS: allows non-public addresses (SSRF)
 #   tags: [local]
 
+# Governance tags (optional). Tags are free-form, but `<ns>:<value>`
+# tags need a known namespace: `jur` is built in (at most one per
+# endpoint, lowercase ISO 3166-1 alpha-2, e.g. `jur:ca`); add more here.
+# Reach is the subset of local / vpn / cloud an endpoint carries.
+# `governance: true` makes every endpoint carry a reach tag and exactly
+# one `jur:` tag. Off by default.
+# tag_namespaces: [team]
+# governance: true
+
 # Named endpoints. Each gives a reachable model a stable name that
 # routing, caching, and traces refer to instead of a raw litellm model
 # string. Names match [A-Za-z0-9_]+: hyphens are reserved for the

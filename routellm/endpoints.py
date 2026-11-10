@@ -79,6 +79,7 @@ model-name grammar that splits on '-'.
 import logging
 import os
 import re
+from functools import cached_property
 from typing import Annotated, Any, Literal
 
 from pydantic import (
@@ -93,6 +94,12 @@ from pydantic import (
 
 from routellm.capabilities import Capabilities
 from routellm.requirements import DEFAULT_AUDIO_TOKENS_PER_SECOND
+from routellm.governance import (
+    check_namespaces,
+    check_tag_namespaces_config,
+    parse_jur,
+    parse_reach,
+)
 from routellm.transcription import LOCAL_TAG, TranscriberConfig
 
 logger = logging.getLogger(__name__)
@@ -254,6 +261,22 @@ class Endpoint(BaseModel):
 
         parse_cap(value)
         return value
+
+    @model_validator(mode="after")
+    def _validate_governance_tags(self) -> "Endpoint":
+        """Refuse a malformed or repeated `jur:` tag at construction."""
+        parse_jur(self.name, self.tags)
+        return self
+
+    @cached_property
+    def reach(self) -> frozenset[str]:
+        """The subset of `local`, `vpn`, `cloud` this endpoint carries."""
+        return parse_reach(self.tags)
+
+    @cached_property
+    def jur(self) -> str | None:
+        """The lowercase country code of its one `jur:` tag, or None."""
+        return parse_jur(self.name, self.tags)
 
     @model_validator(mode="after")
     def _validate_cap_needs_pay(self) -> "Endpoint":
@@ -437,6 +460,8 @@ class EndpointRegistry:
         transcriber: dict[str, Any] | None = None,
         intent_targets: list[str] | None = None,
         audio_tokens_per_second: float = DEFAULT_AUDIO_TOKENS_PER_SECOND,
+        governance: bool = False,
+        tag_namespaces: list[str] | None = None,
     ):
         """Initialize the registry.
 
@@ -480,6 +505,12 @@ class EndpointRegistry:
         # estimate; see `routellm.requirements`.
         self.audio_tokens_per_second: float = audio_tokens_per_second
 
+        if not isinstance(governance, bool):
+            raise ValueError("`governance:` must be true or false")
+        self.governance: bool = governance
+        self.known_namespaces: frozenset[str] = check_tag_namespaces_config(tag_namespaces)
+
+        self._validate_governance_tags()
         self._validate_tiers()
         self._validate_transcribers()
 
@@ -555,6 +586,8 @@ class EndpointRegistry:
             raw_transcriber,
             [str(t) for t in targets],
             audio_tokens_per_second=rate,
+            governance=config.get("governance", False),
+            tag_namespaces=config.get("tag_namespaces"),
         )
 
         # The sidecar merges HERE, on the built registry, so every
@@ -619,6 +652,28 @@ class EndpointRegistry:
         """
         self._validate_tiers()
         self._validate_transcribers()
+
+    def _validate_governance_tags(self) -> None:
+        """Hold every endpoint's tags to the governance grammar.
+
+        Namespaced tags need a known namespace always; under
+        `governance: true` every endpoint must also carry a reach tag
+        and exactly one `jur:` tag.
+        """
+        for ep in self._endpoints.values():
+            check_namespaces(ep.name, ep.tags, self.known_namespaces)
+            if not self.governance:
+                continue
+            if not ep.reach:
+                raise ValueError(
+                    f"endpoint {ep.name!r} carries no reach tag under `governance: true`; "
+                    "add at least one of local, vpn, cloud."
+                )
+            if ep.jur is None:
+                raise ValueError(
+                    f"endpoint {ep.name!r} carries no jur: tag under `governance: true`; "
+                    "add exactly one, e.g. `jur:ca`."
+                )
 
     def _validate_tiers(self) -> None:
         """Check the tier namespace, its references, cycles, and depth."""
