@@ -263,8 +263,22 @@ The config is discovered rather than named; pass `--config <path>` for a one-off
 - `--config` names an explicit config file, merged last over the discovered chain (system, user, project, `ROUTELLM_CONFIG`). Omit it and the server uses whatever it discovers; with nothing on the chain it falls back to our best-performing router configuration and routes the flat `--strong-model`/`--weak-model` pair. Run `python -m routellm.config paths` to see the chain (see [Configuration](#configuration) for details).
 - `--strong-model` and `--weak-model` name that flat pair. Both together or neither; each may name a configured endpoint or a raw model name.
 - `--default-threshold` is the threshold used by a level that names none and whose request carries none. Default `0.5`.
-- `--host` is the interface to bind. Default `127.0.0.1`. The server is unauthenticated, so a wider bind exposes it to that network: widen it only behind a proxy that authenticates. Changed: the server previously bound `0.0.0.0`. Pass `--host 0.0.0.0` to restore that, only behind an authenticating proxy.
+- `--host` is the interface to bind. Default `127.0.0.1`. Unless `auth:` is configured the server is unauthenticated, so a wider bind exposes it to that network (and logs a warning): configure [caller identity](#caller-identity) or widen it only behind a proxy that authenticates. Changed: the server previously bound `0.0.0.0`. Pass `--host 0.0.0.0` to restore that, only behind an authenticating proxy.
 - `--port` is the port to listen on. Default `6060`.
+
+### Caller identity
+
+The server is unauthenticated unless the config has an `auth:` section (see `config.example.yaml`). With `auth.keys_file` set, every route except `GET /health` needs `Authorization: Bearer <key>`; a missing or unknown key is a `401`. The keys file maps the SHA-256 of each key to a caller, so no key is ever stored in clear:
+
+```yaml
+keys:
+  - key_sha256: "<printf %s "$KEY" | shasum -a 256>"
+    principal: team-a
+    profile: default          # optional
+    allowed_classes: [public] # optional
+```
+
+An entry holding a clear-text key stops startup. Keys are compared in constant time and never logged. The matched caller is a `routellm.auth.Principal` on `request.state.principal` and is passed to `Controller.acompletion(principal=...)`; it is never sent upstream. Swap the static map for another source by implementing `routellm.auth.PrincipalResolver`. With auth on, widening `--host` no longer warns.
 
 For most use-cases, **we recommend the `mf` router** as we have evaluated it to be very strong and lightweight.
 

@@ -23,7 +23,7 @@ from routellm.config import ConfigError
 from routellm.quality import FineTuneConfig, QualityManager
 from routellm.resilience import ResilienceConfig
 
-SERVER_SECTIONS = ("cache", "resilience", "comparison", "traces")
+SERVER_SECTIONS = ("cache", "resilience", "comparison", "traces", "auth")
 
 
 class _StrictCache(CacheConfig):
