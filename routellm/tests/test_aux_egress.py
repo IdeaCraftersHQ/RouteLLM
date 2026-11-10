@@ -47,6 +47,7 @@ POLICY = parse_policy(
         "classes": {
             "open": {
                 "treatment": "raw",
+                "cache": "both",
                 "reach": ["local", "cloud"],
                 "tiers": [*TIERS, "mixed"],
             },
@@ -55,7 +56,7 @@ POLICY = parse_policy(
                 "reach": ["local", "vpn"],
                 "tiers": [*TIERS, "site_tier"],
             },
-            "lan": {"treatment": "raw", "reach": ["local"], "tiers": TIERS},
+            "lan": {"treatment": "raw", "cache": "both", "reach": ["local"], "tiers": TIERS},
             "redacted": {"treatment": "redact", "reach": ["local"], "tiers": TIERS},
             "sealed": {"treatment": "block", "reach": ["local"], "tiers": TIERS},
         }
@@ -214,8 +215,8 @@ def test_the_semantic_cache_runs_for_a_class_it_may_serve(world, tmp_path):
 
 
 def test_a_restricted_response_is_stored_without_an_embedding(world, tmp_path):
-    c = build(world, embed_reach="local", tmp_path=tmp_path, semantic=True)
-    ask(c, declared="sealed")
+    c = build(world, tmp_path=tmp_path, semantic=True)
+    ask(c, declared="lan")
 
     rows = (
         sqlite3.connect(c.cache.config.db_path)
