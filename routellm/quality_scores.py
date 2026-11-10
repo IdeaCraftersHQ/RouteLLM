@@ -446,7 +446,14 @@ def score_traces(
         raise FileNotFoundError(f"No traces to score in {traces_dir}")
 
     already = set() if rescore else _scored_ids(out_path)
-    pending = [trace for trace in traces if trace.get("id") not in already]
+    # A comparison call that failed holds no answer: scoring its empty
+    # output would teach the quality data that the endpoint wrote nothing.
+    pending = [
+        trace
+        for trace in traces
+        if trace.get("id") not in already
+        and not ((trace.get("routellm") or {}).get("comparison") or {}).get("error")
+    ]
     if limit is not None:
         pending = pending[:limit]
 

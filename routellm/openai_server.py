@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from routellm.capabilities import Capabilities, side_capabilities, union
+from routellm.comparison import COMPARE_HEADER
 from routellm.config import load_config
 from routellm.controller import HOP_HEADER, Controller, RoutingError
 from routellm.endpoints import Endpoint, EndpointRegistry, Tier
@@ -29,7 +30,13 @@ from routellm.middleware.intent_model_selector import (
     IntentModelSelector,
 )
 from routellm.routers.routers import ROUTER_CLS
-from routellm.server_config import SERVER_SECTIONS, build_cache_config, build_resilience_config
+from routellm.server_config import (
+    SERVER_SECTIONS,
+    build_cache_config,
+    build_comparison_config,
+    build_quality_manager,
+    build_resilience_config,
+)
 from routellm.transcription import TranscriptionError
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -505,6 +512,8 @@ async def lifespan(app):
         middleware=[intents] if intents else None,
         cache_config=build_cache_config(file_config, config_origin),
         resilience_config=build_resilience_config(file_config),
+        comparison_config=build_comparison_config(file_config),
+        quality_manager=build_quality_manager(file_config, config_origin),
     )
     yield
     CONTROLLER = None
@@ -752,6 +761,7 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
             messages=request.messages,
             transcribe_language=language,
             request_id=request_id,
+            compare=http_request.headers.get(COMPARE_HEADER),
             **forwarded,
         )
     except RoutingError as e:
@@ -783,6 +793,65 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
     body = res.model_dump()
     if path is not None:
         body["routellm"] = {"path": path}
+    return JSONResponse(content=body)
+
+
+class CompareRequest(ChatCompletionRequest):
+    """A chat request addressed to several models at once.
+
+    `models` is a list of endpoint names, or the name of a profile or
+    experiment. `model` is not used. `tier` applies that tier's privacy:
+    a local-only tier may only be compared across `local` endpoints.
+    `measure_ttft` streams each model upstream to time its first token;
+    the response is still one JSON body.
+    """
+
+    model: str | None = None
+    models: list[str] | str
+    tier: str | None = None
+    measure_ttft: bool | None = None
+
+
+@app.post("/v1/compare", dependencies=[fastapi.Depends(refuse_loops)])
+async def create_comparison(request: CompareRequest):
+    """Run one request on every named model and return the results side by side.
+
+    Present only when `comparison.enabled` and `comparison.endpoint`
+    are both on. Each result carries the model's output, an `error`
+    code when it failed, its metrics (TTFT, latency, tokens per
+    second, token counts, cost) and a judge `score` when a judge is
+    configured. One model failing never fails the request. Non-
+    streaming only.
+    """
+    manager = CONTROLLER.comparison
+    if manager is None or not manager.config.endpoint:
+        return JSONResponse(ErrorResponse(message="Not found").model_dump(), status_code=404)
+
+    if request.stream:
+        return JSONResponse(
+            ErrorResponse(message="/v1/compare does not stream").model_dump(),
+            status_code=400,
+        )
+
+    forwarded = request.model_dump(exclude_unset=True, exclude_none=True)
+    for handled in ("model", "models", "tier", "measure_ttft"):
+        forwarded.pop(handled, None)
+
+    request_id = shortuuid.uuid()
+    try:
+        body = await manager.compare(
+            request.models,
+            forwarded,
+            tier=request.tier,
+            measure_ttft=request.measure_ttft,
+        )
+    except ValueError as e:
+        return JSONResponse(ErrorResponse(message=str(e)).model_dump(), status_code=400)
+    except Exception as e:
+        logging.getLogger(__name__).error(
+            f"Compare failed (request id {request_id}): {type(e).__name__}: {e!s}"
+        )
+        return JSONResponse({"object": "error", **_error_body(request_id)}, status_code=502)
     return JSONResponse(content=body)
 
 
