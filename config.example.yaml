@@ -115,6 +115,14 @@ endpoints:
     model: ollama_chat/qwen3:8b
     api_base: http://127.0.0.1:11500
     tags: [local]
+    # Params this endpoint's provider rejects. Unset (as here), the
+    # advisory flags an agent client sends -- `parallel_tool_calls`,
+    # `reasoning_effort`, `stream_options` -- are dropped when the
+    # provider lacks them, so the request is still served. Other
+    # unsupported params fail the call. Set `true` to drop anything the
+    # provider rejects, `false` to drop nothing, or a list of names to
+    # drop those too. Dropped names are logged at DEBUG, never values.
+    # drop_params: [logit_bias]
 
   # A second local OpenAI-compatible server over its own tunnel. The
   # `openai/` prefix routes any OpenAI-compatible server through litellm.
