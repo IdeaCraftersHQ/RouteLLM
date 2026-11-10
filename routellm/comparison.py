@@ -465,15 +465,18 @@ class ComparisonManager(CallMixin):
     ):
         """Hold an explicit comparison to the class policy and the egress gates.
 
-        Returns `reqs` carrying the class. An operator run with no class
-        is not class-gated, but an egress gate still judges it, with the
-        class undecided (the most restrictive).
+        Returns `reqs` carrying the class and the route policy. An
+        operator run with no class is not class-gated, but an egress gate
+        still judges it, with the class undecided (the most restrictive),
+        and the route policy's tag denials and allowed set always apply.
         """
         policy = getattr(self.host, "policy", None)
         if policy is not None and not (operator and data_class is None):
             if tier is not None or data_class is None:
                 check_entry_tier(policy, tier, data_class)
-            reqs = dataclasses.replace(reqs, data_class=data_class, route_policy=route_policy)
+            reqs = dataclasses.replace(reqs, data_class=data_class)
+        if route_policy is not None:
+            reqs = dataclasses.replace(reqs, route_policy=route_policy)
         denied = self.policy_reasons(names, reqs)
         if denied:
             name, reason = next(iter(denied.items()))

@@ -550,6 +550,18 @@ class Controller:
         with ThreadPoolExecutor(max_workers=1) as pool:
             return pool.submit(asyncio.run, coro).result()
 
+    @staticmethod
+    def _request_class(declared_class, decision, effective=None):
+        """Return the class a request is held to, the one source every consumer reads.
+
+        `effective` (policy routing's strictest of floor, declared and
+        decision) when policy routing ran; else the decision's class,
+        else the declared one.
+        """
+        if effective is not None:
+            return effective
+        return decision.data_class if decision is not None else declared_class
+
     def _check_entry_tier(self, tier, declared_class, decision, reqs=None, effective=None):
         """Refuse a tier the request's effective class may not enter.
 
@@ -568,8 +580,7 @@ class Controller:
         """
         if self.policy is None:
             return reqs
-        if effective is None:
-            effective = decision.data_class if decision is not None else declared_class
+        effective = self._request_class(declared_class, decision, effective)
         check_entry_tier(self.policy, tier, effective)
         if reqs is None:
             return reqs
@@ -1929,12 +1940,13 @@ class Controller:
 
         # Try cache
         cache_params = self._cache_params(kwargs)
-        cache_ns, cache_mode = self._cache_scope(
-            decision.data_class if decision is not None else declared_class
-        )
+        # The cache reads the one effective class (policy floor, declared
+        # and decision), never the declared or decided one alone.
+        request_class = self._request_class(declared_class, decision, effective)
+        cache_ns, cache_mode = self._cache_scope(request_class)
         use_cache = not streaming and cache_mode != "none"
         fuzzy = cache_mode == "both" and self._semantic_cache_allowed(
-            decision.data_class if decision is not None else declared_class,
+            request_class,
             getattr(reqs, "route_policy", None),
         )
         cached_res = (
@@ -2203,12 +2215,13 @@ class Controller:
 
         # Try cache
         cache_params = self._cache_params(kwargs)
-        cache_ns, cache_mode = self._cache_scope(
-            decision.data_class if decision is not None else declared_class
-        )
+        # The cache reads the one effective class (policy floor, declared
+        # and decision), never the declared or decided one alone.
+        request_class = self._request_class(declared_class, decision, effective)
+        cache_ns, cache_mode = self._cache_scope(request_class)
         use_cache = not streaming and cache_mode != "none"
         fuzzy = cache_mode == "both" and self._semantic_cache_allowed(
-            decision.data_class if decision is not None else declared_class,
+            request_class,
             getattr(reqs, "route_policy", None),
         )
         cached_res = (
