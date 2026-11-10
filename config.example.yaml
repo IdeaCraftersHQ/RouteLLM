@@ -306,9 +306,9 @@ endpoints:
 # compare, intent detector). At load every selected endpoint's model id,
 # and each id under `also_check`, must pass `models` or startup fails.
 # `deny` wins over `allow`; an empty `allow` allows nothing. An allow entry
-# may demand params in the endpoint's `extra`. `require_policy_allow` is
-# accepted but fails closed until request policies exist: it refuses every
-# request to the gate's endpoints.
+# may demand params in the endpoint's `extra`. `require_policy_allow` admits
+# a gated endpoint only when the request's routing policy (below) lists one
+# of its tags in `allow_tags`; without `policy_routing:` it refuses them all.
 # egress_gates:
 #   - name: gated
 #     select: "tag:gated"
@@ -320,6 +320,42 @@ endpoints:
 #           require: {extra_body.provider.data_collection: deny}
 #       deny: ["*:legacy"]
 #     also_check: [extra_body.models]
+
+# Policy routing (optional; needs `policy:`). Request attributes, read from
+# headers, pick a routing policy; its rules pick the tier. A request
+# addressed to an `entry` tier goes to the first matching rule's tier, else
+# `else`. The effective class is the strictest of the policy's `data_class`,
+# the declared class and the decision step's, in the policy file's `classes:`
+# order (least restrictive first); nothing lowers it. A policy never widens a
+# class: the tier it picks must still be an entry tier of the class, and every
+# leaf under it still passes the class, `deny_tags` and the egress gates. A
+# missing, invalid or unknown `key` value takes `default_policy`. A non-default
+# policy named in a header needs the policy file's
+# `principals.<name>.projects` to list it (else 403; no auth: default only). Header
+# names, classes, intents and tiers below are placeholders. Attribute headers
+# are never forwarded upstream.
+# policy_routing:
+#   attributes:
+#     project: {header: X-Route-Project}   # default header: X-Route-<Name>
+#     client: {pattern: '^[a-z]{1,16}$'}   # default pattern: ^[a-z0-9][a-z0-9._-]{0,62}$
+#   key: project
+#   entry: [auto]
+#   rules:
+#     - {when: {class: private}, tier: private}
+#     - {when: {client: codex}, tier: strong}
+#     - {when: {intent: hard}, tier: strong}
+#   else: balanced
+#   default_policy: default
+#   policies:
+#     default:
+#       data_class: general
+#       tiers: [balanced, private]
+#       fallback: balanced
+#     research:                      # a project that may use the strong tier
+#       data_class: general
+#       tiers: [balanced, strong, private]
+#       allow_tags: [metered]        # admitted by a `require_policy_allow` gate
+#       deny_tags: []
 
 # Tiers: named strong/weak pairs whose sides may themselves be tiers, so
 # a request addressed to a tier walks a tree, one router call per level.

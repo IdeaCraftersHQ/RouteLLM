@@ -37,6 +37,7 @@ from routellm.leaf_params import drop_kwargs, log_dropped
 from routellm.payment.gateway import PaymentGateway
 from routellm.payment.types import PaymentChallenge
 from routellm.policy import Policy, PolicyDenied
+from routellm.policy_routing import PolicyRouter, RequestAttributes
 from routellm.quality import QualityManager
 from routellm.resilience import EndpointsCooling, Resilience, ResilienceConfig
 from routellm.routers.embeddings import configure_embeddings
@@ -158,6 +159,7 @@ class Controller:
         decision=None,
         policy: Policy | None = None,
         egress_gates: EgressGates | None = None,
+        policy_routing: PolicyRouter | None = None,
     ):
         """Initialize controller with routers and configuration.
 
@@ -230,6 +232,11 @@ class Controller:
             Hard gates in front of tagged endpoints. At construction
             every selected endpoint's model ids are checked; per request
             each candidate passes them beside the class check.
+        policy_routing : PolicyRouter, optional
+            Policy routing. A request addressed to an entry tier goes to
+            the tier its rules pick, and its effective class also counts
+            its routing policy's default. Needs `policy`; validated
+            against the registry, the policy and the decision step here.
 
         Raises
         ------
@@ -329,6 +336,11 @@ class Controller:
                 quality_manager=self.quality_manager,
                 middleware=self.middleware,
             )
+
+        # Policy routing: its rules, tiers and classes are checked now.
+        self.policy_routing = policy_routing
+        if policy_routing is not None:
+            policy_routing.check(self.endpoints, policy, getattr(decision, "config", None))
 
         # Egress gates: model ids checked now, class and policy per request.
         self.egress_gates = egress_gates
@@ -492,11 +504,13 @@ class Controller:
         with ThreadPoolExecutor(max_workers=1) as pool:
             return pool.submit(asyncio.run, coro).result()
 
-    def _check_entry_tier(self, tier, declared_class, decision, reqs=None):
+    def _check_entry_tier(self, tier, declared_class, decision, reqs=None, effective=None):
         """Refuse a tier the request's effective class may not enter.
 
         Runs after the decision step, so the class is the strictest of
-        the declared one and whatever the step concluded; before any
+        the declared one and whatever the step concluded (or `effective`,
+        when policy routing already combined them with its policy's
+        default); before any
         routing, so nothing is called for a refused request.
 
         Returns
@@ -508,11 +522,39 @@ class Controller:
         """
         if self.policy is None:
             return reqs
-        effective = decision.data_class if decision is not None else declared_class
+        if effective is None:
+            effective = decision.data_class if decision is not None else declared_class
         check_entry_tier(self.policy, tier, effective)
         if reqs is None:
             return reqs
         return dataclasses.replace(reqs, data_class=effective)
+
+    def _policy_route(self, tier, declared_class, decision, reqs, attributes, principal=None):
+        """Apply policy routing; no-op without it.
+
+        Returns
+        -------
+        tuple
+            `(tier, effective class or None, reqs, Selection or None)`:
+            the tier to enter (an entry tier is replaced by the rules'
+            pick), the class combined from the routing policy's default,
+            the declared class and the decision (None without policy
+            routing, which leaves the class to `_check_entry_tier`),
+            `reqs` carrying the policy's name, and the record for the path.
+
+        Raises
+        ------
+        PolicyDenied
+            A tier the routing policy does not allow and has no fallback for.
+        """
+        if self.policy_routing is None:
+            return tier, None, reqs, None
+        sel = self.policy_routing.select(
+            tier, declared_class, decision, reqs, attributes, principal
+        )
+        if reqs is not None:
+            reqs = dataclasses.replace(reqs, route_policy=sel.policy)
+        return sel.tier, sel.effective, reqs, sel
 
     async def effective_class(self, kwargs, declared_class, conversation_id=None):
         """Return the class a request is held to: the decision's, else the declared one."""
@@ -742,8 +784,16 @@ class Controller:
             denial = class_denial(self.policy, self.endpoints, name, data_class)
             if denial is not None:
                 return denial
+        route_policy = getattr(reqs, "route_policy", None)
+        if self.policy_routing is not None and route_policy is not None:
+            denial = self.policy_routing.tag_denial(self.endpoints, name, route_policy)
+            if denial is not None:
+                return denial
         if self.egress_gates is not None:
-            return self.egress_gates.denial(self.endpoints, name, data_class)
+            allowed = None
+            if self.policy_routing is not None and route_policy is not None:
+                allowed = self.policy_routing.policies[route_policy]
+            return self.egress_gates.denial(self.endpoints, name, data_class, route_policy=allowed)
         return None
 
     def _can_serve(self, name: str, reqs) -> str | None:
@@ -779,6 +829,7 @@ class Controller:
         threshold: float | None,
         reqs=None,
         decision=None,
+        route_record=None,
     ) -> tuple[str, list[dict[str, Any]], ModelPair | None]:
         """Choose one endpoint for a prompt and record how it was chosen.
 
@@ -854,6 +905,8 @@ class Controller:
             )
             if decision is not None:
                 path[0]["decision"] = decision.as_dict()
+            if route_record is not None:
+                path[0]["policy_routing"] = route_record.as_dict()
             if ignored_tier is not None:
                 path[0]["intent_ignored"] = ignored_tier
             elif tier_from is not None:
@@ -914,6 +967,8 @@ class Controller:
             entry["pair_from"] = pair_from
         if decision is not None:
             entry["decision"] = decision.as_dict()
+        if route_record is not None:
+            entry["policy_routing"] = route_record.as_dict()
 
         return picked, [entry], pair
 
@@ -1551,6 +1606,7 @@ class Controller:
         declared_class: str | None = None,
         conversation_id: str | None = None,
         principal: Principal | None = None,
+        attributes: RequestAttributes | None = None,
         **kwargs,
     ):
         """Synchronous completion with intelligent routing.
@@ -1599,6 +1655,9 @@ class Controller:
             The authenticated caller. Never forwarded upstream; it is
             carried on `routellm.auth.current_principal` for policy,
             audit and cache code on this request's call path.
+        attributes : RequestAttributes, optional
+            The request's routing attributes (project, client, ...).
+            Read only when `policy_routing` is configured; never forwarded.
         **kwargs
             Standard OpenAI completion parameters (messages, temperature,
             top_p, etc.). model field can encode router and threshold.
@@ -1648,13 +1707,23 @@ class Controller:
 
         # 0. Decide: label the request before anything routes it.
         decision = self._decide_sync(kwargs, declared_class, conversation_id)
-        reqs = self._check_entry_tier(tier, declared_class, decision, reqs)
+        tier, effective, reqs, route_record = self._policy_route(
+            tier, declared_class, decision, reqs, attributes, principal
+        )
+        reqs = self._check_entry_tier(tier, declared_class, decision, reqs, effective)
 
         # 1. Route: traffic rules and middleware bypass the tree, a tier
         #    walks it, and a bare pair routes flat. Each side is checked
         #    for fitness and class before its router runs.
         routed_model, path, effective_pair = self._route(
-            prompt, kwargs, tier, router, threshold, reqs, decision=decision
+            prompt,
+            kwargs,
+            tier,
+            router,
+            threshold,
+            reqs,
+            decision=decision,
+            route_record=route_record,
         )
         area = self._area_of(path)
 
@@ -1869,6 +1938,7 @@ class Controller:
         declared_class: str | None = None,
         conversation_id: str | None = None,
         principal: Principal | None = None,
+        attributes: RequestAttributes | None = None,
         **kwargs,
     ):
         if principal is not None:
@@ -1905,13 +1975,23 @@ class Controller:
         # 0. Decide: label the request before anything routes it. Awaited,
         #    so a slow decision model never holds the event loop.
         decision = await self._decide(kwargs, declared_class, conversation_id)
-        reqs = self._check_entry_tier(tier, declared_class, decision, reqs)
+        tier, effective, reqs, route_record = self._policy_route(
+            tier, declared_class, decision, reqs, attributes, principal
+        )
+        reqs = self._check_entry_tier(tier, declared_class, decision, reqs, effective)
 
         # 1. Route: traffic rules and middleware bypass the tree, a tier
         #    walks it, and a bare pair routes flat. Each side is checked
         #    for fitness and class before its router runs.
         routed_model, path, effective_pair = self._route(
-            prompt, kwargs, tier, router, threshold, reqs, decision=decision
+            prompt,
+            kwargs,
+            tier,
+            router,
+            threshold,
+            reqs,
+            decision=decision,
+            route_record=route_record,
         )
         area = self._area_of(path)
 

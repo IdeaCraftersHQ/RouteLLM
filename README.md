@@ -339,7 +339,7 @@ classes:
   sealed:
     treatment: vault
 principals:
-  analyst: {classes: [public, internal]}
+  analyst: {classes: [public, internal], projects: [research]}  # projects: policy_routing policies a header may select
 ```
 
 - `cache` defaults to `exact` for `raw` and `none` for the other treatments.
@@ -972,7 +972,53 @@ egress_gates:
 
 **Detector.** A middleware whose detector calls a gated endpoint (`intents.model` on a gated endpoint) is not consulted for a request whose class the gate denies: zero calls, and the request stays in the tier it addressed. Other auxiliary paths (routers, semantic cache, transcription, judge) are not gated yet.
 
-**`require_policy_allow`** is accepted but fails closed: it needs the request's policy, which is not built yet, so a gate that sets it refuses every request to its endpoints (`gate:<name>:policy`) until then.
+**`require_policy_allow`** makes the gate depend on the request's [routing policy](#policy-routing): a leaf the gate selects is a candidate only when the selected policy's `allow_tags` lists one of the leaf's tags and its `deny_tags` list none; otherwise the reason is `gate:<name>:policy`. Without `policy_routing:` there is no selected policy, so such a gate refuses every request to its endpoints. The intent detector is not a request with a policy: a gated detector endpoint of such a gate gets no call.
+
+### Policy routing
+
+A `policy_routing:` section routes a request by its attributes instead of a threshold at the entry. Everything in it is config: the header each attribute is read from, the attribute names, the class names, the intent labels and the tier names. It needs a [`policy:`](#policy-file) file (the class order and the class checks come from there).
+
+```yaml
+policy_routing:
+  attributes:                       # attribute -> header it is read from
+    project: {header: X-Route-Project}   # header defaults to X-Route-<Name>
+    client: {pattern: '^[a-z]{1,16}$'}   # pattern defaults to ^[a-z0-9][a-z0-9._-]{0,62}$
+  key: project                      # the attribute whose value names the policy
+  entry: [auto]                     # tiers a client addresses; the rules pick the real tier
+  rules:                            # first match wins; every matcher in `when` must hold
+    - {when: {class: private}, tier: private}
+    - {when: {client: codex}, tier: codex}
+    - {when: {intent: hard}, tier: hard}
+    - {when: {modality: image}, tier: vision}
+  else: code                        # taken when no rule matches
+  default_policy: default           # the policy for a missing, invalid or unknown key
+  policies:
+    default:
+      data_class: general           # floor of the effective class
+      tiers: [code, private, vision]  # tiers this policy may use
+      fallback: code                # taken for a rule target outside `tiers`; none: 403
+      allow_tags: []                # tags a gate with `require_policy_allow` admits
+      deny_tags: []                 # an endpoint with one of these is never a candidate
+    some-project:
+      tiers: [code, hard, private]
+      allow_tags: [metered]
+```
+
+**Attributes.** Each is read off the request headers, validated against its `pattern` and stored on `request.state.attributes` and `routellm.policy_routing.current_attributes`, next to the declared class. A missing, empty or malformed value is an unknown attribute, never an error. No header is copied upstream, so an attribute never reaches a provider, a shadow or comparison call, or the decision classifier.
+
+**Policy.** The value of the `key` attribute names the policy. A missing, invalid or unknown value takes `default_policy` (a policy with that name is required); the path says which (`policy_from`: `attribute`, `absent`, `invalid`, `unknown`).
+
+**Bound to the caller.** The header is a claim, not a right. A value naming a non-default policy is honoured only if the policy file lists it for the authenticated caller: `principals.<name>.projects: [policy, ...]` (a caller with no list may use `default_policy` only). A caller naming a policy it may not use is refused (`403`, naming the policy, `policy_from: forbidden`), never silently moved to the default. With auth off there is no caller, so only `default_policy` applies and a header naming any other policy is a `403`: policy routing with non-default policies requires `auth:`. This is what makes `require_policy_allow` safe: only a policy the caller is authorised for can admit a gated endpoint. A caller listing a policy that `policy_routing:` does not define is a startup error. A missing, invalid or unknown value is still the default policy.
+
+**Effective class.** The most restrictive of the policy's `data_class`, the declared class and the decision step's class, where restrictiveness is the order of the policy file's `classes:` (least restrictive first, the order `decision.data_classes` already uses; startup fails if the two disagree). No source can lower it. Without a `decision:` section the intent is unknown and intent rules never match.
+
+**Rules.** A request addressed to a tier in `entry` goes to the tier of the first matching rule, else to `else`. Matchers are `class` (the effective class), `intent`, `modality` (`text`, `image`, `audio`) and any configured attribute; a list is any-of, a rule with several matchers needs all of them. A request addressed to any other tier is not re-routed. The depth cap and every other tier rule are unchanged.
+
+**Allowed tiers.** A rule target outside the policy's `tiers` goes to its `fallback`, or is refused with `403` naming policy and tier. A tier a client addressed directly that the policy does not allow is refused (`403`), never moved. The fallback is not trusted either: it passes the checks below.
+
+**A policy never widens a class.** The tier the policy picks must still be an entry tier of the effective class (`403` otherwise, naming class and tier) and every candidate under it still passes the class's reach and jurisdiction, the policy's `deny_tags` and the egress gates (`_can_serve`). At startup a rule whose `class` matcher names a class that does not list the rule's tier, a class that none of a policy's selectable tiers can serve, and a selectable tier whose leaves exceed the class's reach are errors.
+
+**Path.** `path[0]["policy_routing"]` records the attributes, the policy and where it came from, each class source (`policy`, `declared`, `decision`), the effective class, the intent, the addressed tier, the tier chosen, the matched rule (index, or `else`) and, when the fallback replaced a refused target, `refused: {<target>: <fallback>}`.
 
 ### Threshold Calibration
 

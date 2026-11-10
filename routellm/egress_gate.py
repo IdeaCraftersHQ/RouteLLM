@@ -36,8 +36,10 @@ Two moments, one rule set:
 
 A class not yet decided is the most restrictive: a request with no class
 is refused by a gate that lists `deny_classes`. `require_policy_allow`
-needs the request's policy, which does not exist yet; until it does a
-gate that sets it refuses every request to its endpoints.
+needs the request's routing policy (`policy_routing:`): a leaf it selects
+is admitted only when that policy lists one of its tags in `allow_tags`
+(and none in `deny_tags`). Without policy routing it refuses every
+request to its endpoints.
 
 Nothing here reads a request body.
 """
@@ -284,7 +286,7 @@ class EgressGates:
             self._leaves[name] = tuple(reachable_leaves(registry, name))
         return self._leaves[name]
 
-    def denial(self, registry, name: str, data_class: str | None) -> str | None:
+    def denial(self, registry, name: str, data_class: str | None, route_policy=None) -> str | None:
         """Return `gate:<name>:<why>` when `name` may not receive this request.
 
         Parameters
@@ -296,6 +298,12 @@ class EgressGates:
         data_class : str, optional
             The request's effective class. None is a class not yet
             decided and counts as the most restrictive.
+        route_policy : RoutePolicy, optional
+            The request's selected routing policy. A gate with
+            `require_policy_allow` admits a leaf only when the policy's
+            `allow_tags` lists one of its tags and `deny_tags` none; with
+            no policy (policy routing off, or a caller with no request) it
+            refuses every leaf it selects.
 
         Returns
         -------
@@ -307,7 +315,9 @@ class EgressGates:
                 spec = gate.spec
                 if leaf not in gate.matched or not spec.request_rules:
                     continue
-                if spec.require_policy_allow:
+                if spec.require_policy_allow and (
+                    route_policy is None or not route_policy.admits(registry.get(leaf).tags)
+                ):
                     return f"gate:{spec.name}:policy"
                 if spec.deny_classes and data_class is None:
                     return f"gate:{spec.name}:class:{UNDECIDED}"
