@@ -53,8 +53,9 @@ def semantic_cache(w):
 
 @case(
     "aux_control_detector_is_called_for_a_class_that_may_reach_it",
+    200,
+    {"local_main": 1},
     reaches_off_host=True,
-    total=0,
     aux=True,
 )
 def control_detector(w):
