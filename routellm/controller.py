@@ -26,6 +26,7 @@ from routellm.capabilities import (
     side_capabilities,
     usable_sibling,
 )
+from routellm.class_tiers import check_class_tiers, check_entry_tier
 from routellm.comparison import ComparisonConfig, ComparisonManager
 from routellm.decision import DecisionRefused, set_decision
 from routellm.endpoints import EndpointRegistry, Selector
@@ -33,6 +34,7 @@ from routellm.hints import TYPESAFE_INSTALL_HINT
 from routellm.leaf_params import drop_kwargs, log_dropped
 from routellm.payment.gateway import PaymentGateway
 from routellm.payment.types import PaymentChallenge
+from routellm.policy import Policy
 from routellm.quality import QualityManager
 from routellm.resilience import EndpointsCooling, Resilience, ResilienceConfig
 from routellm.routers.embeddings import configure_embeddings
@@ -152,6 +154,7 @@ class Controller:
         comparison_config: ComparisonConfig | None = None,
         strict_registry: bool = False,
         decision=None,
+        policy: Policy | None = None,
     ):
         """Initialize controller with routers and configuration.
 
@@ -215,9 +218,18 @@ class Controller:
         comparison_config : ComparisonConfig, optional
             Shadow and compare settings. None, or a disabled config,
             builds no manager and the request path is untouched.
+        policy : Policy, optional
+            The loaded policy. With one, a request must address a tier
+            its effective class allows (`PolicyDenied`, 403), and at
+            construction every leaf reachable from a class's tiers must
+            carry that class's reach and jurisdiction.
 
         Raises
         ------
+        PolicyError
+            If a class names a tier the registry lacks, or a leaf
+            reachable from its tiers is outside its reach or
+            jurisdiction.
         ValueError
             If both models are None and no `default` tier is configured,
             a tier names a router that is not registered, a tier's
@@ -290,6 +302,18 @@ class Controller:
                 self.endpoints,
                 strong_model=strong_model,
                 weak_model=weak_model,
+                traffic_manager=self.traffic_manager,
+                quality_manager=self.quality_manager,
+                middleware=self.middleware,
+            )
+
+        # Class to tiers: every leaf a class's tiers can reach, by any
+        # path, carries what the class allows, or the server never starts.
+        self.policy = policy
+        if policy is not None:
+            check_class_tiers(
+                policy,
+                self.endpoints,
                 traffic_manager=self.traffic_manager,
                 quality_manager=self.quality_manager,
                 middleware=self.middleware,
@@ -447,6 +471,17 @@ class Controller:
 
         with ThreadPoolExecutor(max_workers=1) as pool:
             return pool.submit(asyncio.run, coro).result()
+
+    def _check_entry_tier(self, tier, declared_class, decision) -> None:
+        """Refuse a tier the request's effective class may not enter.
+
+        Runs after the decision step, so the class is the strictest of
+        the declared one and whatever the step concluded; before any
+        routing, so nothing is called for a refused request.
+        """
+        if self.policy is not None:
+            effective = decision.data_class if decision is not None else declared_class
+            check_entry_tier(self.policy, tier, effective)
 
     def _get_model_pair_for_prompt(self, prompt: str) -> ModelPair | None:
         """Get the model pair a middleware asks for, or None."""
@@ -1436,6 +1471,7 @@ class Controller:
 
         # 0. Decide: label the request before anything routes it.
         decision = self._decide_sync(kwargs, declared_class, conversation_id)
+        self._check_entry_tier(tier, declared_class, decision)
 
         # 1. Route: traffic rules and middleware bypass the tree, a tier
         #    walks it, and a bare pair routes flat. Each side is checked
@@ -1679,6 +1715,7 @@ class Controller:
         # 0. Decide: label the request before anything routes it. Awaited,
         #    so a slow decision model never holds the event loop.
         decision = await self._decide(kwargs, declared_class, conversation_id)
+        self._check_entry_tier(tier, declared_class, decision)
 
         # 1. Route: traffic rules and middleware bypass the tree, a tier
         #    walks it, and a bare pair routes flat. Each side is checked

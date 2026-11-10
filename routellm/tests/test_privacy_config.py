@@ -12,7 +12,10 @@ from urllib.parse import urlparse
 
 import pytest
 
+from routellm.caching import CacheConfig
+from routellm.controller import Controller
 from routellm.endpoints import EndpointRegistry
+from routellm.policy import PolicyError, parse_policy
 from routellm.tests.privacy_fixture import LEAVES, LOCAL, build_config
 
 BASES = {name: f"http://127.0.0.1:{9000 + i}/v1" for i, name in enumerate(LEAVES)}
@@ -127,3 +130,40 @@ def test_a_tier_side_naming_a_raw_model_does_not_load():
     cfg["tiers"]["private"]["weak"] = "gpt-4o"
     with pytest.raises(ValueError, match="gpt-4o"):
         EndpointRegistry.from_config(cfg)
+
+
+# -- class to tiers: the private class's tiers reach local leaves only -------
+
+PRIVATE_POLICY = {
+    "classes": {
+        "private": {"treatment": "block", "reach": ["local"], "tiers": list(PRIVATE_TIERS)},
+        "general": {"treatment": "raw", "reach": ["local", "cloud"], "tiers": ["general"]},
+    }
+}
+
+
+def _start(config):
+    return Controller(
+        routers=["random"],
+        endpoints=EndpointRegistry.from_config(copy.deepcopy(config)),
+        policy=parse_policy(PRIVATE_POLICY, "policy.yaml"),
+        cache_config=CacheConfig(enabled=False),
+    )
+
+
+def test_the_fixture_world_starts_under_the_class_policy():
+    _start(_config())
+
+
+def test_a_cloud_leaf_under_a_private_tier_stops_startup():
+    cfg = _config()
+    cfg["tiers"]["private"]["weak"] = "cloud_main"
+    with pytest.raises(PolicyError, match=r"class 'private', tier 'private'.*leaf 'cloud_main'"):
+        _start(cfg)
+
+
+def test_a_cloud_leaf_behind_a_nested_tier_stops_startup():
+    cfg = _config()
+    cfg["tiers"]["default"]["strong"] = "general"
+    with pytest.raises(PolicyError, match="tier 'default'.*leaf 'gated_main'"):
+        _start(cfg)

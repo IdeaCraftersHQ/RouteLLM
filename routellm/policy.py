@@ -43,6 +43,7 @@ from routellm.governance import CLOUD_TAG, REACH_TAGS
 __all__ = [
     "ClassPolicy",
     "Policy",
+    "PolicyDenied",
     "PolicyError",
     "PolicyRefusal",
     "PrincipalPolicy",
@@ -65,6 +66,15 @@ CacheMode = Literal["none", "exact", "both"]
 
 class PolicyError(ValueError):
     """The policy file is unreadable or invalid; the message names file, class and field."""
+
+
+class PolicyDenied(Exception):
+    """A request is refused by the policy once it is being routed (403).
+
+    The message names the class and the tier or leaf it was refused on.
+    """
+
+    status = 403
 
 
 class PolicyRefusal(Exception):

@@ -349,6 +349,15 @@ principals:
 - `redact`: `cloud` in `reach` is a load error until a redaction treatment is available.
 - An unknown class on a request is refused; so is a missing class when `default_class` is null. A principal reaches only the classes listed for it; an unlisted principal reaches none.
 
+#### Class to tiers
+
+`classes.<name>.tiers` lists the entry tiers a request of that class may use. Two checks hold it.
+
+- **Request**: the tier the model name addresses must be in the list of the request's effective class, else `403` in the API error shape, naming class and tier (`data class 'internal' may not use tier 'general' (allowed: private)`). The effective class is the declared one, or the decision classifier's when that is stricter; the check runs after the decision step and before any routing, so a refused request calls nothing. A model name that addresses no tier (a flat pair) and a request with no class are refused too.
+- **Startup**: for each non-vault class, every leaf reachable from each allowed tier must carry only reach labels within the class's `reach`, and a `jur:` within its `jur` (when set). Reachable means both sides of every level, nested tiers, the sibling a failed pick falls back to, and every member of a candidate pool; plus, for every class, traffic-rule pairs, the canary model, middleware pairs, and the targets of a load balancer keyed on a reachable leaf. Any violation refuses to start, listing each as class, tier, leaf and offending tag. A tier named in `tiers` that the registry lacks is an error too.
+
+`routellm.class_tiers` holds both (`check_entry_tier`, `check_class_tiers`); `PolicyDenied` (status 403) is what the request path raises.
+
 #### Request data class and operation
 
 A caller declares what it sends, in either of:
