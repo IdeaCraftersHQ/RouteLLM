@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from routellm.capabilities import Capabilities, side_capabilities, union
 from routellm.config import load_config
 from routellm.controller import HOP_HEADER, Controller, RoutingError
+from routellm.decision import build_decision
 from routellm.endpoints import Endpoint, EndpointRegistry, Tier
 from routellm.hints import TYPESAFE_INSTALL_HINT
 from routellm.middleware.intent_model_selector import (
@@ -346,6 +347,7 @@ def build_router_config(file_config: dict | None) -> dict | None:
         "endpoints",
         "tiers",
         "intents",
+        "decision",
         "quality_from",
         "quality_from_override",
         *SERVER_SECTIONS,
@@ -484,6 +486,7 @@ async def lifespan(app):
     config_origin = str(loaded.layers[-1].path) if loaded.layers else None
     endpoints = build_registry(file_config, config_origin)
     intents = build_intents(file_config, endpoints)
+    decision = build_decision(file_config, endpoints)
     router_config = build_router_config(file_config)
 
     # Neither flag and no tier to route into leaves the legacy flat form
@@ -541,6 +544,7 @@ async def lifespan(app):
         default_router=args.routers[0] if args.routers else None,
         default_threshold=args.default_threshold,
         middleware=[intents] if intents else None,
+        decision=decision,
         cache_config=build_cache_config(file_config, config_origin),
         resilience_config=build_resilience_config(file_config),
     )
