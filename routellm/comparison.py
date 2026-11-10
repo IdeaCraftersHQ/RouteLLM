@@ -51,139 +51,41 @@ import secrets
 import time
 from typing import Any
 
-from litellm import acompletion, stream_chunk_builder
-from pydantic import BaseModel, ConfigDict, Field, StrictBool
-
-from routellm.leaf_params import drop_kwargs, log_dropped
+from routellm.comparison_call import ROLE_CANDIDATE, ROLE_PRIMARY, ROLE_SHADOW, CallMixin
+from routellm.comparison_config import (
+    ComparisonConfig,
+    Experiment,
+    JudgeConfig,
+    SamplingRule,
+    expand_models,
+    is_local,
+    leaves_of,
+    tier_is_local_only,
+    validate_config,
+)
 from routellm.transcription import LOCAL_TAG
+
+__all__ = [
+    "COMPARE_HEADER",
+    "ROLE_CANDIDATE",
+    "ROLE_PRIMARY",
+    "ROLE_SHADOW",
+    "ComparisonConfig",
+    "ComparisonManager",
+    "Experiment",
+    "JudgeConfig",
+    "Plan",
+    "SamplingRule",
+    "is_local",
+    "leaves_of",
+    "tier_is_local_only",
+]
 
 logger = logging.getLogger(__name__)
 
 #: Request header naming what to compare: an experiment, a profile, or
 #: a comma-separated list of endpoint names.
 COMPARE_HEADER = "X-RouteLLM-Compare"
-
-#: Roles a recorded trace can have in a comparison.
-ROLE_PRIMARY = "primary"
-ROLE_SHADOW = "shadow"
-ROLE_CANDIDATE = "candidate"
-
-
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class SamplingRule(_Strict):
-    """Shadow a fraction of one tier's requests.
-
-    Attributes
-    ----------
-    rate : float
-        Probability in [0, 1] that a request to the tier is shadowed.
-    models : list[str] or str
-        Endpoint names, or the name of a profile.
-    """
-
-    rate: float = Field(ge=0, le=1)
-    models: list[str] | str
-
-
-class Experiment(_Strict):
-    """A named experiment: models, a sample rate and its own limits.
-
-    Attributes
-    ----------
-    models : list[str] or str
-        Endpoint names, or the name of a profile.
-    rate : float
-        Probability in [0, 1] that a request is shadowed. Naming the
-        experiment in the header ignores it.
-    tiers : list[str], optional
-        Only requests that entered one of these tiers are sampled.
-        Unset samples every request.
-    budget_usd : float, optional
-        Stop this experiment once it has spent this much.
-    max_concurrency : int, optional
-        At most this many of its shadow calls in flight at once.
-    """
-
-    models: list[str] | str
-    rate: float = Field(default=0.0, ge=0, le=1)
-    tiers: list[str] | None = None
-    budget_usd: float | None = Field(default=None, ge=0)
-    max_concurrency: int | None = Field(default=None, gt=0)
-
-
-class JudgeConfig(_Strict):
-    """Score each recorded output with an existing scorer spec.
-
-    Attributes
-    ----------
-    scorer : str
-        A `routellm.quality_scores` spec: `rubric:`, `module:`,
-        `composite:` or `judge:<model>`. Only `judge:` calls an LLM; the
-        others run offline code. `judge:<model>` names an endpoint (or
-        its model string), and counts as local only if that endpoint
-        carries the `local` tag.
-    """
-
-    scorer: str
-
-
-class ComparisonConfig(_Strict):
-    """The `comparison:` section. Everything is off until `enabled`.
-
-    Attributes
-    ----------
-    enabled : bool
-        Master switch. Off: no shadow, no endpoint, header ignored.
-    endpoint : bool
-        Serve `POST /v1/compare` when enabled (default True).
-    allow_header : bool
-        Honour the `X-RouteLLM-Compare` header (default True).
-    max_concurrency : int
-        Shadow calls in flight at once, across everything.
-    max_models : int
-        Most models one compare request or plan may name.
-    timeout_ms : int
-        Per-call timeout for a comparison call.
-    measure_ttft : bool
-        Stream shadow calls upstream to measure time to first token.
-        Off by default: shadows are non-streaming and report no TTFT.
-    budget_usd : float, optional
-        Stop all comparison calls once this much is spent.
-    compare_allowed_models : list[str]
-        Endpoints `POST /v1/compare` may name without a `tier`. Models
-        in `profiles` and `experiments` are allowed too, since the
-        operator named them.
-    allow_untiered_compare : bool
-        DANGEROUS. Lets an untiered `/v1/compare` name any configured
-        endpoint, so any caller can send any prompt to any model,
-        including paid and cloud ones. Off by default.
-    profiles : dict
-        Named endpoint lists, usable in the header and in `models:`.
-    sampling : dict
-        Per-tier sampling rules.
-    experiments : dict
-        Named experiments.
-    judge : JudgeConfig, optional
-        Score recorded outputs.
-    """
-
-    enabled: StrictBool = False
-    endpoint: StrictBool = True
-    allow_header: StrictBool = True
-    max_concurrency: int = Field(default=4, gt=0)
-    max_models: int = Field(default=4, gt=0)
-    timeout_ms: int = Field(default=60000, gt=0)
-    measure_ttft: StrictBool = False
-    budget_usd: float | None = Field(default=None, ge=0)
-    compare_allowed_models: list[str] = Field(default_factory=list)
-    allow_untiered_compare: StrictBool = False
-    profiles: dict[str, list[str]] = Field(default_factory=dict)
-    sampling: dict[str, SamplingRule] = Field(default_factory=dict)
-    experiments: dict[str, Experiment] = Field(default_factory=dict)
-    judge: JudgeConfig | None = None
 
 
 class Plan:
@@ -205,23 +107,7 @@ class Plan:
         self.local_only = local_only
 
 
-def is_local(registry, name: str) -> bool:
-    """Whether endpoint `name` is registered and tagged `local`."""
-    return name in registry.names() and LOCAL_TAG in registry.get(name).tags
-
-
-def leaves_of(registry, tier: str) -> set[str] | None:
-    """Endpoints reachable from a tier; None while a side is unresolved."""
-    return registry._leaves(tier)
-
-
-def tier_is_local_only(registry, tier: str) -> bool:
-    """Whether every endpoint a tier can reach is tagged `local`."""
-    leaves = leaves_of(registry, tier)
-    return bool(leaves) and all(is_local(registry, leaf) for leaf in leaves)
-
-
-class ComparisonManager:
+class ComparisonManager(CallMixin):
     """Plans, runs and records comparisons for one controller.
 
     Parameters
@@ -257,98 +143,14 @@ class ComparisonManager:
         self.dropped = 0
         self._scorer = None
         self._scorer_failed = False
-        self._validate()
-
-    # ----------------------------------------------------------- load time
+        self._judge_local = validate_config(config, host.endpoints)
 
     @property
     def registry(self):
         return self.host.endpoints
 
-    def _validate(self) -> None:
-        registry, config = self.registry, self.config
-
-        for name, models in config.profiles.items():
-            self._check_endpoints(models, f"profile {name!r}")
-        self._check_endpoints(config.compare_allowed_models, "compare_allowed_models")
-
-        local_only_tiers: set[str] = set()
-
-        for tier, rule in config.sampling.items():
-            if not registry.has_tier(tier):
-                raise ValueError(f"comparison.sampling names unknown tier {tier!r}")
-            models = self._expand(rule.models, f"sampling of tier {tier!r}")
-            self._check_endpoints(models, f"sampling of tier {tier!r}")
-            self._check_local(tier, models, f"sampling of tier {tier!r}", local_only_tiers)
-
-        for name, experiment in config.experiments.items():
-            label = f"experiment {name!r}"
-            models = self._expand(experiment.models, label)
-            self._check_endpoints(models, label)
-            for tier in experiment.tiers or []:
-                if not registry.has_tier(tier):
-                    raise ValueError(f"comparison {label} names unknown tier {tier!r}")
-                self._check_local(tier, models, label, local_only_tiers)
-
-        self._judge_local = True
-        if config.judge is not None:
-            self._judge_local = self._spec_is_local(config.judge.scorer)
-            if not self._judge_local and local_only_tiers:
-                raise ValueError(
-                    f"comparison.judge {config.judge.scorer!r} is not local, but "
-                    f"data from local-only tier(s) {', '.join(sorted(local_only_tiers))} "
-                    "would be judged by it. Use a judge model tagged `local`, an "
-                    "offline scorer, or drop those tiers from sampling/experiments."
-                )
-
     def _expand(self, models: list[str] | str, where: str) -> list[str]:
-        if isinstance(models, str):
-            if models not in self.config.profiles:
-                raise ValueError(f"comparison {where} names unknown profile {models!r}")
-            return list(self.config.profiles[models])
-        return list(models)
-
-    def _check_endpoints(self, models: list[str], where: str) -> None:
-        for name in models:
-            if name not in self.registry.names():
-                raise ValueError(
-                    f"comparison {where} names {name!r}, which is not a configured endpoint"
-                )
-            if self.registry.get(name).pay:
-                raise ValueError(
-                    f"comparison {where} names {name!r}, which has `pay: true`: "
-                    "a comparison call must never spend the wallet"
-                )
-
-    def _check_local(self, tier: str, models: list[str], where: str, found: set[str]) -> None:
-        if not tier_is_local_only(self.registry, tier):
-            return
-        found.add(tier)
-        bad = [m for m in models if not is_local(self.registry, m)]
-        if bad:
-            raise ValueError(
-                f"comparison {where}: tier {tier!r} is local-only (every endpoint it "
-                f"reaches is tagged {LOCAL_TAG!r}), so it may only be shadowed to "
-                f"{LOCAL_TAG!r} endpoints; not {', '.join(bad)}"
-            )
-
-    def _spec_is_local(self, spec: str) -> bool:
-        """Whether a scorer spec keeps its data on this machine.
-
-        Only `judge:<model>` calls a model; every other form runs
-        offline code. A judge is local when its model is an endpoint
-        tagged `local`, named directly or by its model string.
-        """
-        kind, _, rest = spec.partition(":")
-        if kind != "judge":
-            return True
-        if is_local(self.registry, rest):
-            return True
-        return any(
-            LOCAL_TAG in self.registry.get(n).tags
-            for n in self.registry.names()
-            if self.registry.get(n).model == rest
-        )
+        return expand_models(self.config, models, where)
 
     # --------------------------------------------------------- planning
 
@@ -689,219 +491,3 @@ class ComparisonManager:
     def over_budget(self) -> bool:
         budget = self.config.budget_usd
         return budget is not None and self.spent_usd >= budget
-
-    # ---------------------------------------------------------- one call
-
-    async def _one(
-        self,
-        name,
-        kwargs,
-        prompt,
-        *,
-        plan,
-        role,
-        request_model,
-        path,
-        session_id,
-        reqs,
-        measure_ttft,
-    ) -> dict[str, Any]:
-        """Call one endpoint, judge, record, and return its result."""
-        result = await self._call(name, kwargs, reqs, measure_ttft, plan)
-        self._charge(result["metrics"]["cost_usd"], plan.experiment)
-
-        if result["error"] is None:
-            result["score"] = await self._judge(prompt, result["output"], plan.local_only)
-
-        comparison = {
-            "id": plan.id,
-            "role": role,
-            "trigger": plan.trigger,
-            "experiment": plan.experiment,
-            "error": result["error"],
-            "metrics": result["metrics"],
-            "score": result["score"],
-        }
-        try:
-            self.host.quality_manager.record_trace(
-                prompt,
-                name,
-                result.pop("_response"),
-                None,
-                path=path,
-                request_model=request_model,
-                endpoint=name,
-                session_id=session_id,
-                latency_ms=result["metrics"]["latency_ms"],
-                comparison=comparison,
-                score=result["score"],
-            )
-        except Exception as exc:
-            logger.warning("recording comparison trace failed: %s", exc)
-        result.pop("_response", None)
-        return result
-
-    async def _call(self, name, kwargs, reqs, measure_ttft, plan) -> dict[str, Any]:
-        endpoint = self.registry.get(name)
-        metrics: dict[str, Any] = {
-            "ttft_ms": None,
-            "latency_ms": None,
-            "tokens_per_second": None,
-            "prompt_tokens": None,
-            "completion_tokens": None,
-            "cost_usd": None,
-        }
-        result: dict[str, Any] = {
-            "endpoint": name,
-            "model": endpoint.model,
-            "output": "",
-            "finish_reason": None,
-            "error": None,
-            "score": None,
-            "metrics": metrics,
-            "_response": {},
-        }
-
-        can_serve = getattr(self.host, "_can_serve", None)
-        if reqs is not None and can_serve is not None:
-            try:
-                reason = can_serve(name, reqs)
-            except Exception:
-                reason = None
-            if reason:
-                result["error"] = f"unsupported: {reason}"
-                return result
-
-        if self.over_budget():
-            result["error"] = "budget_exhausted"
-            return result
-
-        started = time.monotonic()
-        try:
-            res, ttft = await asyncio.wait_for(
-                self._request(name, endpoint, kwargs, measure_ttft),
-                timeout=self.config.timeout_ms / 1000,
-            )
-        except TimeoutError:
-            result["error"] = "timeout"
-            metrics["latency_ms"] = int((time.monotonic() - started) * 1000)
-            return result
-        except Exception as exc:
-            logger.warning("comparison call to %s failed: %s: %s", name, type(exc).__name__, exc)
-            result["error"] = "upstream_error"
-            metrics["latency_ms"] = int((time.monotonic() - started) * 1000)
-            return result
-
-        elapsed = time.monotonic() - started
-        body = res.model_dump() if hasattr(res, "model_dump") else dict(res)
-        usage = body.get("usage") or {}
-        prompt_tokens = usage.get("prompt_tokens")
-        completion_tokens = usage.get("completion_tokens")
-        choice = (body.get("choices") or [{}])[0]
-        message = choice.get("message") or {}
-
-        result["output"] = message.get("content") or ""
-        result["finish_reason"] = choice.get("finish_reason")
-        result["_response"] = body
-        metrics.update(
-            ttft_ms=None if ttft is None else int(ttft * 1000),
-            latency_ms=int(elapsed * 1000),
-            tokens_per_second=(
-                round(completion_tokens / elapsed, 3) if completion_tokens and elapsed > 0 else None
-            ),
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            cost_usd=self._cost(name, prompt_tokens, completion_tokens),
-        )
-        return result
-
-    async def _request(self, name, endpoint, kwargs, measure_ttft):
-        """One non-cached, non-retried upstream call; returns (response, ttft)."""
-        host = self.host
-        api_base, api_key = endpoint.credentials(host.api_base, host.api_key)
-        extra = {
-            **endpoint.extra,
-            **drop_kwargs(endpoint.model, api_base, endpoint.drop_params, endpoint.extra),
-        }
-        from routellm.controller import outbound_headers
-
-        call = {**extra, **kwargs}
-        call.pop("stream", None)
-        call.pop("stream_options", None)
-        call.pop("extra_headers", None)
-        call["model"] = endpoint.model
-        log_dropped(name, endpoint.model, api_base, call)
-        headers = outbound_headers(extra.get("extra_headers"), kwargs.get("extra_headers"))
-
-        if not measure_ttft:
-            res = await acompletion(
-                api_base=api_base, api_key=api_key, extra_headers=headers, **call
-            )
-            return res, None
-
-        started = time.monotonic()
-        stream = await acompletion(
-            api_base=api_base,
-            api_key=api_key,
-            extra_headers=headers,
-            stream=True,
-            stream_options={"include_usage": True},
-            **call,
-        )
-        chunks = []
-        ttft = None
-        async for chunk in stream:
-            if ttft is None and _has_content(chunk):
-                ttft = time.monotonic() - started
-            chunks.append(chunk)
-        res = stream_chunk_builder(chunks, messages=kwargs.get("messages"))
-        if res is None:
-            raise RuntimeError("empty stream")
-        return res, ttft
-
-    def _cost(self, name: str, prompt_tokens, completion_tokens) -> float | None:
-        record = (getattr(self.host, "_catalog_records", None) or {}).get(name)
-        if record is None:
-            return None
-        cost_in = getattr(record, "cost_input", None)
-        cost_out = getattr(record, "cost_output", None)
-        if cost_in is None and cost_out is None:
-            return None
-        return (
-            (prompt_tokens or 0) * (cost_in or 0.0) + (completion_tokens or 0) * (cost_out or 0.0)
-        ) / 1e6
-
-    # ------------------------------------------------------------- judge
-
-    async def _judge(self, prompt: str, output: str, local_only: bool) -> float | None:
-        judge = self.config.judge
-        if judge is None or self._scorer_failed:
-            return None
-        if local_only and not self._judge_local:
-            logger.warning("not judging local-only data: the judge is not local")
-            return None
-
-        loop = asyncio.get_running_loop()
-        try:
-            if self._scorer is None:
-                from routellm.quality_scores import build_scorer
-
-                self._scorer = await loop.run_in_executor(
-                    None, lambda: build_scorer(judge.scorer, allow_llm=True)
-                )
-            reward = await loop.run_in_executor(
-                None, lambda: self._scorer.score(output, {"prompt": prompt})
-            )
-            return None if reward.score is None else float(reward.score)
-        except Exception as exc:
-            if self._scorer is None:
-                self._scorer_failed = True
-            logger.warning("comparison judge failed: %s", exc)
-            return None
-
-
-def _has_content(chunk) -> bool:
-    try:
-        return bool(chunk.choices[0].delta.content)
-    except (AttributeError, IndexError, TypeError):
-        return False
