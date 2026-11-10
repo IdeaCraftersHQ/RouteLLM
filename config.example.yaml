@@ -111,6 +111,13 @@ audio_tokens_per_second: 32
 # tag_namespaces: [team]
 # governance: true
 
+# `strict_registry: true` (or `--strict-registry`) refuses every model
+# name that is not an endpoint below: raw --strong-model/--weak-model
+# values, the legacy default pair, and raw targets in traffic rules,
+# canary and load balancers fail at startup; an unknown name never
+# reaches litellm. Off by default.
+# strict_registry: true
+
 # Named endpoints. Each gives a reachable model a stable name that
 # routing, caching, and traces refer to instead of a raw litellm model
 # string. Names match [A-Za-z0-9_]+: hyphens are reserved for the

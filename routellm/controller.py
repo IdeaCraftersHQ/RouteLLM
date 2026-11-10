@@ -43,6 +43,7 @@ from routellm.routing import (
     sibling_of,
 )
 from routellm.streaming import RoutedStream
+from routellm.strict import check_pair, check_strict_registry
 from routellm.traffic import TrafficManager
 from routellm.types import Middleware, ModelPair
 
@@ -147,6 +148,7 @@ class Controller:
         default_router: str | None = None,
         default_threshold: float = 0.5,
         comparison_config: ComparisonConfig | None = None,
+        strict_registry: bool = False,
     ):
         """Initialize controller with routers and configuration.
 
@@ -202,6 +204,11 @@ class Controller:
             request carries none. Falls back to `routers[0]`.
         default_threshold : float
             Threshold used under the same conditions. Default 0.5.
+        strict_registry : bool, optional
+            Refuse every model that is not a registry endpoint: the
+            registry's `resolve` raises for unknown names and every
+            name given here is checked at construction. Also on when
+            the registry was built with `strict_registry: true`.
         comparison_config : ComparisonConfig, optional
             Shadow and compare settings. None, or a disabled config,
             builds no manager and the request path is untouched.
@@ -215,6 +222,8 @@ class Controller:
             both sides, or `strong_model`/`weak_model` names a tier.
         """
         self.endpoints = endpoints or EndpointRegistry()
+        if strict_registry:
+            self.endpoints.strict_registry = True
 
         # A tier side may be a policy rather than a name. Resolve every
         # one against the configured endpoints and the models.dev
@@ -267,6 +276,18 @@ class Controller:
         self.cache = Cache(cache_config)
         self.traffic_manager = traffic_manager or TrafficManager()
         self.quality_manager = quality_manager or QualityManager()
+
+        # Strict mode: every name handed in from outside the registry is
+        # refused now rather than reaching litellm on a request.
+        if self.endpoints.strict_registry:
+            check_strict_registry(
+                self.endpoints,
+                strong_model=strong_model,
+                weak_model=weak_model,
+                traffic_manager=self.traffic_manager,
+                quality_manager=self.quality_manager,
+                middleware=self.middleware,
+            )
 
         if config is None:
             config = GPT_4_AUGMENTED_CONFIG
@@ -650,6 +671,14 @@ class Controller:
             inherited,
         )
 
+        # Traffic rules were checked at startup; a middleware answers per
+        # request, so its pair is checked here.
+        if overridden is not None and self.endpoints.strict_registry:
+            try:
+                check_pair(self.endpoints, overridden, pair_from)
+            except ValueError as exc:
+                raise RoutingError(str(exc)) from exc
+
         pair = overridden or self.default_model_pair
         if pair is None:
             raise RoutingError(
@@ -925,6 +954,13 @@ class Controller:
         # from a balancer whose target model equals the routed name.
         if model_name in self.traffic_manager.load_balancers:
             model, balanced_key, balanced_base = self.traffic_manager.balance(model_name)
+            if self.endpoints.strict_registry:
+                # A target names a registry endpoint, so the call carries
+                # that endpoint's model, reach and params, never a raw
+                # string. The balancer's own base and key still win.
+                endpoint = self.endpoints.resolve(model)
+                model = endpoint.model
+                api_base, api_key = endpoint.credentials(self.api_base, self.api_key)
         else:
             model, balanced_key, balanced_base = endpoint.model, None, None
 

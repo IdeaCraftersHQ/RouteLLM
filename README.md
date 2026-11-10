@@ -302,6 +302,16 @@ Unknown keys under an endpoint are a load error naming the endpoint and the key,
 
 An endpoint tagged `local` must set `api_base`. Without one the call would go to the provider's default (public) base, so a leaf meant to stay on your machine would send its prompts to the cloud; the config is refused instead. Drop the tag if the endpoint is meant to be remote.
 
+#### Strict registry mode
+
+By default a model name that is not a registry endpoint is passed to litellm as a raw model string, with the controller's `api_base`/`api_key`. `strict_registry: true` (top-level) or `--strict-registry` closes that on every path; it is off by default. Either one turns it on; the flag cannot turn a config's `true` off.
+
+- `resolve` of an unknown name raises `ValueError`, so a fallback, pool member or any other late lookup fails closed.
+- Checked at startup, each refused with the name and where it came from: `--strong-model` / `--weak-model` (and the controller's flat pair), traffic-rule models, `canary_model`, load-balancer keys and targets, and the pairs or raw detection model a middleware carries. The legacy default pair (used when no flag and no `default` tier is given) is never invented: the server refuses to start without a `default` tier or two endpoint flags.
+- A middleware pair returned per request is checked per request; a raw one is a `RoutingError` (HTTP 400).
+- Comparison and shadow targets, and `intents.model` / `intents.upstream`, already must be registry endpoints.
+- Every name above must be an endpoint, not a tier. A load-balancer target is an endpoint name: the call carries that endpoint's model, base, key and params (the balancer's own `api_base`/`api_key` still win).
+
 #### Environment variables in config values
 
 One config file can serve several hosts whose endpoint URLs differ. Any string value (in mappings and lists; never keys) may read the environment:
