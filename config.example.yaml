@@ -21,6 +21,36 @@ bert:
 mf:
     checkpoint_path: routellm/mf_gpt4_augmented
 
+# Response cache. Off unless enabled: it answers from disk instead of
+# calling the model, which is wrong for most conversational traffic. The
+# key covers the whole request -- every message (images and tool calls
+# included), tools and sampling params -- so only an identical request
+# hits. Stream requests are never cached. The database holds prompts and
+# completions in plaintext and is created owner-only (0600). A relative
+# `db_path` resolves against this file's directory.
+cache:
+  enabled: false
+  db_path: .routellm_cache.db
+  ttl_seconds: 86400
+
+# Retries, timeout and circuit breaker for every upstream call. The
+# defaults are shown. `timeout_ms` bounds one attempt; a slow local
+# model needs more. An endpoint may override it with its own
+# `timeout_ms:`. An `openai/` endpoint also retries inside the SDK, so
+# set `extra: {max_retries: 0}` there to keep the count honest.
+resilience:
+  timeout_ms: 30000
+  max_retries: 3
+  retry_on_codes: [429, 500, 502, 503, 504]
+  initial_backoff_ms: 500
+  backoff_factor: 2.0
+  cb_enabled: true
+  cb_fail_max: 5
+  cb_fail_rate: 0.5
+  cb_fail_wait_ms: 5000
+  cb_rate_interval_ms: 60000
+  cb_rate_minimum: 10
+
 # Named endpoints. Each gives a reachable model a stable name that
 # routing, caching, and traces refer to instead of a raw litellm model
 # string. Names match [A-Za-z0-9_]+: hyphens are reserved for the

@@ -181,6 +181,9 @@ class Endpoint(BaseModel):
         well-formed the 402 it answers with. Enabling a payment
         provider supplies a wallet; this is what names who may spend
         it.
+    timeout_ms : int, optional
+        Per-attempt timeout for this endpoint, overriding the server's
+        `resilience.timeout_ms`. None keeps the global value.
     max_payment : str, optional
         The most a single payment to this endpoint may be, as human
         money ("$0.01"). It may only lower the process-wide
@@ -204,6 +207,7 @@ class Endpoint(BaseModel):
     quality_measured: bool = False
     pay: StrictBool = False
     max_payment: str | None = None
+    timeout_ms: int | None = Field(default=None, gt=0)
 
     @field_validator("name")
     @classmethod

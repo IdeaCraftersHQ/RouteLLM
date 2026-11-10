@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import sqlite3
 import time
 from typing import Any
@@ -46,6 +47,68 @@ class CacheConfig(BaseModel):
     embedding_model: str = "text-embedding-3-small"
 
 
+def conversation_key(messages: Any) -> str:
+    """Digest of a whole conversation, for use in a cache key.
+
+    Covers every message: role, text, content parts (images included,
+    by value), tool calls and tool results. Two conversations that merely
+    end in the same message get different digests.
+
+    Parameters
+    ----------
+    messages : Any
+        The request's `messages`, a list of dicts or a bare string.
+
+    Returns
+    -------
+    str
+        SHA256 hex digest of the canonical JSON form.
+    """
+    canonical = json.dumps(messages, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _blank_text(content: Any) -> Any:
+    """`content` with the text of its text parts emptied, structure kept."""
+    if isinstance(content, str):
+        return ""
+    if isinstance(content, list):
+        return [
+            {**part, "text": ""} if isinstance(part, dict) and part.get("type") == "text" else part
+            for part in content
+        ]
+    return content
+
+
+def context_key(messages: Any) -> str:
+    """Digest of everything in a conversation except its last turn's text.
+
+    The semantic cache compares the final user turn by embedding, so that
+    is the one thing allowed to differ between a request and the entry it
+    reuses. Everything else must match exactly: earlier messages, the
+    system prompt, and the last turn's role, tool calls and non-text
+    parts (images included, by value).
+
+    Parameters
+    ----------
+    messages : Any
+        The request's `messages`, a list of dicts or a bare string.
+
+    Returns
+    -------
+    str
+        SHA256 hex digest of the canonical JSON form.
+    """
+    if isinstance(messages, list) and messages:
+        last = messages[-1]
+        if isinstance(last, dict):
+            last = {**last, "content": _blank_text(last.get("content"))}
+        scope: Any = [*messages[:-1], last]
+    else:
+        scope = _blank_text(messages)
+    return conversation_key(scope)
+
+
 class Cache:
     """Persistent cache for completions, supporting exact and semantic matching.
 
@@ -65,7 +128,21 @@ class Cache:
         self._init_db()
 
     def _init_db(self):
-        """Initialize SQLite database schema."""
+        """Initialize SQLite database schema.
+
+        A disabled cache touches nothing on disk. The database is created
+        owner-only (0600), and an existing one is brought to 0600: it holds
+        prompts and completions in plaintext.
+        """
+        if not self.config.enabled:
+            return
+        parent = os.path.dirname(self.config.db_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        os.close(os.open(self.config.db_path, os.O_CREAT | os.O_RDWR, 0o600))
+        # The mode above only applies to a file this call creates; one
+        # that already exists (older version, other umask) is tightened.
+        os.chmod(self.config.db_path, 0o600)
         conn = sqlite3.connect(self.config.db_path)
         cursor = conn.cursor()
         cursor.execute("""
@@ -75,10 +152,20 @@ class Cache:
                 model TEXT,
                 response TEXT,
                 embedding BLOB,
-                created_at INTEGER
+                created_at INTEGER,
+                scope TEXT
             )
         """)
+        # A database made before `scope` existed gains the column; its old
+        # rows keep a NULL scope, which no semantic lookup matches, so
+        # they still serve exact hits and never a fuzzy one.
+        columns = {row[1] for row in cursor.execute("PRAGMA table_info(completion_cache)")}
+        if "scope" not in columns:
+            cursor.execute("ALTER TABLE completion_cache ADD COLUMN scope TEXT")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_model ON completion_cache(model)")
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_model_scope ON completion_cache(model, scope)"
+        )
         conn.commit()
         conn.close()
 
@@ -101,6 +188,32 @@ class Cache:
         """
         data = {"prompt": prompt, "model": model, "params": params}
         return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+
+    @staticmethod
+    def _get_scope(params: dict[str, Any]) -> str:
+        """Digest of what a semantic match must share with its entry.
+
+        Callers put a digest of the whole conversation under
+        `_conversation` (the exact key) and a digest of everything but
+        the last turn's text under `_context`. The scope is every param
+        except the first, so only the final turn's wording may differ.
+        A caller that supplies no `_context` has no safe fuzzy scope, so
+        `_conversation` stays in and semantic matching degrades to exact.
+
+        Parameters
+        ----------
+        params : dict
+            Generation parameters, as passed to `get` and `put`.
+
+        Returns
+        -------
+        str
+            SHA256 hex digest.
+        """
+        scoped = {k: v for k, v in params.items() if k != "_conversation"}
+        if "_context" not in params and "_conversation" in params:
+            scoped["_conversation"] = params["_conversation"]
+        return hashlib.sha256(json.dumps(scoped, sort_keys=True, default=str).encode()).hexdigest()
 
     def get(self, prompt: str, model: str, params: dict[str, Any]) -> dict[str, Any] | None:
         """Retrieve cached completion via exact or semantic match.
@@ -148,8 +261,9 @@ class Cache:
             logger.debug(f"Cache: Attempting semantic match for '{prompt}'")
             prompt_emb = self._get_embedding(prompt)
             cursor.execute(
-                "SELECT response, embedding, created_at FROM completion_cache WHERE model = ? AND embedding IS NOT NULL",
-                (model,),
+                "SELECT response, embedding, created_at FROM completion_cache "
+                "WHERE model = ? AND scope = ? AND embedding IS NOT NULL",
+                (model, self._get_scope(params)),
             )
             rows = cursor.fetchall()
             for r, emb_blob, c_at in rows:
@@ -225,7 +339,9 @@ class Cache:
         conn = sqlite3.connect(self.config.db_path)
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT OR REPLACE INTO completion_cache (key, prompt, model, response, embedding, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO completion_cache "
+            "(key, prompt, model, response, embedding, created_at, scope) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 key,
                 prompt,
@@ -233,6 +349,7 @@ class Cache:
                 json.dumps(response),
                 embedding.tobytes() if embedding is not None else None,
                 int(time.time()),
+                self._get_scope(params),
             ),
         )
         conn.commit()

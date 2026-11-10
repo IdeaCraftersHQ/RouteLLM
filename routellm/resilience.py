@@ -187,9 +187,20 @@ class Resilience:
         return self.cb_map[key]
 
     async def wrap_acompletion(
-        self, model_name: str, fn: Callable[..., Awaitable[Any]], *args, **kwargs
+        self,
+        model_name: str,
+        fn: Callable[..., Awaitable[Any]],
+        *args,
+        timeout_ms: int | None = None,
+        **kwargs,
     ):
+        """Call `fn` with retries, a breaker and a per-attempt timeout.
+
+        `timeout_ms` overrides the configured one for this call, which is
+        how an endpoint that is slow by nature gets a longer budget.
+        """
         cb = self.get_cb(model_name)
+        timeout_s = (self.config.timeout_ms if timeout_ms is None else timeout_ms) / 1000
 
         last_error = None
         for attempt in range(self.config.max_retries + 1):
@@ -206,9 +217,7 @@ class Resilience:
                 await asyncio.sleep(wait)
 
             try:
-                res = await asyncio.wait_for(
-                    fn(*args, **kwargs), timeout=self.config.timeout_ms / 1000
-                )
+                res = await asyncio.wait_for(fn(*args, **kwargs), timeout=timeout_s)
                 if self.config.cb_enabled:
                     cb.record_success()
                 return res

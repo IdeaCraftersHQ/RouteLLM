@@ -15,7 +15,7 @@ from litellm import acompletion, completion, stream_chunk_builder
 from tqdm import tqdm
 
 from routellm import requirements as requirements_module
-from routellm.caching import Cache, CacheConfig
+from routellm.caching import Cache, CacheConfig, context_key, conversation_key
 from routellm.capabilities import (
     build_tier_index,
     catalog_records,
@@ -786,6 +786,22 @@ class Controller:
 
         return model, balanced_base or api_base, balanced_key or api_key, endpoint.extra
 
+    @staticmethod
+    def _cache_params(kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Everything that shapes the answer, for the cache key.
+
+        The sampling params, tools and the like, plus a digest of the
+        whole conversation: the cache's own `prompt` is only the last
+        message, which would let two different conversations ending in
+        the same words share one answer. `_context` digests all but the
+        last turn's text, which scopes the semantic match to the same
+        context.
+        """
+        params = {k: v for k, v in kwargs.items() if k not in ["messages", "model"]}
+        params["_conversation"] = conversation_key(kwargs.get("messages"))
+        params["_context"] = context_key(kwargs.get("messages"))
+        return params
+
     def _validate_router_threshold(self, router: str, threshold: float):
         if router not in self.routers:
             raise RoutingError(f"Router {router} not found.")
@@ -1148,7 +1164,7 @@ class Controller:
         streaming = bool(kwargs.get("stream"))
 
         # Try cache
-        cache_params = {k: v for k, v in kwargs.items() if k not in ["messages", "model"]}
+        cache_params = self._cache_params(kwargs)
         cached_res = None if streaming else self.cache.get(prompt, model_to_use, cache_params)
         if cached_res:
             from litellm.utils import ModelResponse
@@ -1317,7 +1333,7 @@ class Controller:
         streaming = bool(kwargs.get("stream"))
 
         # Try cache
-        cache_params = {k: v for k, v in kwargs.items() if k not in ["messages", "model"]}
+        cache_params = self._cache_params(kwargs)
         cached_res = (
             None if streaming else await self.cache.aget(prompt, model_to_use, cache_params)
         )
@@ -1387,7 +1403,11 @@ class Controller:
                         ),
                     )
 
-                res = await self.resilience.wrap_acompletion(model_name, _open)
+                res = await self.resilience.wrap_acompletion(
+                    model_name,
+                    _open,
+                    timeout_ms=self.endpoints.resolve(model_name).timeout_ms,
+                )
                 latency_ms = int((time.monotonic() - started) * 1000)
 
                 if streaming:

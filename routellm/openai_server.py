@@ -29,6 +29,7 @@ from routellm.middleware.intent_model_selector import (
     IntentModelSelector,
 )
 from routellm.routers.routers import ROUTER_CLS
+from routellm.server_config import SERVER_SECTIONS, build_cache_config, build_resilience_config
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 CONTROLLER = None
@@ -302,7 +303,14 @@ def build_router_config(file_config: dict | None) -> dict | None:
         the router defaults.
     """
     router_config = dict(file_config or {})
-    for key in ("endpoints", "tiers", "intents", "quality_from", "quality_from_override"):
+    for key in (
+        "endpoints",
+        "tiers",
+        "intents",
+        "quality_from",
+        "quality_from_override",
+        *SERVER_SECTIONS,
+    ):
         router_config.pop(key, None)
     return router_config or None
 
@@ -494,6 +502,8 @@ async def lifespan(app):
         default_router=args.routers[0] if args.routers else None,
         default_threshold=args.default_threshold,
         middleware=[intents] if intents else None,
+        cache_config=build_cache_config(file_config, config_origin),
+        resilience_config=build_resilience_config(file_config),
     )
     yield
     CONTROLLER = None
