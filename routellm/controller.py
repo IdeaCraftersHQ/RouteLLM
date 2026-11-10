@@ -26,6 +26,7 @@ from routellm.capabilities import (
 )
 from routellm.endpoints import EndpointRegistry, Selector
 from routellm.hints import TYPESAFE_INSTALL_HINT
+from routellm.leaf_params import drop_kwargs, log_dropped
 from routellm.payment.gateway import PaymentGateway
 from routellm.payment.types import PaymentChallenge
 from routellm.quality import QualityManager
@@ -788,7 +789,12 @@ class Controller:
         else:
             model, balanced_key, balanced_base = endpoint.model, None, None
 
-        return model, balanced_base or api_base, balanced_key or api_key, endpoint.extra
+        api_base = balanced_base or api_base
+        extra = {
+            **endpoint.extra,
+            **drop_kwargs(model, api_base, endpoint.drop_params, endpoint.extra),
+        }
+        return model, api_base, balanced_key or api_key, extra
 
     @staticmethod
     def _cache_params(kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -1203,6 +1209,7 @@ class Controller:
             def _call():
                 kwargs_copy = {**extra, **kwargs}
                 kwargs_copy["model"] = model
+                log_dropped(model_name, model, curr_api_base, kwargs_copy)
                 kwargs_copy.pop("extra_headers", None)
                 return completion(
                     api_base=curr_api_base,
@@ -1398,6 +1405,7 @@ class Controller:
             async def _call(extra_headers=None):
                 kwargs_copy = {**extra, **kwargs}
                 kwargs_copy["model"] = model
+                log_dropped(model_name, model, curr_api_base, kwargs_copy)
                 # The endpoint's headers, the request's, then a payment
                 # proof, merged into the one `extra_headers` litellm takes.
                 kwargs_copy.pop("extra_headers", None)

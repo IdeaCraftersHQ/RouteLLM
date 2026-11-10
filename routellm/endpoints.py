@@ -79,12 +79,13 @@ model-name grammar that splits on '-'.
 import logging
 import os
 import re
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
     Field,
     StrictBool,
+    StringConstraints,
     field_validator,
     model_validator,
 )
@@ -184,6 +185,13 @@ class Endpoint(BaseModel):
     timeout_ms : int, optional
         Per-attempt timeout for this endpoint, overriding the server's
         `resilience.timeout_ms`. None keeps the global value.
+    drop_params : bool or list[str], optional
+        What to do with a request param this endpoint's provider does
+        not support. Unset drops the advisory flags the provider lacks
+        (`parallel_tool_calls`, `reasoning_effort`, `stream_options`)
+        and fails on anything else; `true` drops anything the provider
+        rejects; `false` drops nothing; a list of names drops those
+        for this endpoint as well. See `routellm.leaf_params`.
     max_payment : str, optional
         The most a single payment to this endpoint may be, as human
         money ("$0.01"). It may only lower the process-wide
@@ -208,6 +216,7 @@ class Endpoint(BaseModel):
     pay: StrictBool = False
     max_payment: str | None = None
     timeout_ms: int | None = Field(default=None, gt=0)
+    drop_params: StrictBool | list[Annotated[str, StringConstraints(min_length=1)]] | None = None
 
     @field_validator("name")
     @classmethod
