@@ -215,6 +215,18 @@ def is_non_public_base(api_base: str) -> bool:
     return any(ip in net for net in _LOCAL_NETWORKS if net.version == ip.version)
 
 
+_PerMillion = Annotated[float, Field(strict=True, ge=0, allow_inf_nan=False)]
+
+
+class Price(BaseModel):
+    """An explicit USD price per 1M tokens, input and output both stated."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    input: _PerMillion
+    output: _PerMillion
+
+
 class Endpoint(BaseModel):
     """A named, individually addressable model endpoint.
 
@@ -269,6 +281,15 @@ class Endpoint(BaseModel):
         Default False. Dangerous: with it a `local` endpoint may point
         at a public host, so the tag no longer means the prompt stays
         on the machine or network.
+    price : Price, optional
+        USD per 1M tokens (`input`, `output`, both required, both
+        non-negative), overriding the models.dev catalog for this
+        endpoint wherever a price is read: the `free:` selector term,
+        `cost_*` orders and comparison cost. For models the catalog
+        lacks or misprices, local ones above all.
+    free : bool, optional
+        `true` is shorthand for a price of 0 in and out. Only `true`
+        is accepted, and not alongside `price`.
     max_payment : str, optional
         The most a single payment to this endpoint may be, as human
         money ("$0.01"). It may only lower the process-wide
@@ -295,6 +316,8 @@ class Endpoint(BaseModel):
     pay: StrictBool = False
     allow_public_base: StrictBool = False
     max_payment: str | None = None
+    price: Price | None = None
+    free: Literal[True] | None = None
     timeout_ms: int | None = Field(default=None, gt=0)
     drop_params: StrictBool | list[Annotated[str, StringConstraints(min_length=1)]] | None = None
 
@@ -403,6 +426,25 @@ class Endpoint(BaseModel):
             "host, drop the `local` tag, or set `allow_public_base: true` "
             "(dangerous: it lets a `local` endpoint reach a public host)."
         )
+
+    @model_validator(mode="after")
+    def _validate_price_or_free(self) -> "Endpoint":
+        """`price` and `free` both state a price; one source per endpoint."""
+        if self.price is not None and self.free is not None:
+            raise ValueError(
+                f"endpoint {self.name!r} sets both `price` and `free`; "
+                "use `price: {input: 0, output: 0}` or `free: true`, not both."
+            )
+        return self
+
+    @property
+    def price_override(self) -> tuple[float, float] | None:
+        """Return the stated (input, output) USD per 1M, None when unstated."""
+        if self.price is not None:
+            return (self.price.input, self.price.output)
+        if self.free:
+            return (0.0, 0.0)
+        return None
 
     @model_validator(mode="after")
     def _validate_cap_needs_pay(self) -> "Endpoint":

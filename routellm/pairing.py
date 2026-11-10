@@ -214,7 +214,13 @@ class Candidate:
 
     @property
     def total_cost(self) -> float | None:
-        """Return input plus output USD per 1M, or None when unpriced."""
+        """Return input plus output USD per 1M, or None when unpriced.
+
+        An endpoint's own `price` / `free` wins over the catalog.
+        """
+        override = self.endpoint.price_override
+        if override is not None:
+            return override[0] + override[1]
         if self.record is None:
             return None
         if self.record.cost_input is None and self.record.cost_output is None:
@@ -545,12 +551,15 @@ def _free_term(select: str) -> bool | None:
     return values.pop() if values else None
 
 
-def _is_free(record: ModelRecord | None) -> bool:
-    """Return whether the catalog prices input and output at zero.
+def _is_free(record: ModelRecord | None, endpoint: Endpoint | None = None) -> bool:
+    """Return whether input and output are priced at zero.
 
-    An uncatalogued endpoint, or one whose record leaves either price
+    An endpoint's own `price` / `free` wins over the catalog. An uncatalogued endpoint, or one whose record leaves either price
     unstated, is not free: absence of a price is not a price of zero.
     """
+    override = endpoint.price_override if endpoint is not None else None
+    if override is not None:
+        return override == (0.0, 0.0)
     return (
         record is not None
         and record.cost_input is not None
@@ -795,7 +804,7 @@ def rank_candidates(
         if key is not None:
             record = by_key.get(key)
 
-        if free is not None and _is_free(record) != free:
+        if free is not None and _is_free(record, endpoint) != free:
             continue
 
         capabilities = capabilities_for(endpoint, record)

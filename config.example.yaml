@@ -423,8 +423,19 @@ tiers:
 # (`local|vpn|cloud`); anything else, or an unknown namespace in any
 # `tag:` term, fails at startup.
 
-# `free:true` keeps endpoints the catalog prices at 0 for input and output
-# (unpriced or uncatalogued ones are not free). `pool: N` keeps the best N
+# `free:true` keeps endpoints priced at 0 for input and output (unpriced or
+# uncatalogued ones are not free). An endpoint's own `price:` (USD per 1M
+# tokens, `input` and `output` both required, non-negative) or `free: true`
+# (shorthand for 0 and 0) overrides the catalog for that endpoint in the
+# `free:` term, `cost_*` orders and comparison cost, so an uncatalogued
+# local or new `:free` model can be priced; the override wins over a catalog
+# price. `price` with `free` is rejected. Commented out:
+#
+# endpoints:
+#   local_a: {model: ollama_chat/a, api_base: "http://127.0.0.1:11434", tags: [local], free: true}
+#   gw_new:  {model: openrouter/vendor/new:free, tags: [cloud], price: {input: 0, output: 0}}
+#
+# `pool: N` keeps the best N
 # matches: the first is the side, the rest are tried after it, before the
 # other side, when it fails or is cooling (see `resilience:`). Tag every
 # metered gateway endpoint (`cloud`, plus the provider's own label) so a

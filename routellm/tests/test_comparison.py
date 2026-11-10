@@ -52,7 +52,16 @@ def ups():
 
 
 def build(
-    ups, comparison, tmp_path, *, tags=None, tiers=None, cache=False, traces=True, capture=False
+    ups,
+    comparison,
+    tmp_path,
+    *,
+    tags=None,
+    tiers=None,
+    cache=False,
+    traces=True,
+    capture=False,
+    extra=None,
 ):
     tags = tags or {}
     endpoints = {
@@ -61,6 +70,7 @@ def build(
             "api_base": ups[name].base,
             "api_key_env": "FAKE_KEY",
             **({"tags": tags[name]} if name in tags else {}),
+            **((extra or {}).get(name) or {}),
         }
         for name in ups
     }
@@ -461,6 +471,32 @@ def test_unpriced_endpoint_has_null_cost(ups, tmp_path):
     controller._catalog_records = {}
     ask(controller, compare="b")
     assert shadows(tmp_path)[0]["routellm"]["comparison"]["metrics"]["cost_usd"] is None
+
+
+def test_endpoint_price_override_prices_an_uncatalogued_call(ups, tmp_path):
+    extra = {"b": {"price": {"input": 1_000_000, "output": 1_000_000}}}
+    controller = build(ups, {"enabled": True}, tmp_path, extra=extra)
+    controller._catalog_records = {}
+    ask(controller, compare="b")
+    (row,) = shadows(tmp_path)
+    assert row["routellm"]["comparison"]["metrics"]["cost_usd"] == pytest.approx(6.0)
+
+
+def test_endpoint_price_override_beats_catalog_price(ups, tmp_path):
+    controller = build(ups, {"enabled": True}, tmp_path, extra={"b": {"free": True}})
+    _priced(controller, 1_000_000.0)
+    ask(controller, compare="b")
+    (row,) = shadows(tmp_path)
+    assert row["routellm"]["comparison"]["metrics"]["cost_usd"] == 0.0
+
+
+def test_endpoint_price_override_counts_against_budget(ups, tmp_path):
+    extra = {"b": {"price": {"input": 100_000, "output": 100_000}}}  # 0.6 USD per call
+    controller = build(ups, {"enabled": True, "budget_usd": 1.0}, tmp_path, extra=extra)
+    controller._catalog_records = {}
+    for _ in range(4):
+        ask(controller, compare="b")
+    assert len(ups["b"].hits) == 2
 
 
 def test_global_budget_stops_shadows_once_spent(ups, tmp_path):

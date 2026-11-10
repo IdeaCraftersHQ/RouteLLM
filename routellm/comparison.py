@@ -37,8 +37,8 @@ Safety, enforced here and nowhere else:
 * Every outbound call carries the hop header.
 
 Budget accounting is in USD, in memory, per process: a restart clears
-it. A call's cost is its token usage priced from the catalog record of
-the endpoint; an unpriced endpoint costs nothing against the budget. A
+it. A call's cost is its token usage priced from the endpoint's own `price` / `free`, else from
+the catalog record of the endpoint; an unpriced endpoint costs nothing against the budget. A
 call is charged when it finishes, so in-flight calls can overshoot a cap
 by their own cost.
 """
