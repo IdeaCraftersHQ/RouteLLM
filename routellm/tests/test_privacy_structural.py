@@ -21,7 +21,8 @@ for _module in CASE_MODULES:
 
 BREAKER = ["breaker_open_on_every_local_leaf"]
 BATCH = [n for n in CASES if n not in BREAKER and not CASES[n].policy]
-POLICY_BATCH = [n for n in CASES if CASES[n].policy]
+POLICY_BATCH = [n for n in CASES if CASES[n].policy and not CASES[n].gate]
+GATE_BATCH = [n for n in CASES if CASES[n].gate]
 
 
 @pytest.fixture(scope="module")
@@ -41,6 +42,48 @@ def breaker_results(tmp_path_factory):
 @pytest.fixture(scope="module")
 def policy_results(tmp_path_factory):
     return pf.run_cases(tmp_path_factory.mktemp("privacy-policy"), POLICY_BATCH, class_policy=True)
+
+
+@pytest.fixture(scope="module")
+def gate_results(tmp_path_factory):
+    return pf.run_cases(
+        tmp_path_factory.mktemp("privacy-gate"),
+        GATE_BATCH,
+        extra_config=pf.GATE_CONFIG,
+        class_policy=True,
+    )
+
+
+@pytest.mark.parametrize("name", GATE_BATCH)
+def test_a_gated_leaf_takes_zero_hits_for_a_denied_class(name, gate_results):
+    check(name, gate_results[name])
+
+
+def test_gate_denials_name_the_gate_and_the_class(gate_results):
+    for name in (
+        "gate_forced_side_onto_the_gated_leaf_is_403",
+        "gate_sibling_is_never_called",
+    ):
+        assert "gate:gated:class:leaky" in gate_results[name]["obs"]["message"], name
+
+
+def test_the_gate_controls_reach_the_gated_leaf(gate_results):
+    assert (
+        gate_results["gate_control_allowed_class_reaches_the_gated_primary"]["hits"]["gated_main"]
+        >= 1
+    )
+    assert (
+        gate_results["gate_control_allowed_class_falls_back_to_the_gated_sibling"]["hits"][
+            "gated_main"
+        ]
+        >= 1
+    )
+    assert (
+        gate_results["gate_control_allowed_class_is_classified_by_the_gated_detector"]["hits"][
+            "gated_main"
+        ]
+        >= 1
+    )
 
 
 @pytest.mark.parametrize("name", POLICY_BATCH)

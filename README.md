@@ -360,7 +360,7 @@ principals:
 
 **Every candidate, every path.** Under a policy the same reach and `jur` rule is applied again to each endpoint a request could be sent to, at request time (`Controller._can_serve`, through `routellm.class_tiers.class_denial`): tier sides (a tier-valued side passes only if every leaf under it does), a side forced by capabilities or by the class, the fallback sibling, candidate-pool members, load-balancer targets, the canary model, traffic-rule and middleware pairs, and every comparison target. A denied candidate is never called and is never replaced by another class or tier: when none is left the request fails `403` with the reason `policy:<class>:<reach|jur>`. A sibling dropped for its class after the primary failed upstream ends the same way, with `403` rather than the upstream error. Nothing changes without a policy, or for a class that may reach the endpoint.
 
-- **Comparison**: a shadow target the request's class may not use is dropped before anything is called and listed in the primary's path entry as `comparison_denied` (`endpoint`, `reason`). `POST /v1/compare` refuses with `403` when the class may not enter the named `tier` or may not use any listed model, and calls nothing. The class is the decision classifier's when one is configured, else the declared one; under a policy a client request without one is refused. The operator's replay run, which declares no class, is not class-gated.
+- **Comparison**: a shadow target the request's class may not use is dropped before anything is called and listed in the primary's path entry as `comparison_denied` (`endpoint`, `reason`). `POST /v1/compare` refuses with `403` when the class may not enter the named `tier` or may not use any listed model, and calls nothing. The class is the decision classifier's when one is configured, else the declared one; under a policy a client request without one is refused. The operator's replay run, which declares no class, is not class-gated by the policy; an [egress gate](#egress-gates) still judges it, with the class undecided.
 - **Intent tier switch**: a tier an intent maps to that is not in the class's `tiers` is ignored, with no error: the request stays in the tier it entered, and the path entry records `intent_ignored` with the tier named. Intent tiers a class may enter are walked at startup like any other allowed tier.
 
 #### Request data class and operation
@@ -899,7 +899,7 @@ The targets above need no `intent_routing` of their own: a request arriving as `
 
 A classifier never overrules an app that chose a tier by name: an intent-selected tier is honoured only for a request addressed to `default`, or to a tier that opts in with `intent_routing: true`. A tier that is passed over this way says so on the decision path, as `intent_ignored`, and a tier entered by intent carries `tier_from: intent`. `default` can opt out with `intent_routing: false`.
 
-Intent detection never reaches a provider outside the registry, and there is no default model. With `detector: litellm`, `model` must name a registry endpoint (not a tier, not a raw model name: that is a startup error), and the call uses that endpoint's own `api_base` and credential. Leave `model` unset and detection is disabled, with one INFO line at startup. With `detector: jev`, `upstream` must name a registry endpoint whose `api_base` is the Jev host, so the call carries that endpoint's reach and jurisdiction tags like any other. A router that calls a hosted service, such as `jev`, is configured the same way (`jev: {upstream: jev_host}`) and refuses to load without it. The endpoint a detector or router calls is exposed (`egress_endpoint`, `upstream`) so an egress policy can veto it.
+Intent detection never reaches a provider outside the registry, and there is no default model. With `detector: litellm`, `model` must name a registry endpoint (not a tier, not a raw model name: that is a startup error), and the call uses that endpoint's own `api_base` and credential. Leave `model` unset and detection is disabled, with one INFO line at startup. With `detector: jev`, `upstream` must name a registry endpoint whose `api_base` is the Jev host, so the call carries that endpoint's reach and jurisdiction tags like any other. A router that calls a hosted service, such as `jev`, is configured the same way (`jev: {upstream: jev_host}`) and refuses to load without it. The endpoint a detector calls is exposed (`egress_endpoint`) and an [egress gate](#egress-gates) vetoes it: a gated detector endpoint gets no call for a request whose class the gate denies.
 
 `detector: jev` classifies with one TypeSafe Jev question and needs the extension: `pip install -e extensions/typesafe`. `detector: litellm` asks the `model` to classify in a prompt built from the `descriptions`, and needs nothing extra. Both read the same `descriptions`, so the wording that tells the classifier what an intent means lives in one place. `python -m routellm.pairing --config` prints one `intent <label> -> tier <name>` line per mapping.
 
@@ -941,6 +941,35 @@ python -m routellm.decision.eval --config config.yaml --data labelled.jsonl --mi
 ```
 
 It prints recall and precision per class, a confusion table and latency percentiles, and exits 1 when a named class's recall is under its floor (`--model-only` skips the recognizers).
+
+### Egress gates
+
+An `egress_gates:` list holds back a tagged group of endpoints. A gate is keyed on an endpoint tag expression, so it names no provider: the deployment picks the tag.
+
+```yaml
+egress_gates:
+  - name: gated
+    select: "tag:gated"              # tag terms only: tag:x  !tag:x  tag:a|b
+    deny_classes: [private]          # classes that never reach a selected endpoint
+    require_policy_allow: false      # see below
+    models:
+      allow:                         # globs on the endpoint's model id
+        - "vendor/*"
+        - model: "vendor/free-*"     # an entry may require request params
+          require: {extra_body.provider.data_collection: deny}
+      deny: ["*:legacy"]             # deny wins over allow
+    also_check: [extra_body.models]  # dotted paths in `extra` holding more model ids
+```
+
+**At load**, every endpoint `select` matches is checked: its own model id, and every id found under `also_check` (a provider-side fallback list the router cannot see at call time), must match `models.allow` and no `models.deny` entry, and each `require` of every matching allow entry must equal the value at that path in the endpoint's `extra`. A violation stops startup naming gate, endpoint and id. Omitting `models.allow` leaves ids unlimited (only `deny` applies); an empty list allows nothing. A `select` matching no endpoint, a `deny_classes` entry the policy does not list, and `deny_classes` or `require_policy_allow` without a `policy:` are load errors too, and so is a `decision.endpoint` that a gate with those rules selects: the decision step reads a request before its class exists.
+
+**At request time** the gate is one more reason at the same point as the class check (`Controller._policy_reason`, behind `_can_serve`), so it holds every tier side, forced side, sibling, candidate-pool member, load-balancer target, shadow, `POST /v1/compare` target and the canary. A selected endpoint whose gate refuses the request's class is not a candidate: it is never called and never replaced by another class. The request goes to the tier's other side, or when none is left fails `403` with `gate:<name>:class:<class>`. A tier is judged by every leaf under it. The reason of a dropped sibling or pool member is listed on the path as `egress_gate_denied`; a gated endpoint that served is listed as `egress_gate: {passed: [<name>]}`.
+
+**Order.** The class is final before any gated call: the gate reads the class the controller put on the request after the decision step (the strictest of the declared class, recognizers and the model), so a decision that raises the class, or fails into `on_error`, is what the gate sees. A request with no class at all (the operator's replay) counts as the most restrictive for `deny_classes` and is refused a gated endpoint (`gate:<name>:class:undecided`); `models` rules apply as at load only.
+
+**Detector.** A middleware whose detector calls a gated endpoint (`intents.model` on a gated endpoint) is not consulted for a request whose class the gate denies: zero calls, and the request stays in the tier it addressed. Other auxiliary paths (routers, semantic cache, transcription, judge) are not gated yet.
+
+**`require_policy_allow`** is accepted but fails closed: it needs the request's policy, which is not built yet, so a gate that sets it refuses every request to its endpoints (`gate:<name>:policy`) until then.
 
 ### Threshold Calibration
 
