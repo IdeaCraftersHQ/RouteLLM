@@ -47,9 +47,10 @@ class IntentModelSelector:
         self,
         intent_mappings: list[IntentModelMapping],
         default_model_pair: ModelPair | None = None,
-        intent_detection_model: str = "gpt-3.5-turbo",
+        intent_detection_model: str | None = None,
         intent_detector: Any | None = None,
         intent_tiers: dict[str, str] | None = None,
+        intent_endpoint: Any | None = None,
     ):
         """Initialize the intent-based model selector.
 
@@ -62,7 +63,15 @@ class IntentModelSelector:
             a selector that picks tiers only, which keeps
             `get_model_pair` from bypassing the tier tree.
         intent_detection_model : str, optional
-            Model to use for intent detection (default "gpt-3.5-turbo").
+            Raw litellm model for the built-in classification path.
+            There is no default: with neither this nor
+            `intent_endpoint` nor `intent_detector`, `detect_intent`
+            makes no call and answers "general". The server never
+            passes a raw name; it passes `intent_endpoint`.
+        intent_endpoint : Endpoint, optional
+            Registry endpoint the built-in classification path calls,
+            with its own base URL and credential. Wins over
+            `intent_detection_model`.
         intent_detector : Optional[Any], optional
             Pluggable intent detector to delegate detect_intent to (default
             None, which uses the built-in litellm classification path). Any
@@ -75,7 +84,10 @@ class IntentModelSelector:
         """
         self.intent_mappings = intent_mappings
         self.default_model_pair = default_model_pair
-        self.intent_detection_model = intent_detection_model
+        self.intent_endpoint = intent_endpoint
+        self.intent_detection_model = (
+            intent_endpoint.model if intent_endpoint is not None else intent_detection_model
+        )
         self.intent_detector = intent_detector
         self.intent_tiers = dict(intent_tiers or {})
         self.intent_cache = {}  # Cache detected intents
@@ -88,6 +100,33 @@ class IntentModelSelector:
             for mapping in intent_mappings
             if mapping.model_pair is not None
         }
+
+    @property
+    def egress_endpoint(self) -> str | None:
+        """Registry endpoint name this selector sends prompts to, or None.
+
+        Read by a per-class egress gate to veto the call. A pluggable
+        detector reports its own `upstream`; the built-in path reports
+        `intent_endpoint`. None means nothing leaves the process (an
+        in-process detector, or detection disabled).
+        """
+        if self.intent_detector is not None:
+            return getattr(self.intent_detector, "upstream", None)
+        if self.intent_endpoint is not None:
+            return self.intent_endpoint.name
+        return None
+
+    def _completion_params(self) -> dict[str, Any]:
+        """Return the litellm kwargs for a classification call."""
+        params: dict[str, Any] = {"model": self.intent_detection_model}
+        if self.intent_endpoint is not None:
+            api_base, api_key = self.intent_endpoint.credentials(None, None)
+            if api_base is not None:
+                params["api_base"] = api_base
+            if api_key is not None:
+                params["api_key"] = api_key
+            params.update(self.intent_endpoint.extra)
+        return params
 
     def detect_intent(self, prompt: str) -> str:
         """Detect the intent of a prompt using an LLM.
@@ -122,6 +161,10 @@ class IntentModelSelector:
                 detected_intent = "general"
             self.intent_cache[prompt] = detected_intent
             return detected_intent
+
+        # No detector and no model: never fall through to a cloud call.
+        if self.intent_detection_model is None:
+            return "general"
 
         intent_descriptions = {
             mapping.intent: mapping.description for mapping in self.intent_mappings
@@ -172,7 +215,7 @@ Respond with ONLY the category name in lowercase, nothing else. If none of the c
 
             # Call the LLM to classify the intent
             response = completion(
-                model=self.intent_detection_model,
+                **self._completion_params(),
                 messages=[{"role": "user", "content": classification_prompt}],
             )
 
@@ -210,6 +253,9 @@ Respond with ONLY the category name in lowercase, nothing else. If none of the c
             Dictionary with keys "analysis", "scores", and "best_match".
             Returns {"error": str, "best_match": "general"} on failure.
         """
+        if self.intent_detection_model is None:
+            return {"error": "no intent detection model configured", "best_match": "general"}
+
         # Get available intents and their descriptions
         intents = [mapping.intent for mapping in self.intent_mappings]
         intent_descriptions = {
@@ -258,7 +304,7 @@ Respond in JSON format like this:
 
             # Call the LLM for analysis
             response = completion(
-                model=self.intent_detection_model,
+                **self._completion_params(),
                 messages=[{"role": "user", "content": analysis_prompt}],
             )
 

@@ -85,7 +85,7 @@ def load_intent_config(config_path: str) -> IntentModelSelector:
         intent_mappings=intent_mappings,
         default_model_pair=default_model_pair,
         intent_tiers=config.get("intent_tiers"),
-        intent_detection_model=config.get("intent_detection_model", "gpt-3.5-turbo"),
+        intent_detection_model=config.get("intent_detection_model"),
     )
 
 

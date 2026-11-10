@@ -588,7 +588,8 @@ tiers:
 
 intents:
   detector: jev          # or litellm
-  model: jev-1           # the model the detector classifies with
+  model: jev-1           # litellm: a registry endpoint name; jev: the Jev model id
+  upstream: jev_host     # jev only: the registry endpoint it calls
   confidence_floor: 0.6  # jev only: below it, no intent is claimed
   descriptions:
     legal: contracts, statutes, and case law
@@ -603,6 +604,8 @@ Each intent maps to a tier, and `tiers:` must be present and non-empty — an `i
 The targets above need no `intent_routing` of their own: a request arriving as `default` is the case the gate below allows, and `legal` and `coding` are where it is sent, not where it came from. A tier needs `intent_routing: true` only when apps address *it* directly and you still want the classifier to move them on.
 
 A classifier never overrules an app that chose a tier by name: an intent-selected tier is honoured only for a request addressed to `default`, or to a tier that opts in with `intent_routing: true`. A tier that is passed over this way says so on the decision path, as `intent_ignored`, and a tier entered by intent carries `tier_from: intent`. `default` can opt out with `intent_routing: false`.
+
+Intent detection never reaches a provider outside the registry, and there is no default model. With `detector: litellm`, `model` must name a registry endpoint (not a tier, not a raw model name: that is a startup error), and the call uses that endpoint's own `api_base` and credential. Leave `model` unset and detection is disabled, with one INFO line at startup. With `detector: jev`, `upstream` must name a registry endpoint whose `api_base` is the Jev host, so the call carries that endpoint's reach and jurisdiction tags like any other. A router that calls a hosted service, such as `jev`, is configured the same way (`jev: {upstream: jev_host}`) and refuses to load without it. The endpoint a detector or router calls is exposed (`egress_endpoint`, `upstream`) so an egress policy can veto it.
 
 `detector: jev` classifies with one TypeSafe Jev question and needs the extension: `pip install -e extensions/typesafe`. `detector: litellm` asks the `model` to classify in a prompt built from the `descriptions`, and needs nothing extra. Both read the same `descriptions`, so the wording that tells the classifier what an intent means lives in one place. `python -m routellm.pairing --config` prints one `intent <label> -> tier <name>` line per mapping.
 

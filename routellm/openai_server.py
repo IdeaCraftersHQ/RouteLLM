@@ -258,12 +258,24 @@ def build_intents(
     ]
 
     if detector_name == "litellm":
+        if not model:
+            logging.info(
+                "intents.model is unset: intent detection is disabled. Set it to a "
+                "registry endpoint name to classify requests."
+            )
+            return None
         return IntentModelSelector(
             intent_mappings=mappings,
             default_model_pair=None,
-            intent_detection_model=model or "gpt-3.5-turbo",
+            intent_endpoint=_registry_endpoint(registry, model, "intents.model"),
             intent_tiers=intent_tiers,
         )
+
+    # The Jev upstream is a registry endpoint too, so it carries reach
+    # and jurisdiction tags like any model call. Checked before the
+    # import so a bad config fails the same way with or without the
+    # extension installed.
+    upstream = _registry_endpoint(registry, spec.get("upstream"), "intents.upstream")
 
     try:
         from routellm_typesafe.intent_detector import JevIntentDetector
@@ -275,6 +287,8 @@ def build_intents(
         model=model,
         confidence_floor=spec.get("confidence_floor", 0.5),
         descriptions=descriptions,
+        base_url=upstream.api_base,
+        upstream=upstream.name,
     )
     return IntentModelSelector(
         intent_mappings=mappings,
@@ -282,6 +296,24 @@ def build_intents(
         intent_detector=detector,
         intent_tiers=intent_tiers,
     )
+
+
+def _registry_endpoint(registry: EndpointRegistry, name: str | None, key: str):
+    """Return the registry endpoint `name`, or raise naming `key`.
+
+    A tier is refused with its own message: classifying needs one
+    concrete call target, and a tier is resolved per request.
+    """
+    if not name:
+        raise ValueError(f"{key} must name a registry endpoint; it has no default.")
+    if registry.has_tier(name):
+        raise ValueError(f"{key}: {name!r} is a tier; name a registry endpoint instead.")
+    if name not in registry.names():
+        known = ", ".join(registry.names()) or "<none>"
+        raise ValueError(
+            f"{key}: {name!r} is not a registry endpoint. Configured endpoints: {known}"
+        )
+    return registry.get(name)
 
 
 def build_router_config(file_config: dict | None) -> dict | None:

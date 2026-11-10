@@ -33,8 +33,16 @@ against a specific model version: `jev-latest` moves on release.
 
 ## Config
 
+Under the server, the Jev host is declared as a registry endpoint so
+the call carries its reach and jurisdiction tags, and `jev.upstream`
+(and `intents.upstream` for the detector) names it. The router refuses
+to load without one.
+
 ```yaml
+endpoints:
+  jev_host: {model: jev-1, api_base: https://api.typesafe.ai, tags: [cloud, "jur:us"]}
 jev:
+    upstream: jev_host
     # model and timeout default to the SDK env (TYPESAFE_DEFAULT_MODEL, 10s)
     # calibrated 2026-09-20 against jev-1.13.0; pin model: jev-1.13.0 to keep thresholds stable
     max_prompt_chars: 100000

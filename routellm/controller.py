@@ -302,10 +302,41 @@ class Controller:
             router_pbar = tqdm(total=len(to_build), desc="Initializing routers")
 
         for router in to_build:
-            router_config = config.get(router, {})
-            self.routers[router] = ROUTER_CLS[router](**router_config)
+            router_config = dict(config.get(router, {}))
+            router_cls = ROUTER_CLS[router]
+            if getattr(router_cls, "requires_upstream", False):
+                router_config.update(self._router_upstream(router, router_config))
+            self.routers[router] = router_cls(**router_config)
             if router_pbar:
                 router_pbar.update(1)
+
+    def _router_upstream(self, router: str, router_config: dict) -> dict[str, str | None]:
+        """Resolve the registry endpoint a hosted router calls.
+
+        A router that sends prompts to a hosted service sets
+        `requires_upstream = True`; its config must then carry
+        `upstream: <endpoint>`, so the call carries that endpoint's
+        reach and jurisdiction tags like any model call and an egress
+        gate can name it. The endpoint's `api_base` becomes the
+        router's `base_url`.
+
+        Raises
+        ------
+        ValueError
+            If `upstream` is unset or names no registry endpoint.
+        """
+        name = router_config.pop("upstream", None)
+        if not name:
+            raise ValueError(
+                f"Router {router!r} calls a hosted service and needs "
+                f"`{router}.upstream: <registry endpoint>`; it has no default."
+            )
+        if name not in self.endpoints.names():
+            raise ValueError(
+                f"Router {router!r} upstream {name!r} is not a registry endpoint. "
+                f"Configured endpoints: {', '.join(self.endpoints.names()) or '<none>'}"
+            )
+        return {"upstream": name, "base_url": self.endpoints.get(name).api_base}
 
     @property
     def model_pair(self) -> ModelPair:
