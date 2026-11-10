@@ -329,10 +329,10 @@ def test_clear_text_key_file_stops_startup_without_echoing_it(tmp_path):
     config = tmp_path / "c.json"
     config.write_text(json.dumps({"auth": {"keys_file": str(bad)}}))
     code = (
-        "import sys; sys.argv=['x','--config',%r]\n"
+        f"import sys; sys.argv=['x','--config',{str(config)!r}]\n"
         "import routellm.openai_server as s\n"
         "from fastapi.testclient import TestClient\n"
-        "with TestClient(s.app): pass\n" % str(config)
+        "with TestClient(s.app): pass\n"
     )
     result = subprocess.run(
         [sys.executable, "-c", code],
