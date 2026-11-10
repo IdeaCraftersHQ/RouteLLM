@@ -12,6 +12,10 @@ precedence first, later layers overriding earlier ones::
     5. env                     ROUTELLM_CONFIG=<path>
     6. flag                    --config <path>
 
+Layer 3 can be left out with `--no-user-config` or
+`ROUTELLM_NO_USER_CONFIG=1`, so an unrelated per-user file never reaches
+a pinned deployment; every other layer still applies.
+
 Layers 2-4 are optional and silently skipped when absent. The env and
 flag layers are explicit: naming a file that does not exist is an error,
 because the operator asked for that file by name.
@@ -56,6 +60,18 @@ PROJECT_MARKERS = [".routellm.yaml", "routellm.yaml"]
 SYSTEM_PATH = "/etc/routellm/config.yaml"
 ENV_VAR = "ROUTELLM_CONFIG"
 FLAG = "--config"
+NO_USER_ENV_VAR = "ROUTELLM_NO_USER_CONFIG"
+NO_USER_FLAG = "--no-user-config"
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def no_user_config_from_env() -> bool:
+    """True when `ROUTELLM_NO_USER_CONFIG` is set to a truthy value.
+
+    Truthy: 1, true, yes, on (any case). Unset, empty, 0, false, no,
+    off and anything else leave the user layer on.
+    """
+    return os.environ.get(NO_USER_ENV_VAR, "").strip().lower() in _TRUTHY
 
 
 class ConfigError(Exception):
@@ -74,11 +90,15 @@ class ResolvedPath:
         One of "system", "user", "project", "env", "flag".
     exists : bool
         Whether a regular file sits at `path` right now, by stat.
+    skipped : bool
+        True when the layer was deliberately left out (`--no-user-config`
+        or `ROUTELLM_NO_USER_CONFIG`); `exists` is then False.
     """
 
     path: Path
     source: str
     exists: bool
+    skipped: bool = False
 
 
 @dataclass
@@ -176,6 +196,7 @@ def _project_file(cwd: Path) -> Path | None:
 def config_paths(
     cwd: os.PathLike | str | None = None,
     explicit: os.PathLike | str | None = None,
+    skip_user: bool | None = None,
 ) -> list[ResolvedPath]:
     """Return the full config chain, lowest precedence first.
 
@@ -187,6 +208,9 @@ def config_paths(
     explicit : path-like, optional
         The `--config` flag value. Wins over `ROUTELLM_CONFIG` when both
         are set; both are appended after the project layer.
+    skip_user : bool, optional
+        Leave the user (XDG) layer out. None (default) defers to
+        `ROUTELLM_NO_USER_CONFIG`; an explicit bool wins over it.
 
     Returns
     -------
@@ -197,9 +221,15 @@ def config_paths(
     """
     start = Path(cwd).resolve() if cwd is not None else Path.cwd().resolve()
 
+    if skip_user is None:
+        skip_user = no_user_config_from_env()
+
+    user_path = _user_config_dir() / TOOL / "config.yaml"
     chain = [
         _entry(Path(SYSTEM_PATH), "system"),
-        _entry(_user_config_dir() / TOOL / "config.yaml", "user"),
+        ResolvedPath(user_path, "user", False, skipped=True)
+        if skip_user
+        else _entry(user_path, "user"),
     ]
 
     project = _project_file(start)
@@ -329,6 +359,7 @@ def load_config(
     cwd: os.PathLike | str | None = None,
     explicit: os.PathLike | str | None = None,
     interpolate: bool = True,
+    skip_user: bool | None = None,
 ) -> LoadedConfig:
     """Load and merge every config layer that applies.
 
@@ -338,6 +369,8 @@ def load_config(
         Directory the project walk-up starts from. Defaults to the CWD.
     explicit : path-like, optional
         The `--config` flag value.
+    skip_user : bool, optional
+        Leave the user layer out; None defers to `ROUTELLM_NO_USER_CONFIG`.
     interpolate : bool
         Expand `${VAR}` references in string values (default). False
         leaves the merged text as written, for inspection; `variables`
@@ -360,7 +393,7 @@ def load_config(
         value reads an unset variable; the message names the file, the
         dotted key and the variable.
     """
-    chain = config_paths(cwd=cwd, explicit=explicit)
+    chain = config_paths(cwd=cwd, explicit=explicit, skip_user=skip_user)
 
     data = _defaults()
     origins: dict[str, Path] = {}
@@ -385,6 +418,30 @@ def load_config(
         data = interpolate_tree(data, origin_of=lambda key: _origin_of(origins, key))
 
     return LoadedConfig(data=data, layers=layers, origins=origins, chain=chain, variables=variables)
+
+
+def layer_summary(loaded: LoadedConfig) -> str:
+    """One line naming the layers merged and the ones skipped, paths only.
+
+    Never includes config values, so it is safe to log at INFO.
+
+    Returns
+    -------
+    str
+        e.g. ``loaded: project=/a/.routellm.yaml, flag=/b.yaml; skipped:
+        user=/home/u/.config/routellm/config.yaml``; ``loaded: none
+        (built-in router defaults only)`` when no file was read.
+    """
+    loaded_part = (
+        ", ".join(f"{e.source}={e.path}" for e in loaded.layers)
+        if loaded.layers
+        else "none (built-in router defaults only)"
+    )
+    skipped = [f"{e.source}={e.path}" for e in loaded.chain if e.skipped]
+    text = f"loaded: {loaded_part}"
+    if skipped:
+        text += f"; skipped: {', '.join(skipped)}"
+    return text
 
 
 def explain(loaded: LoadedConfig) -> str:
@@ -479,7 +536,8 @@ def _chain_lines(chain: list[ResolvedPath]) -> list[str]:
     layers whether or not a marker was found.
     """
     lines = [
-        f"{'[used]  ' if entry.exists else '[absent]'} {entry.source:<7} {entry.path}"
+        f"{'[skipped]' if entry.skipped else '[used]  ' if entry.exists else '[absent]'}"
+        f" {entry.source:<7} {entry.path}"
         for entry in chain
     ]
     if not any(entry.source == "project" for entry in chain):
@@ -525,6 +583,12 @@ def main(argv: list[str] | None = None) -> int:
         default=argparse.SUPPRESS,
         help="Explicit config file; the highest-precedence layer.",
     )
+    common.add_argument(
+        NO_USER_FLAG,
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help=f"Skip the user (XDG) config layer; same as {NO_USER_ENV_VAR}=1.",
+    )
 
     parser = argparse.ArgumentParser(
         prog="python -m routellm.config",
@@ -552,9 +616,13 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
 
+    # None (flag absent) defers to the env var; the flag only ever turns
+    # the skip on.
+    skip_user = True if getattr(args, "no_user_config", False) else None
+
     try:
         if args.command == "paths":
-            chain = config_paths(explicit=getattr(args, "config", None))
+            chain = config_paths(explicit=getattr(args, "config", None), skip_user=skip_user)
             if args.format == "json":
                 print(
                     json.dumps(
@@ -563,6 +631,7 @@ def main(argv: list[str] | None = None) -> int:
                                 "source": entry.source,
                                 "path": str(entry.path),
                                 "exists": entry.exists,
+                                "skipped": entry.skipped,
                             }
                             for entry in chain
                         ],
@@ -582,8 +651,8 @@ def main(argv: list[str] | None = None) -> int:
             # raises FileNotFoundError with the right message for that
             # case (caught below); call it here for the side effect of
             # that check before ever consulting the chain for a winner.
-            load_config(explicit=explicit, interpolate=False)
-            winner = winning_path(config_paths(explicit=explicit))
+            load_config(explicit=explicit, interpolate=False, skip_user=skip_user)
+            winner = winning_path(config_paths(explicit=explicit, skip_user=skip_user))
             if winner is None:
                 print(
                     "no routellm config file on the chain; run `paths` to see where it looked",
@@ -593,7 +662,11 @@ def main(argv: list[str] | None = None) -> int:
             print(winner.path)
             return 0
 
-        loaded = load_config(explicit=getattr(args, "config", None), interpolate=args.resolve)
+        loaded = load_config(
+            explicit=getattr(args, "config", None),
+            interpolate=args.resolve,
+            skip_user=skip_user,
+        )
         if args.format == "json":
             print(json.dumps(loaded.data, indent=2, default=str))
         else:

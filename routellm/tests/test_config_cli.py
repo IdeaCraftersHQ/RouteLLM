@@ -309,3 +309,70 @@ def test_paths_and_show_agree_when_no_project_marker_exists(env):
     assert len(project_lines) == 1
     assert project_lines[0].startswith("[absent]")
     assert project_lines[0] in show_out
+
+
+# ---------------------------------------------------------------------------
+# --no-user-config
+# ---------------------------------------------------------------------------
+
+
+def test_no_user_config_flag_skips_layer_in_show(env):
+    """`show --no-user-config` omits user values."""
+    env.write(env.user, {"only_user": 1})
+
+    code, out, _ = env.run("show", "--no-user-config", "--format", "json")
+
+    assert code == 0
+    assert "only_user" not in json.loads(out)
+
+
+def test_no_user_config_flag_leading_position(env):
+    """Flag works before the subcommand too."""
+    env.write(env.user, {"only_user": 1})
+
+    code, out, _ = env.run("--no-user-config", "show", "--format", "json")
+
+    assert code == 0
+    assert "only_user" not in json.loads(out)
+
+
+def test_paths_marks_skipped_user_layer(env):
+    """`paths` lists the user path as [skipped], json carries `skipped`."""
+    env.write(env.user, {"a": 1})
+
+    _, out, _ = env.run("paths", "--no-user-config")
+    _, js, _ = env.run("paths", "--no-user-config", "--format", "json")
+
+    assert any(
+        l.startswith("[skipped]") and str(env.user) in l for l in out.splitlines()
+    )
+    user = next(e for e in json.loads(js) if e["source"] == "user")
+    assert user["skipped"] is True and user["exists"] is False
+
+
+def test_show_text_lists_skipped_user_layer(env):
+    """`show` chain header reflects the skip."""
+    env.write(env.user, {"a": 1})
+
+    _, out, _ = env.run("show", "--no-user-config")
+
+    assert "[skipped]" in out
+
+
+def test_env_var_skips_in_show(env, monkeypatch):
+    """ROUTELLM_NO_USER_CONFIG applies to the CLI without the flag."""
+    env.write(env.user, {"only_user": 1})
+    monkeypatch.setenv("ROUTELLM_NO_USER_CONFIG", "1")
+
+    _, out, _ = env.run("show", "--format", "json")
+
+    assert "only_user" not in json.loads(out)
+
+
+def test_path_ignores_skipped_user_file(env):
+    """`path` does not name the user file when skipped."""
+    env.write(env.user, {"a": 1})
+
+    code, _, _ = env.run("path", "--no-user-config")
+
+    assert code == 1

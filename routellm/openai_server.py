@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from routellm.capabilities import Capabilities, side_capabilities, union
 from routellm.comparison import COMPARE_HEADER
-from routellm.config import load_config
+from routellm.config import layer_summary, load_config
 from routellm.controller import HOP_HEADER, Controller, RoutingError
 from routellm.decision import build_decision
 from routellm.endpoints import Endpoint, EndpointRegistry, Tier
@@ -473,14 +473,11 @@ async def lifespan(app):
     # ROUTELLM_CONFIG and `--config`, each merged onto the last. The
     # layers that were actually read are logged so a surprising value
     # has a file to blame.
-    loaded = load_config(explicit=args.config)
-    if loaded.layers:
-        logging.info(
-            "config layers: %s",
-            ", ".join(f"{entry.source}={entry.path}" for entry in loaded.layers),
-        )
-    else:
-        logging.info("config layers: none found; built-in router defaults only")
+    loaded = load_config(
+        explicit=args.config,
+        skip_user=True if args.no_user_config else None,
+    )
+    logging.info("config layers %s", layer_summary(loaded))
 
     # `endpoints:` and `tiers:` belong to the registry and `intents:`
     # to the intent middleware; the rest of the merged mapping stays
@@ -1019,6 +1016,15 @@ parser.add_argument(
         "Explicit config file, merged last over the discovered chain "
         "(system, user, project, ROUTELLM_CONFIG). Run "
         "`python -m routellm.config paths` to see the chain."
+    ),
+)
+parser.add_argument(
+    "--no-user-config",
+    action="store_true",
+    help=(
+        "Skip the user (XDG) config layer; the system, project, "
+        "ROUTELLM_CONFIG and --config layers still apply. Same as "
+        "ROUTELLM_NO_USER_CONFIG=1."
     ),
 )
 parser.add_argument("--port", type=int, default=6060)
