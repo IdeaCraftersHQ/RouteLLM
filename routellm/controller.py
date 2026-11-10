@@ -382,7 +382,12 @@ class Controller:
         if config is None:
             config = GPT_4_AUGMENTED_CONFIG
 
-        configure_embeddings(self.endpoints, embedding_endpoint, allow_remote_embeddings)
+        configure_embeddings(
+            self.endpoints,
+            embedding_endpoint,
+            allow_remote_embeddings,
+            strict=policy is not None,
+        )
 
         # A tier's router must exist too, but it is named in the config
         # file rather than on the command line, so it is checked here

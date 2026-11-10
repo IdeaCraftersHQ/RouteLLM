@@ -981,7 +981,7 @@ egress_gates:
 | Comparison judge | the `judge:<endpoint>` | shadow output recorded unscored |
 | Decision classifier | its `decision.endpoint` | it runs before the class is known, so startup fails unless every non-`vault` class may reach it |
 
-Audio transcription runs before the class is known too; a tier whose endpoints are all `local` already requires a `local` transcriber at load. An embedding call with no registry endpoint (`--allow-remote-embeddings`) carries no tags, so a request with a class under a policy is refused it.
+Audio transcription runs before the class is known too; a tier whose endpoints are all `local` already requires a `local` transcriber at load. An embedding call with no registry endpoint carries no tags, so `--allow-remote-embeddings` is refused at startup under a policy; give the server an embedding endpoint instead.
 
 **`require_policy_allow`** makes the gate depend on the request's [routing policy](#policy-routing): a leaf the gate selects is a candidate only when the selected policy's `allow_tags` lists one of the leaf's tags and its `deny_tags` list none; otherwise the reason is `gate:<name>:policy`. Without `policy_routing:` there is no selected policy, so such a gate refuses every request to its endpoints. The intent detector is not a request with a policy: a gated detector endpoint of such a gate gets no call.
 
@@ -1301,7 +1301,7 @@ class MyRouter(Router):
 
 `embed` sends the text to one registry endpoint: the one `embeddings.endpoint` names, else the endpoint called `embedding`. The endpoint's `model`, `api_base`, `api_key_env` and `extra` are used as written, so the call carries its reach and `jur:` tags like any model call. The semantic cache embeds through the same endpoint. There is no default endpoint and no default model: a server that loads such a router, or enables `cache.semantic_enabled`, with no endpoint refuses to start and names the missing key. The startup log names the endpoint and its reach.
 
-`--allow-remote-embeddings` falls back, for a server with no endpoint, to `OPENAI_BASE_URL` / `OPENAI_API_KEY`, with a WARNING naming the host the prompts go to. No tag describes that call, so no policy can gate it. Tests that need their own configuration call `configure_embeddings(registry, endpoint)` and `reset_embedding_client()`.
+`--allow-remote-embeddings` falls back, for a server with no endpoint, to `OPENAI_BASE_URL` / `OPENAI_API_KEY`, with a WARNING naming the host the prompts go to. No tag describes that call, so no policy can gate it: with `strict_registry: true` or a loaded `policy:` (which forces strict) the flag is refused at startup, naming `embeddings.endpoint` as the fix. Tests that need their own configuration call `configure_embeddings(registry, endpoint)` and `reset_embedding_client()`.
 
 ### Adding a new benchmark
 

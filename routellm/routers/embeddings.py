@@ -46,6 +46,7 @@ def configure_embeddings(
     registry: EndpointRegistry | None,
     endpoint: str | None = None,
     allow_remote: bool = False,
+    strict: bool = False,
 ) -> None:
     """Set where embeddings go. Builds and checks nothing.
 
@@ -57,9 +58,26 @@ def configure_embeddings(
         Name of the registry endpoint to use; `embedding` when None.
     allow_remote : bool
         Permit the environment fallback when no endpoint exists.
+    strict : bool
+        Whether `strict_registry` is on (a loaded policy forces it).
+
+    Raises
+    ------
+    ValueError
+        If `allow_remote` is set under `strict`: the fallback sends
+        prompts to a raw model through the environment, which a strict
+        registry exists to prevent.
     """
     global _registry, _endpoint, _allow_remote
 
+    if allow_remote and (strict or (registry is not None and registry.strict_registry)):
+        raise ValueError(
+            "--allow-remote-embeddings is refused under strict_registry (a loaded "
+            "`policy:` forces it): it sends prompts to OPENAI_BASE_URL with a raw "
+            f"{LEGACY_ENV_MODEL!r} model that no tag describes. Define an "
+            f"endpoint named {EMBEDDING_ENDPOINT!r} or name one with "
+            "`embeddings.endpoint: <endpoint>`, and drop the flag."
+        )
     _registry = registry
     _endpoint = endpoint
     _allow_remote = allow_remote

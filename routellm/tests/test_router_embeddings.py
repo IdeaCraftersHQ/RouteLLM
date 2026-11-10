@@ -147,6 +147,81 @@ def test_allow_remote_embeddings_warns_naming_the_host(embedding_router, monkeyp
     assert any("embeddings.example.test" in w for w in warnings)
 
 
+def _strict_registry():
+    registry = _registry()
+    registry.strict_registry = True
+    return registry
+
+
+def _policy():
+    from routellm.policy import parse_policy
+
+    return parse_policy(
+        {
+            "default_class": "public",
+            "classes": {
+                "public": {"treatment": "raw", "reach": ["local"], "tiers": ["default"]},
+            },
+        },
+        "p.yaml",
+    )
+
+
+def test_strict_registry_refuses_allow_remote_embeddings(embedding_router, monkeypatch):
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://embeddings.example.test/v1")
+
+    with pytest.raises(ValueError) as excinfo:
+        _controller(_strict_registry(), routers=["emb"], allow_remote_embeddings=True)
+
+    message = str(excinfo.value)
+    assert "allow-remote-embeddings" in message
+    assert "strict_registry" in message
+    assert "embeddings.endpoint" in message
+
+
+def test_strict_flag_on_the_controller_refuses_allow_remote_embeddings():
+    with pytest.raises(ValueError, match="allow-remote-embeddings"):
+        _controller(_registry(), strict_registry=True, allow_remote_embeddings=True)
+
+
+def test_a_policy_refuses_allow_remote_embeddings():
+    registry = EndpointRegistry.from_config(
+        {
+            "endpoints": {
+                name: {"model": "openai/m", "api_base": "http://127.0.0.1:9/v1", "tags": ["local"]}
+                for name in ("strong", "weak")
+            },
+            "tiers": {
+                "default": {
+                    "router": "random",
+                    "threshold": 0.5,
+                    "strong": "strong",
+                    "weak": "weak",
+                }
+            },
+        }
+    )
+    with pytest.raises(ValueError, match="allow-remote-embeddings"):
+        _controller(registry, policy=_policy(), allow_remote_embeddings=True)
+
+
+def test_strict_with_an_endpoint_still_refuses_the_flag(fake, monkeypatch):
+    monkeypatch.setenv("EMBED_KEY", "k")
+    registry = _registry(fake.base)
+    registry.strict_registry = True
+
+    with pytest.raises(ValueError, match="allow-remote-embeddings"):
+        _controller(registry, allow_remote_embeddings=True)
+
+
+def test_strict_without_the_flag_still_starts(fake, monkeypatch):
+    monkeypatch.setenv("EMBED_KEY", "k")
+    registry = _registry(fake.base)
+    registry.strict_registry = True
+
+    _controller(registry)
+
+
 def test_allow_remote_embeddings_uses_the_environment(fake, monkeypatch):
     monkeypatch.setenv("OPENAI_BASE_URL", fake.base)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-env")
