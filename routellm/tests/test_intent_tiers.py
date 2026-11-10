@@ -33,6 +33,8 @@ CONFIG = {
         "cloud_strong": {"model": "gpt-4o"},
         "frontier_local": {"model": "ollama_chat/qwen3:32b"},
         "local_fast": {"model": "ollama_chat/qwen3:8b"},
+        "classifier": {"model": "gpt-4o-mini"},
+        "jev_upstream": {"model": "jev-1", "api_base": "https://jev.example.com"},
     },
     "tiers": {
         "premium": {
@@ -356,7 +358,7 @@ def test_intents_section_builds_a_litellm_backed_selector(registry, server_confi
     config = {
         "intents": {
             "detector": "litellm",
-            "model": "gpt-4o-mini",
+            "model": "classifier",
             "descriptions": {"legal": "contracts and statutes"},
             "tiers": {"legal": "legal"},
         }
@@ -368,6 +370,7 @@ def test_intents_section_builds_a_litellm_backed_selector(registry, server_confi
     assert selector.intent_tiers == {"legal": "legal"}
     assert selector.intent_detector is None
     assert selector.intent_detection_model == "gpt-4o-mini"
+    assert selector.egress_endpoint == "classifier"
     assert [m.intent for m in selector.intent_mappings] == ["legal"]
     assert selector.intent_mappings[0].description == "contracts and statutes"
 
@@ -403,6 +406,7 @@ def test_the_jev_detector_is_imported_lazily(registry, server_config, monkeypatc
         "intents": {
             "detector": "jev",
             "model": "jev-1",
+            "upstream": "jev_upstream",
             "confidence_floor": 0.7,
             "descriptions": {"legal": "contracts"},
             "tiers": {"legal": "legal"},
@@ -429,7 +433,9 @@ def test_a_missing_typesafe_extension_names_the_install(registry, server_config,
     monkeypatch.delitem(sys.modules, "routellm_typesafe", raising=False)
     monkeypatch.setattr(builtins, "__import__", _refuse)
 
-    config = {"intents": {"detector": "jev", "tiers": {"legal": "legal"}}}
+    config = {
+        "intents": {"detector": "jev", "upstream": "jev_upstream", "tiers": {"legal": "legal"}}
+    }
 
     with pytest.raises(ImportError, match="pip install -e extensions/typesafe"):
         server_config.build_intents(config, registry)

@@ -109,14 +109,24 @@ class JevRouter(Router):
         file value, then built-in default.
     base_url : str, optional
         Override for the API base URL. ``None`` uses the SDK default.
+    upstream : str, optional
+        Name of the registry endpoint this router calls, set by the
+        controller and exposed so an egress gate can veto it.
     transport : httpx2.BaseTransport, optional
         Custom transport; exists so tests can inject a ``MockTransport``.
 
     Notes
     -----
+    Under a controller the router carries `requires_upstream = True`:
+    the controller resolves ``jev.upstream`` (a registry endpoint
+    name) to ``base_url`` and refuses to load the router without one,
+    so the call carries that endpoint's reach and jurisdiction tags.
+
     No ``api_key`` parameter is exposed: credentials come from the
     environment so that keys never land in ``config.yaml``.
     """
+
+    requires_upstream = True
 
     def __init__(
         self,
@@ -129,7 +139,9 @@ class JevRouter(Router):
         prompt_file=None,
         base_url=None,
         transport=None,
+        upstream=None,
     ):
+        self.upstream = upstream
         section = (
             PromptFile.load(prompt_file).section(PROMPT_SECTION, PROMPT_SCHEMA)
             if prompt_file is not None

@@ -60,6 +60,8 @@ class JevIntentDetector:
         instructions: Optional[str] = None,
         prompt_file: Optional[Any] = None,
         transport: Optional[Any] = None,
+        base_url: Optional[str] = None,
+        upstream: Optional[str] = None,
     ):
         """Initialize the Jev-backed intent detector.
 
@@ -91,7 +93,15 @@ class JevIntentDetector:
         transport : httpx2.BaseTransport, optional
             Transport handed to the SDK client (default None). Useful
             for tests.
+        base_url : str, optional
+            API base URL handed to the SDK client (default None, the
+            SDK default). The server passes the `api_base` of the
+            registry endpoint named by `intents.upstream`.
+        upstream : str, optional
+            Name of the registry endpoint this detector calls, exposed
+            as `self.upstream` so an egress gate can veto it.
         """
+        self.upstream = upstream
         self.intent_mappings = intent_mappings
         self.model = model
         self.timeout = timeout
@@ -123,6 +133,7 @@ class JevIntentDetector:
         self._client = typesafe_sdk.TypeSafeClient(
             model=model,
             timeout=timeout,
+            base_url=base_url,
             transport=transport,
         )
 

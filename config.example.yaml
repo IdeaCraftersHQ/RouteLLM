@@ -173,6 +173,19 @@ endpoints:
     model: text-embedding-3-small
     api_key_env: OPENAI_API_KEY
 
+# Intent detection (optional; off unless `model` is set). It picks a
+# tier from the prompt. `model` must name an endpoint above: there is
+# no default model and a raw litellm name is a startup error. With
+# `detector: jev`, `upstream` names the endpoint whose `api_base` is the
+# Jev host, and a `jev` router needs `jev: {upstream: <endpoint>}`.
+# intents:
+#   detector: litellm          # or jev
+#   model: local_fast          # registry endpoint that classifies
+#   descriptions:
+#     code: writing or debugging software
+#   tiers:
+#     code: default
+
 # Tiers: named strong/weak pairs whose sides may themselves be tiers, so
 # a request addressed to a tier walks a tree, one router call per level.
 # A tier naming no router or threshold inherits them from the level
