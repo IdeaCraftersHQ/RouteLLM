@@ -15,7 +15,7 @@ following attrs (any subset; missing = no signal) is accepted:
     cost_estimate    : Optional[str]   one of "low", "medium", "high"
     output_format    : Optional[str]   e.g. "code", "json", "yaml", "prose"
 
-Policy table (showcase scenario 3, locked spec):
+Policy table:
 
     PII (any of EMAIL/PHONE/SSN)              skip cache; tenant-scoped namespace
     Jailbreak score >= JAILBREAK_HIGH         skip cache (audit handled upstream)
@@ -198,7 +198,7 @@ def classify_to_policy(request: Any, classification: Any) -> CachePolicy:
         return CachePolicy(
             action=CacheAction.LOOKUP_AND_STORE,
             ttl=TTL_SHORT,
-            namespace=DEFAULT_NAMESPACE_KEY,  # workspace-scoped per T-0193
+            namespace=DEFAULT_NAMESPACE_KEY,  # workspace-scoped
             match=MatchStrategy.BOTH,
             reason="domain:legal",
         )
@@ -206,7 +206,7 @@ def classify_to_policy(request: Any, classification: Any) -> CachePolicy:
         return CachePolicy(
             action=CacheAction.LOOKUP_AND_STORE,
             ttl=TTL_LONG,
-            namespace=DEFAULT_NAMESPACE_KEY,  # workspace-scoped per T-0193
+            namespace=DEFAULT_NAMESPACE_KEY,  # workspace-scoped
             match=MatchStrategy.BOTH,
             reason=f"domain:{domain}",
         )

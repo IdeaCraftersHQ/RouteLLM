@@ -1,4 +1,4 @@
-"""Tests covering each row of the cache policy table (scenario 3 spec).
+"""Tests covering each row of the cache policy table.
 
 Uses a fake ClassificationResult dataclass so we don't pull c12n
 bindings into the test loop. The mapping function only inspects
@@ -130,7 +130,7 @@ def test_domain_legal_workspace_scoped_short_ttl():
 
 
 # ---------------------------------------------------------------------------
-# Row 6 — Domain: math/cs → workspace-scoped (per T-0193), long TTL.
+# Row 6 — Domain: math/cs → workspace-scoped, long TTL.
 # ---------------------------------------------------------------------------
 
 

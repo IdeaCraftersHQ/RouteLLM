@@ -2,7 +2,7 @@
 
 Class-aware cache + routing policy mapping. Translates c12n
 ClassificationResult labels into a routellm CachePolicy per the
-showcase scenario 3 spec table.
+cache policy table.
 
 Public API:
     CachePolicy            — dataclass mirroring routellm US-0102 spec

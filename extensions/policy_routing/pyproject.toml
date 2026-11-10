@@ -28,9 +28,6 @@ dependencies = [
 c12n = []
 dev = ["pytest", "pytest-asyncio"]
 
-[project.urls]
-"Showcase scenario" = "https://github.com/jadb-admin/.ops/tree/main/.tlc/tracks/tools-showcase-scenarios"
-
 [tool.setuptools.packages.find]
 include = ["routellm_policy_routing*"]
 exclude = ["tests*"]

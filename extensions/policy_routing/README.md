@@ -4,7 +4,7 @@ Class-aware cache + routing policy mapping for routellm.
 
 Translates **c12n** classification labels into a routellm
 **CachePolicy** (skip / lookup / store / TTL / namespace / match
-strategy) per the cache policy table from showcase scenario 3
+strategy) per the cache policy table below.
 
 
 ## Status
