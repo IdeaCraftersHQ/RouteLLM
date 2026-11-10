@@ -6,6 +6,7 @@ It current only supports Chat Completions: https://platform.openai.com/docs/api-
 import argparse
 import json
 import logging
+import math
 import os
 import time
 from collections.abc import AsyncGenerator
@@ -30,6 +31,7 @@ from routellm.middleware.intent_model_selector import (
     IntentModelMapping,
     IntentModelSelector,
 )
+from routellm.resilience import EndpointsCooling
 from routellm.routers.routers import ROUTER_CLS
 from routellm.server_config import (
     SERVER_SECTIONS,
@@ -698,6 +700,27 @@ def _error_body(request_id: str) -> dict:
     }
 
 
+def _cooling_response(exc: EndpointsCooling, request_id: str) -> JSONResponse:
+    """Answer a request whose every candidate is cooling after a rate limit.
+
+    503 with `Retry-After` set to the soonest cooldown end, whole
+    seconds rounded up, at least 1. The body is generic; the endpoint
+    names and timings stay in the server log under the request id.
+    """
+    logging.getLogger(__name__).warning(f"Request failed (request id {request_id}): {exc}")
+    retry_after = max(1, math.ceil(exc.retry_after))
+    return JSONResponse(
+        {
+            "object": "error",
+            "message": f"All upstreams are rate-limited; retry later (request id {request_id})",
+            "type": "server_error",
+            "request_id": request_id,
+        },
+        status_code=503,
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
 #: Request header naming the language of any audio in the request.
 TRANSCRIBE_LANGUAGE_HEADER = "X-RouteLLM-Transcribe-Language"
 
@@ -822,6 +845,8 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
         )
     except TranscriptionError as e:
         return _transcription_failure(e, request_id)
+    except EndpointsCooling as e:
+        return _cooling_response(e, request_id)
     except Exception as e:
         # Whatever an upstream raised can name it and echo its text: the
         # client gets a generic message and an id; the detail stays here.
