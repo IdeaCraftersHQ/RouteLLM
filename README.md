@@ -467,7 +467,7 @@ tiers:
     transcriber: {mode: passthrough}   # this tier routes audio to an audio-capable side
 ```
 
-Unknown keys under `transcriber:` are a load error, as are unknown placeholders in a template. A tier's keys are laid over the global section; `mode: passthrough` (or no `transcriber:` at all) leaves audio routing exactly as described above. The transcriber used is the one on the tier the request **addresses** (the global section when it addresses none), decided before any intent re-routing.
+Unknown keys under `transcriber:` are a load error, as are unknown placeholders in a template. A tier's keys are laid over the global section; `mode: passthrough` (or no `transcriber:` at all) leaves audio routing exactly as described above. The transcriber used is the one on the tier the request **addresses** (the global section when it addresses none), decided before any intent re-routing. Because of that, a tier that accepts intent routing (`default`, or `intent_routing: true`) and that an `intents:` mapping can send to a local-only tier (see Private tiers) must itself use a `local` transcriber, or the config is rejected at load. Middleware supplied in code rather than through `intents:` is not visible to this check.
 
 For every `input_audio` part the server POSTs the decoded bytes as multipart to `<api_base>/audio/transcriptions` with `response_format=verbose_json` and `timestamp_granularities[]=segment`, plus `language` when one applies, and replaces the part with a text part, one line per segment:
 

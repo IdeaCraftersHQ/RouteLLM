@@ -697,3 +697,60 @@ def test_server_status_codes_request_ids_and_no_leaks(tmp_path):
     assert out["llm_hits"] == 2
     assert LEAK in out["log"]  # detail stays server-side, under the same id
     assert "hello one" not in out["log"]
+
+
+# -- intent re-routing ---------------------------------------------------------
+
+
+def _intent_spec(transcriber, intents, intent_routing=None, tags_open=("cloud",)):
+    open_tier = {"strong": "c", "weak": "d"}
+    if intent_routing is not None:
+        open_tier["intent_routing"] = intent_routing
+    return {
+        "endpoints": {
+            "a": {"model": "m", "tags": ["local"]},
+            "b": {"model": "n", "tags": ["local"]},
+            "c": {"model": "o", "tags": list(tags_open)},
+            "d": {"model": "p", "tags": list(tags_open)},
+        },
+        "tiers": {
+            "private": {
+                "strong": "a",
+                "weak": "b",
+                "transcriber": {"api_base": "http://127.0.0.1:9/v1", "tags": ["local"]},
+            },
+            "default": open_tier,
+        },
+        "transcriber": transcriber,
+        "intents": {"tiers": intents},
+    }
+
+
+CLOUD_STT = {"api_base": "http://stt.example.com/v1"}
+
+
+def test_a_tier_that_intent_routing_can_send_to_a_local_only_tier_needs_a_local_transcriber():
+    # `default` accepts intent routing and an intent maps to the local-only
+    # `private`; audio would be transcribed in the cloud before that move.
+    spec = _intent_spec(CLOUD_STT, {"confidential": "private"})
+
+    with pytest.raises(ValueError, match="intent"):
+        EndpointRegistry.from_config(spec)
+
+
+def test_the_same_config_is_fine_with_a_local_transcriber():
+    spec = _intent_spec({**CLOUD_STT, "tags": ["local"]}, {"confidential": "private"})
+
+    assert EndpointRegistry.from_config(spec).transcriber_for("default").is_local
+
+
+def test_a_tier_that_does_not_accept_intent_routing_is_not_affected():
+    spec = _intent_spec(CLOUD_STT, {"confidential": "private"}, intent_routing=False)
+
+    assert EndpointRegistry.from_config(spec).transcriber_for("default").active
+
+
+def test_intents_that_reach_no_local_only_tier_are_fine():
+    spec = _intent_spec(CLOUD_STT, {"general": "default"})
+
+    assert EndpointRegistry.from_config(spec).transcriber_for("default").active

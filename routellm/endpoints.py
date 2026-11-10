@@ -425,6 +425,7 @@ class EndpointRegistry:
         endpoints: dict[str, Endpoint] | None = None,
         tiers: dict[str, Tier] | None = None,
         transcriber: dict[str, Any] | None = None,
+        intent_targets: list[str] | None = None,
     ):
         """Initialize the registry.
 
@@ -462,6 +463,7 @@ class EndpointRegistry:
 
         self._transcriber_raw: dict[str, Any] | None = transcriber
         self._transcribers: dict[str | None, TranscriberConfig] = {}
+        self.intent_targets: list[str] = list(intent_targets or [])
 
         self._validate_tiers()
         self._validate_transcribers()
@@ -524,7 +526,9 @@ class EndpointRegistry:
         if raw_transcriber is not None and not isinstance(raw_transcriber, dict):
             raise ValueError("`transcriber:` must be a mapping")
 
-        registry = cls(endpoints, tiers, raw_transcriber)
+        intents = config.get("intents")
+        targets = (intents.get("tiers") or {}).values() if isinstance(intents, dict) else []
+        registry = cls(endpoints, tiers, raw_transcriber, [str(t) for t in targets])
 
         # The sidecar merges HERE, on the built registry, so every
         # consumer that goes through from_config -- the server and both
@@ -734,6 +738,28 @@ class EndpointRegistry:
                     f"transcribed. Point the tier at a local transcriber and tag it "
                     f"`tags: [{LOCAL_TAG}]`, or set `mode: passthrough`."
                 )
+
+        # Intent routing re-routes AFTER audio would already have been
+        # transcribed (it classifies the prompt, which includes the
+        # transcript). A tier that may be re-routed to a local-only tier
+        # must therefore itself transcribe locally.
+        for name, config in built.items():
+            if name is None or not config.active or config.is_local:
+                continue
+            if not self._tiers[name].accepts_intent_routing():
+                continue
+            for target in self.intent_targets:
+                if target == name or target not in self._tiers:
+                    continue
+                leaves = self._leaves(target)
+                if leaves and all(LOCAL_TAG in self._endpoints[leaf].tags for leaf in leaves):
+                    raise ValueError(
+                        f"Tier {name!r} accepts intent routing and an intent can send it "
+                        f"to local-only tier {target!r}, but its transcriber is not tagged "
+                        f"{LOCAL_TAG!r}: audio would be transcribed off-machine before the "
+                        f"move. Use a local transcriber on {name!r}, set "
+                        f"`intent_routing: false` on it, or `mode: passthrough`."
+                    )
 
         self._transcribers = built
 

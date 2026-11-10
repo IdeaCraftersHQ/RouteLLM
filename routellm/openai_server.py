@@ -157,7 +157,7 @@ def build_registry(file_config: dict | None, config_path: str | None = None) -> 
         args.default_threshold,
         args.routers[0] if args.routers else "<none>",
     )
-    return EndpointRegistry(endpoints, tiers, registry.transcriber_raw)
+    return EndpointRegistry(endpoints, tiers, registry.transcriber_raw, registry.intent_targets)
 
 
 #: Detector backends the `intents:` section may ask for.
