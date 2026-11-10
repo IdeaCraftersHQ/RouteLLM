@@ -11,6 +11,7 @@ or from any `analyze(text, language) -> [{start, end, category, score}]`
 you inject.
 """
 
+import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -30,6 +31,7 @@ __all__ = [
     "RedactContext",
     "RedactError",
     "Redactor",
+    "Restorer",
     "format_placeholder",
     "split_incomplete",
 ]
@@ -116,11 +118,15 @@ class Redactor:
             spans.append(s)
         return spans
 
-    def redact(self, text: str, ctx: RedactContext) -> tuple[str, str]:
+    def redact(
+        self, text: str, ctx: RedactContext, mapping_id: str | None = None
+    ) -> tuple[str, str]:
         """`(redacted_text, mapping_id)`.
 
         Placeholder-shaped text already in `text` is left alone and never
         assigned to a value, so a restore cannot mistake it for one.
+        `mapping_id`, from an earlier call for the same `ctx`, makes the
+        texts of one request share a mapping instead of opening a new one.
         """
         scope, counter_key = self._scope(ctx)
         spans = self._spans(text, ctx)
@@ -137,7 +143,9 @@ class Redactor:
             parts += [text[pos : s["start"]], ph]
             pos = s["end"]
         parts.append(text[pos:])
-        return "".join(parts), self.store.new_mapping(ctx.principal, scope)
+        if mapping_id is None:
+            mapping_id = self.store.new_mapping(ctx.principal, scope)
+        return "".join(parts), mapping_id
 
     def restore(self, text: str, mapping_id: str, ctx: RedactContext) -> str:
         """`text` with each known placeholder replaced by its value.
@@ -150,3 +158,34 @@ class Redactor:
         scope, _ = self._scope(ctx)
         values = self.store.resolve(mapping_id, ctx.principal, scope)
         return _PLACEHOLDER.sub(lambda m: values.get(_canonical(m), m.group(0)), text)
+
+    def restorer(self, mapping_id: str, ctx: RedactContext) -> "Restorer":
+        """A `Restorer` holding the mapping's values, read once.
+
+        Raises `MappingExpired` / `MappingError` now, before anything is
+        sent, rather than on a reply that is already on its way back.
+        """
+        scope, _ = self._scope(ctx)
+        return Restorer(self.store.resolve(mapping_id, ctx.principal, scope))
+
+
+class Restorer:
+    """Restores placeholders from values already read; touches no store.
+
+    `text` puts values back as they are. `json_string` is for text inside
+    a JSON document (tool-call arguments): each value is escaped so the
+    document stays valid.
+    """
+
+    def __init__(self, values: dict[str, str]):
+        self._values = values
+
+    def text(self, text: str) -> str:
+        return _PLACEHOLDER.sub(lambda m: self._values.get(_canonical(m), m.group(0)), text)
+
+    def json_string(self, text: str) -> str:
+        def sub(m: re.Match) -> str:
+            value = self._values.get(_canonical(m))
+            return m.group(0) if value is None else json.dumps(value)[1:-1]
+
+        return _PLACEHOLDER.sub(sub, text)

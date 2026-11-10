@@ -60,6 +60,7 @@ CASE_MODULES = [
     "routellm.tests.privacy_cases_egress_gate",
     "routellm.tests.privacy_cases_policy_routing",
     "routellm.tests.privacy_cases_aux",
+    "routellm.tests.privacy_cases_redact",
 ]
 
 #: The caller every class-policy case sends as, and its key.
@@ -329,6 +330,55 @@ def class_policy_files(tmp_path: Path, route: bool = False) -> dict:
     }
 
 
+#: Canaries of the redact world: what must never reach an off-host leaf.
+CANARIES = (
+    "Jean Tremblay",
+    "Marie Gagnon",
+    "Alice Smith",
+    "jean.tremblay@example.com",
+    "046 454 286",
+    "ACME-12345",
+)
+
+
+def redact_files(tmp_path: Path) -> dict:
+    """The redact world's config: class `pii` (treatment `redact`) may reach the cloud.
+
+    The policy is the policy world's with `pii` added; `redact:` runs the
+    pattern engine (no model download) with the names as client-id
+    patterns. The aux world's detector and embedding endpoint are added
+    by the caller, so every auxiliary call is a remote call to the cloud
+    fake, which `pii` must not make.
+    """
+    pair = {"router": "pin_strong", "threshold": 0.0}
+    base = class_policy_files(tmp_path)
+    policy = json.loads((tmp_path / "policy.json").read_text())
+    red_tiers = {
+        "red_cloud": {**pair, "strong": "cloud_main", "weak": "local_small"},
+        "red_gated": {**pair, "strong": "gated_main", "weak": "local_small"},
+        "red_local": {**pair, "strong": "local_main", "weak": "cloud_main"},
+        "red_fallback": {**pair, "strong": "cloud_main", "weak": "gated_main"},
+    }
+    policy["classes"]["pii"] = {
+        "treatment": "redact",
+        "reach": ["local", "cloud"],
+        "tiers": [*red_tiers, "default"],
+    }
+    policy["principals"]["suite"]["classes"].append("pii")
+    (tmp_path / "policy.json").write_text(json.dumps(policy))
+    names = [c for c in CANARIES if " " in c and "@" not in c and c[0].isalpha()]
+    return {
+        **base,
+        "tiers": {**base["tiers"], **red_tiers},
+        "comparison": {"enabled": True, "compare_allowed_models": ["cloud_main", "gated_main"]},
+        "redact": {
+            "engine": "patterns",
+            "client_id_patterns": [*(rf"\b{n}\b" for n in names), r"ACME-\d{5}"],
+            "store": {"path": str(tmp_path / "redact" / "tokens.db")},
+        },
+    }
+
+
 def build_config(bases: dict[str, str]) -> dict:
     return {"endpoints": endpoints(bases), "tiers": tiers()}
 
@@ -344,6 +394,7 @@ class Case:
     gate: bool = False  # runs in the egress-gate world (policy world plus gates)
     route: bool = False  # runs in the route world (two classes plus `policy_routing:`)
     aux: bool = False  # runs in the auxiliary-call world (policy world plus `AUX_CONFIG`)
+    redact: bool = False  # runs in the redact world (see `redact_files`)
 
 
 CASES: dict[str, Case] = {}
@@ -359,6 +410,7 @@ def case(
     gate=False,
     route=False,
     aux=False,
+    redact=False,
 ):
     """Register a case. `status` and `local` are what the test asserts.
 
@@ -378,10 +430,11 @@ def case(
             None if total is not None else dict(local or {}),
             total,
             reaches_off_host,
-            policy or gate or route or aux,
+            policy or gate or route or aux or redact,
             gate,
             route,
             aux,
+            redact,
         )
         return fn
 
@@ -533,7 +586,15 @@ print("@@RESULT@@" + json.dumps(out))
 """
 
 
-def run_cases(tmp_path, names, extra_config=None, resilience=None, class_policy=False, route=False):
+def run_cases(
+    tmp_path,
+    names,
+    extra_config=None,
+    resilience=None,
+    class_policy=False,
+    route=False,
+    redact=False,
+):
     """Run the named cases in one subprocess; return {case: {obs, hits}}.
 
     `extra_config` is merged over the fixture config (top-level keys),
@@ -544,7 +605,10 @@ def run_cases(tmp_path, names, extra_config=None, resilience=None, class_policy=
     if route:
         class_policy = True
         extra_config = {**route_config(), **(extra_config or {})}
-    if class_policy:
+    if redact:
+        class_policy = True
+        extra_config = {**redact_files(tmp_path), **AUX_CONFIG, **(extra_config or {})}
+    elif class_policy:
         extra_config = {**class_policy_files(tmp_path, route), **(extra_config or {})}
     # Selector tiers consult the models.dev catalog on construction; an
     # empty snapshot keeps that off the network (tags need no catalog).

@@ -37,6 +37,9 @@ from routellm.config import ConfigError
 
 ENTRY_POINT_GROUP = "routellm.transforms"
 
+#: The reach of a leaf that never leaves the host.
+LOCAL_ONLY = frozenset({"local"})
+
 
 class TransformError(Exception):
     """A transform failed; the request is refused, never sent as it was.
@@ -137,6 +140,16 @@ class RequestTransform(Protocol):
         """Optional. A fresh restorer for one streamed text field."""
         ...
 
+    def inverse_arguments(self, text: str, state: Any) -> str:
+        """Optional. `inverse` for a tool call's arguments, a JSON
+        document: a restored value may need escaping. Defaults to
+        `inverse`."""
+        ...
+
+    def arguments_restorer(self, state: Any) -> StreamRestorer:
+        """Optional. `restorer` for streamed tool-call arguments."""
+        ...
+
 
 class IdentityTransform:
     """The default: rewrites nothing, so there is nothing to restore."""
@@ -197,15 +210,22 @@ class _PerPiece:
         return ""
 
 
-def map_text(messages: list[dict], fn: Callable[[str], str]) -> list[dict]:
+def map_text(
+    messages: list[dict],
+    fn: Callable[[str], str],
+    arguments: Callable[[str], str] | None = None,
+) -> list[dict]:
     """Return a copy of `messages` with `fn` applied to every text it carries.
 
     Covers string content, the `text` of text parts in a multimodal
     content list (other parts are left as they are), tool calls'
     function arguments and a legacy `function_call`'s arguments, on
-    every role. Does not mutate the input; a transform's `forward` is
-    the intended caller.
+    every role. Arguments are JSON documents, so a transform that must
+    see their strings, not their escapes, passes `arguments` to handle
+    them; it defaults to `fn`. Does not mutate the input; a transform's
+    `forward` is the intended caller.
     """
+    arguments = arguments or fn
     out = copy.deepcopy(messages)
     for message in out:
         if not isinstance(message, dict):
@@ -220,11 +240,17 @@ def map_text(messages: list[dict], fn: Callable[[str], str]) -> list[dict]:
         for call in message.get("tool_calls") or ():
             function = call.get("function") if isinstance(call, dict) else None
             if isinstance(function, dict) and isinstance(function.get("arguments"), str):
-                function["arguments"] = fn(function["arguments"])
+                function["arguments"] = arguments(function["arguments"])
         legacy = message.get("function_call")
         if isinstance(legacy, dict) and isinstance(legacy.get("arguments"), str):
-            legacy["arguments"] = fn(legacy["arguments"])
+            legacy["arguments"] = arguments(legacy["arguments"])
     return out
+
+
+def _inverse_of(transform, arguments: bool):
+    """The transform's inverse for text, or for tool-call arguments."""
+    specific = getattr(transform, "inverse_arguments", None) if arguments else None
+    return specific or transform.inverse
 
 
 def _chain_restorers(restorers: list[StreamRestorer]) -> StreamRestorer:
@@ -260,20 +286,33 @@ class Applied:
         """True when at least one transform rewrote this call."""
         return bool(self.steps)
 
-    def restore_text(self, text: str) -> str:
+    def restore_text(self, text: str, arguments: bool = False) -> str:
+        """Undo every step on one complete piece; `arguments` for a tool
+        call's JSON arguments. A step that fails ends the request."""
         for transform, state in reversed(self.steps):
-            text = transform.inverse(text, state)
+            undo = _inverse_of(transform, arguments)
+            try:
+                text = undo(text, state)
+            except Exception as exc:
+                label = type(transform).__name__
+                raise TransformError(
+                    f"{label} could not restore the reply", transform=label
+                ) from exc
         return text
 
-    def restorer(self) -> StreamRestorer:
-        """A fresh restorer for one streamed text field."""
+    def restorer(self, arguments: bool = False) -> StreamRestorer:
+        """A fresh restorer for one streamed text field (or, with
+        `arguments`, for a tool call's arguments)."""
         made = []
         for transform, state in reversed(self.steps):
-            make = getattr(transform, "restorer", None)
+            make = getattr(transform, "arguments_restorer" if arguments else "restorer", None)
+            if make is None and arguments:
+                make = getattr(transform, "restorer", None)
             if make is not None:
                 made.append(make(state))
             else:
-                made.append(_PerPiece(lambda t, tr=transform, st=state: tr.inverse(t, st)))
+                undo = _inverse_of(transform, arguments)
+                made.append(_PerPiece(lambda t, undo=undo, st=state: undo(t, st)))
         return _chain_restorers(made)
 
     def restore_response(self, response):
@@ -296,17 +335,17 @@ class Applied:
             for call in getattr(message, "tool_calls", None) or ():
                 function = getattr(call, "function", None)
                 if function is not None and isinstance(function.arguments, str):
-                    function.arguments = self.restore_text(function.arguments)
+                    function.arguments = self.restore_text(function.arguments, True)
             legacy = getattr(message, "function_call", None)
             if legacy is not None and isinstance(getattr(legacy, "arguments", None), str):
-                legacy.arguments = self.restore_text(legacy.arguments)
+                legacy.arguments = self.restore_text(legacy.arguments, True)
         return response
 
     def stream_restore(self):
         """The per-stream restorer of chunks (see `routellm.transform_stream`)."""
         from routellm.transform_stream import StreamRestore
 
-        return StreamRestore(self.restorer)
+        return StreamRestore(self.restorer, lambda: self.restorer(True))
 
 
 NOT_APPLIED = Applied()
@@ -328,6 +367,11 @@ class TransformRunner:
     @property
     def active(self) -> bool:
         return bool(self.transforms)
+
+    @property
+    def redacts(self) -> bool:
+        """True when a transform in the chain performs the `redact` treatment."""
+        return any(getattr(t, "redacts", False) for t in self.transforms)
 
     def selects(self, ctx: TransformContext) -> bool:
         """Whether any transform may rewrite a request like this one."""
@@ -397,9 +441,14 @@ def forward_call(host, kwargs: dict, endpoint: str, reqs, request_id=None, shado
     transformed messages when a transform ran, else the input itself.
     """
     runner = getattr(host, "transforms", None)
+    ctx = context_for(host, reqs, endpoint, request_id, shadow)
+    if ctx.treatment == "redact" and not (runner is not None and runner.redacts):
+        # A redact class may leave the host only through its transform;
+        # with none loaded, only a local-only leaf may be called.
+        if not ctx.reach or not ctx.reach <= LOCAL_ONLY:
+            raise TransformError("class needs redaction but no redactor is loaded")
     if runner is None or not runner.active:
         return kwargs, NOT_APPLIED
-    ctx = context_for(host, reqs, endpoint, request_id, shadow)
     messages, applied = runner.forward(kwargs["messages"], ctx)
     if not applied.active and messages is kwargs["messages"]:
         return kwargs, applied

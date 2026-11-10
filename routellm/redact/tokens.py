@@ -9,9 +9,10 @@ key file: mode 0600, tightened if an older file is looser.
 
 A value is looked up by `HMAC-SHA256(gateway_key, scope || value)`, so
 the lookup column cannot be matched against a guessed value without the
-gateway key and cannot be linked across scopes. The value itself is held
-in the clear: restoring needs it. The protection of that column is the
-file mode, like the response cache; it is not encrypted.
+gateway key and cannot be linked across scopes. The value itself is kept
+so a reply can be restored; how that column is protected is the store's
+`ValueCipher` (`routellm.redact.cipher`): plaintext with the file modes
+above by default, like the response cache, or AES-GCM when configured.
 """
 
 import hashlib
@@ -21,6 +22,8 @@ import secrets
 import sqlite3
 import time
 from collections.abc import Callable, Iterable
+
+from routellm.redact.cipher import PlainCipher, ValueCipher
 
 __all__ = [
     "DEFAULT_TTL_S",
@@ -76,6 +79,8 @@ class TokenStore:
     `path`: database file. `key`: gateway key (32 bytes); when omitted it
     is read from, or created in, `<path>.key`. `ttl_s`: lifetime of a
     mapping and of each token, counted from the last use of the token.
+    `cipher`: protection of the stored values (default: none, file modes
+    only).
     """
 
     def __init__(
@@ -84,6 +89,7 @@ class TokenStore:
         *,
         key: bytes | None = None,
         ttl_s: float = DEFAULT_TTL_S,
+        cipher: ValueCipher | None = None,
         clock: Callable[[], float] = time.time,
     ):
         if ttl_s <= 0:
@@ -91,6 +97,7 @@ class TokenStore:
         self.path = path
         self.key_path = path + ".key"
         self.ttl_s = ttl_s
+        self.cipher = cipher if cipher is not None else PlainCipher()
         self._clock = clock
         parent = os.path.dirname(path)
         if parent and not os.path.isdir(parent):
@@ -125,6 +132,9 @@ class TokenStore:
     def _mac(self, *parts: str) -> str:
         msg = "\x00".join(parts).encode()
         return hmac.new(self._key, msg, hashlib.sha256).hexdigest()
+
+    def _context(self, scope: str, placeholder: str) -> bytes:
+        return f"{scope}\x00{placeholder}".encode()
 
     # -- keys -------------------------------------------------------------
 
@@ -197,7 +207,14 @@ class TokenStore:
                     )
                     c.execute(
                         "INSERT OR REPLACE INTO tokens VALUES (?,?,?,?,?,?)",
-                        (scope, lk, ph, category, value, exp),
+                        (
+                            scope,
+                            lk,
+                            ph,
+                            category,
+                            self.cipher.protect(value, self._context(scope, ph)),
+                            exp,
+                        ),
                     )
                     out.append(ph)
                 c.execute("COMMIT")
@@ -242,8 +259,11 @@ class TokenStore:
                 raise MappingExpired("mapping expired")
             rows = c.execute(
                 "SELECT placeholder, value FROM tokens WHERE scope=? AND expires>?", (scope, now)
-            )
-            return dict(rows.fetchall())
+            ).fetchall()
+        try:
+            return {ph: self.cipher.reveal(v, self._context(scope, ph)) for ph, v in rows}
+        except ValueError as exc:
+            raise MappingError("a stored value cannot be read") from exc
 
     # -- upkeep and inspection ---------------------------------------------
 

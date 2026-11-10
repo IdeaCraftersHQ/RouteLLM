@@ -34,9 +34,11 @@ from routellm.class_tiers import (
     check_decision_endpoint,
     check_entry_tier,
     class_denial,
+    redact_aux_denial,
     route_error,
 )
 from routellm.comparison import ComparisonConfig, ComparisonManager
+from routellm.config import ConfigError
 from routellm.decision import DecisionRefused, set_decision
 from routellm.egress_gate import EgressGates
 from routellm.endpoints import EndpointRegistry, Selector
@@ -60,7 +62,7 @@ from routellm.routing import (
 from routellm.streaming import RoutedStream
 from routellm.strict import check_pair, check_strict_registry
 from routellm.traffic import NoAllowedTarget, TrafficManager
-from routellm.transform import TransformRunner, context_for, forward_call
+from routellm.transform import TransformError, TransformRunner, context_for, forward_call
 from routellm.transform_stream import RestoringIterator
 from routellm.types import Middleware, ModelPair
 
@@ -379,6 +381,18 @@ class Controller:
         # Egress gates: model ids checked now, class and policy per request.
         self.egress_gates = egress_gates
         self.transforms = TransformRunner(transforms)
+        if policy is not None and not self.transforms.redacts:
+            off_host = [
+                n
+                for n, c in policy.classes.items()
+                if c.treatment == "redact" and set(c.reach) - {"local"}
+            ]
+            if off_host:
+                raise ConfigError(
+                    f"policy class {', '.join(map(repr, off_host))} has treatment redact and "
+                    "may leave the host, but no redact transform is configured "
+                    "(add a `redact:` section)"
+                )
         if egress_gates is not None:
             egress_gates.check(
                 self.endpoints,
@@ -667,10 +681,26 @@ class Controller:
     def _aux_denial(
         self, name: str, data_class: str | None, route_policy: str | None = None
     ) -> str | None:
-        """Return why a call carrying request content may not go to endpoint `name`, or None.
+        """Return why an auxiliary call carrying request content may not go to `name`, or None.
 
         The one check every auxiliary call passes (hosted routers, the
         embedding endpoint, the intent detector, the comparison judge):
+        the main call's check (`_egress_denial`), then, for a class whose
+        treatment is `redact`, `redact:<class>:aux_not_local` unless
+        every leaf of `name` is local. The redact transform rewrites the
+        main call only; an auxiliary call would carry the raw content,
+        so for such a class it stays on the host.
+        """
+        denial = self._egress_denial(name, data_class, route_policy)
+        if denial is None and self.policy is not None:
+            denial = redact_aux_denial(self.policy, self.endpoints, name, data_class)
+        return denial
+
+    def _egress_denial(
+        self, name: str, data_class: str | None, route_policy: str | None = None
+    ) -> str | None:
+        """Return why a call carrying request content may not go to `name`, or None.
+
         `policy:<class>:<reach|jur>` when the class may not reach it
         (only under a loaded policy and with a class), then
         `gate:<name>:<why>` when an egress gate refuses it. A request
@@ -990,7 +1020,7 @@ class Controller:
         controller put on `reqs` once the decision step has run, so a
         request is never judged on a class that is not final.
         """
-        return self._aux_denial(
+        return self._egress_denial(
             name, getattr(reqs, "data_class", None), getattr(reqs, "route_policy", None)
         )
 
@@ -2105,6 +2135,9 @@ class Controller:
 
                 res = applied.restore_response(res)
                 return self._attach_path(res, path, model_name, sibling, sibling_reference, walk)
+            except TransformError:
+                # Not the leaf's fault: no other leaf is tried.
+                raise
             except Exception as e:
                 import logging
 
@@ -2475,6 +2508,9 @@ class Controller:
 
                 res = applied.restore_response(res)
                 return self._attach_path(res, path, model_name, sibling, sibling_reference, walk)
+            except TransformError:
+                # Not the leaf's fault: no other leaf is tried.
+                raise
             except Exception as e:
                 import logging
 

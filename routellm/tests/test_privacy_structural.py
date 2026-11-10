@@ -24,12 +24,12 @@ BATCH = [n for n in CASES if n not in BREAKER and not CASES[n].policy]
 POLICY_BATCH = [
     n
     for n in CASES
-    if CASES[n].policy and not CASES[n].gate and not CASES[n].route and not CASES[n].aux
+    if CASES[n].policy and not (CASES[n].gate or CASES[n].route or CASES[n].aux or CASES[n].redact)
 ]
 ROUTE_BATCH = [n for n in CASES if CASES[n].route and not CASES[n].aux]
 ROUTE_AUX_BATCH = [n for n in CASES if CASES[n].route and CASES[n].aux]
 GATE_BATCH = [n for n in CASES if CASES[n].gate]
-AUX_BATCH = [n for n in CASES if CASES[n].aux and not CASES[n].route]
+AUX_BATCH = [n for n in CASES if CASES[n].aux and not CASES[n].route and not CASES[n].redact]
 
 
 @pytest.fixture(scope="module")

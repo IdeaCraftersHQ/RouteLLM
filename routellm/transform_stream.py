@@ -112,17 +112,26 @@ class StreamRestore:
     ----------
     make : callable
         Returns a fresh `StreamRestorer` for each text field it meets.
+    make_arguments : callable, optional
+        The same for a tool call's arguments (a JSON document); `make`
+        when omitted.
     """
 
-    def __init__(self, make: Callable[[], StreamRestorer]):
+    def __init__(
+        self,
+        make: Callable[[], StreamRestorer],
+        make_arguments: Callable[[], StreamRestorer] | None = None,
+    ):
         self._make = make
+        self._make_arguments = make_arguments or make
         self._held: dict[tuple, StreamRestorer] = {}
         self._last = None
 
     def _restorer(self, index, key) -> StreamRestorer:
         slot = (index, key)
         if slot not in self._held:
-            self._held[slot] = self._make()
+            is_text = key in _TEXT
+            self._held[slot] = (self._make if is_text else self._make_arguments)()
         return self._held[slot]
 
     def feed(self, chunk) -> list:

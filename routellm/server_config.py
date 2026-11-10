@@ -33,6 +33,7 @@ SERVER_SECTIONS = (
     "auth",
     "embeddings",
     "transforms",
+    "redact",
 )
 
 
@@ -101,14 +102,21 @@ def build_embedding_endpoint(file_config: dict | None) -> str | None:
     return name
 
 
-def build_transforms(file_config: dict | None) -> list:
-    """Return the request transforms the `transforms:` list names, in order.
+def build_transforms(file_config: dict | None, config_path: str | None = None) -> list:
+    """Return the request transforms, in order: the redactor, then `transforms:`.
 
-    Each entry is `module:attr`, an entry point name in the
-    `routellm.transforms` group, or a mapping with `use:` and `options:`.
-    Absent: none, and the request path is untouched.
+    The redactor is built from a `redact:` section (see
+    `routellm.redact.config`) and runs first, so a later transform sees
+    placeholders, never the values. Each `transforms:` entry is
+    `module:attr`, an entry point name in the `routellm.transforms`
+    group, or a mapping with `use:` and `options:`. Neither present:
+    none, and the request path is untouched.
     """
-    return load_transforms((file_config or {}).get("transforms"))
+    from routellm.redact.config import build_redact_transform
+
+    redactor = build_redact_transform((file_config or {}).get("redact"), config_path)
+    chain = load_transforms((file_config or {}).get("transforms"))
+    return [redactor, *chain] if redactor is not None else chain
 
 
 def build_resilience_config(file_config: dict | None) -> ResilienceConfig:

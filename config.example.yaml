@@ -554,6 +554,17 @@ tiers:
 #   models:
 #     fr: fr_core_news_lg
 #     en: en_core_web_lg
+#   # The redact treatment: a policy class with `treatment: redact` reaches
+#   # cloud leaves as placeholders, restored locally. Required when such a
+#   # class may leave the host (startup fails without this section).
+#   engine: presidio          # presidio | patterns (patterns: no person/location)
+#   languages: [fr, en]
+#   non_text: refuse          # refuse | pass: images, audio, files in messages
+#   store:
+#     path: state/tokens.db   # default $XDG_STATE_HOME/routellm/redact/tokens.db
+#     ttl_s: 86400
+#     encryption: none        # none | aes-gcm (needs the `redact-encrypt` extra)
+#     # key_file: /etc/routellm/redact.key   # mode 0600; or key_env: NAME
 
 # Request transforms. Off unless this list exists. Each entry rewrites the
 # messages of every upstream call (primary, fallback, pool member, retry,

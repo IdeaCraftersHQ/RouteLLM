@@ -124,16 +124,118 @@ sent upstream.
   tightened).
 - Values are found by `HMAC-SHA256(gateway key, scope || value)`; the
   key is `<path>.key`, generated on first use, or passed in.
-- The values themselves are stored in the clear, as the response cache
-  stores prompts: the file mode is the protection. Put the directory on
-  an encrypted volume if that is not enough.
+- The values themselves are stored in the clear by default, as the
+  response cache stores prompts: the file mode is the protection. For
+  more, turn on AES-GCM (see [Protecting stored values](#protecting-stored-values))
+  or put the directory on an encrypted volume.
 - A mapping and each token expire `ttl_s` after creation / last use;
   expired rows are purged on the next write.
+
+### Protecting stored values
+
+The store's value column goes through a `ValueCipher`
+(`routellm.redact.cipher`): `protect(value, context)` /
+`reveal(stored, context)`.
+
+| `redact.store.encryption` | Value column | Needs |
+|---------------------------|--------------|-------|
+| `none` (default) | plaintext; database and key files 0600, directory 0700 | nothing |
+| `aes-gcm` | AES-256-GCM, fresh 96-bit nonce per value, bound to its scope and placeholder | `pip install "routellm[redact-encrypt]"` and a 32-byte key |
+
+```yaml
+redact:
+  store:
+    encryption: aes-gcm
+    key_file: /etc/routellm/redact.key   # mode 0600; or key_env: ROUTELLM_REDACT_KEY
+```
+
+The key is base64 or hex of 32 random bytes (`openssl rand -base64 32`).
+Startup stops if `aes-gcm` is chosen and the extra, the key, its 0600
+mode or its length is wrong. A tampered row, a row moved to another
+placeholder, a wrong key and a row written under the other setting all
+fail as an unreadable mapping (the request is refused); ciphertext is
+never returned as a value. Rows live for `ttl_s` (a day by default), so
+changing the setting only costs the mappings in flight.
+
+The lookup column (an HMAC under the gateway key) is not the value and
+does not change. `cryptography` 50.0.2 is the pinned dependency
+(Apache-2.0 OR BSD-3-Clause, released 2026-09-30).
+
+## The redact treatment
+
+A policy class with `treatment: redact` may reach cloud leaves
+(`reach: [local, cloud]`) because this transform runs first. It is built
+from a `redact:` section of the server config and runs ahead of any
+`transforms:` entry.
+
+```yaml
+policy: policy.yaml            # classes.pii: {treatment: redact, reach: [local, cloud], ...}
+redact:
+  engine: presidio             # presidio (default) | patterns (no NER: no person, no location)
+  languages: [fr, en]          # every text is analysed under each, spans merged
+  client_id_patterns: ['CLI-\d{6}']
+  non_text: refuse             # refuse (default) | pass
+  store:
+    path: state/tokens.db      # default $XDG_STATE_HOME/routellm/redact/tokens.db
+    ttl_s: 86400
+    encryption: none
+```
+
+**Which calls.** For a request whose effective class has treatment
+`redact`, every call to a leaf that is not exactly `local` (cloud, vpn,
+a leaf with no reach label) goes out redacted: system, user, assistant
+and tool messages, the text parts of multimodal content, and tool-call
+and legacy function-call arguments. Arguments are JSON, so the strings
+inside are redacted (a dump escapes `é`, which would hide it) and the
+document is re-serialised. This holds for the primary, the sibling
+fallback, pool members, shadow and compare targets. A `local` leaf gets
+the request raw: redaction is for egress.
+
+**Restore.** The reply is restored locally, before it reaches the client:
+message content, reasoning, tool-call arguments (values are JSON-escaped
+into the arguments, so they stay valid), streamed or not. A placeholder
+split across chunks is held until it completes; a held tail that never
+completes is released as written. A placeholder the model invented or
+mangled is left as written. The mapping is read once, before the call; a
+reply is restored from memory.
+
+**Refusal, never raw.** A redactor, analyzer or store error, a span
+outside the text, an unreadable mapping, or a part that is not text
+(an image, audio, a file; `non_text: pass` sends those as they are)
+ends the request with a 500 `transform_failed` before any provider is
+called. No fallback leaf is tried. A restore error does the same. A
+policy that lets a redact class leave the host with no `redact:` section
+stops the server at startup; a request that reaches a non-local leaf
+without a redactor is refused at the call.
+
+**Auxiliary calls.** The transform rewrites the main call only. Every
+other call that carries request content (hosted and embedding routers,
+the semantic cache's embedding, the intent detector, the comparison
+judge, the decision classifier) is local-only for a redact class: its
+endpoint must have only the `local` reach label, else it is skipped
+(`redact:<class>:aux_not_local`) and, for the decision classifier,
+startup fails. A redact class takes no part in the semantic cache.
+
+**At rest.**
+
+- Cache: a request in a redact class is never looked up or stored.
+- Traces: a non-`raw` class keeps digests only, whatever `capture_content`.
+- Logs: this package logs no text; litellm's DEBUG records, which print
+  messages, are dropped while a redact transform is configured.
+- Mapping ids appear in no cache key, trace or log line.
+- The values live in the token store and nowhere else, protected as above.
+
+**Limits.** The transform sees `messages`. Other request fields
+(`user`, `metadata`, tool and schema descriptions, a message's `name`)
+go upstream as sent. A transcriber runs before the class is known; keep
+it local with a redact class. Recall is the analyzers': measure it
+(the leak and recall harness gates the treatment for production).
 
 ## Licences
 
 | Component | Version | Licence |
 |-----------|---------|---------|
+| cryptography (`redact-encrypt`) | 50.0.2 | Apache-2.0 OR BSD-3-Clause |
 | presidio-analyzer | 2.2.365 | MIT |
 | spacy | 3.8.16 | MIT |
 | en_core_web_lg | 3.8.0 | MIT |

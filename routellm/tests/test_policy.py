@@ -105,16 +105,16 @@ def test_block_class_allowing_cloud_is_a_load_error():
         parse_policy(raw, "p.yaml")
 
 
-def test_redact_cloud_is_a_load_error_until_redaction_exists():
+def test_redact_cloud_loads_because_the_redaction_treatment_exists():
+    raw = cls("pii", treatment="redact", reach=["cloud"], tiers=["t"])
+    assert parse_policy(raw).classes["pii"].treatment == "redact"
+
+
+def test_redact_cloud_is_a_load_error_without_the_treatment(monkeypatch):
+    monkeypatch.setattr(policy_mod, "REDACTION_AVAILABLE", False)
     raw = cls("pii", treatment="redact", reach=["cloud"], tiers=["t"])
     with pytest.raises(PolicyError, match=r"class 'pii' reach: 'cloud' on a redact"):
         parse_policy(raw, "p.yaml")
-
-
-def test_redact_cloud_loads_when_redaction_is_available(monkeypatch):
-    monkeypatch.setattr(policy_mod, "REDACTION_AVAILABLE", True)
-    raw = cls("pii", treatment="redact", reach=["cloud"], tiers=["t"])
-    assert parse_policy(raw).classes["pii"].treatment == "redact"
 
 
 @pytest.mark.parametrize(
