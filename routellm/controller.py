@@ -351,6 +351,7 @@ class Controller:
         # Class to tiers: every leaf a class's tiers can reach, by any
         # path, carries what the class allows, or the server never starts.
         self.policy = policy
+        self.quality_manager.policy = policy
         if policy is not None:
             check_class_tiers(
                 policy,
@@ -382,7 +383,12 @@ class Controller:
         if config is None:
             config = GPT_4_AUGMENTED_CONFIG
 
-        configure_embeddings(self.endpoints, embedding_endpoint, allow_remote_embeddings)
+        configure_embeddings(
+            self.endpoints,
+            embedding_endpoint,
+            allow_remote_embeddings,
+            strict=policy is not None,
+        )
 
         # A tier's router must exist too, but it is named in the config
         # file rather than on the command line, so it is checked here
@@ -1886,6 +1892,7 @@ class Controller:
                 session_id=session_id,
                 latency_ms=0,
                 area=area,
+                request_ctx=reqs,
             )
             return self._attach_path(res, path, model_to_use, sibling, sibling_reference)
 
@@ -1947,6 +1954,7 @@ class Controller:
                     session_id=session_id,
                     latency_ms=latency_ms,
                     area=area,
+                    request_ctx=reqs,
                 )
 
                 return self._attach_path(res, path, model_name, sibling, sibling_reference, walk)
@@ -1983,6 +1991,7 @@ class Controller:
         started,
         area,
         comparison=None,
+        reqs=None,
     ):
         """Record a streamed completion's trace once the stream is over.
 
@@ -2024,6 +2033,7 @@ class Controller:
                 latency_ms=latency_ms,
                 area=area,
                 comparison=comparison,
+                request_ctx=reqs,
             )
             logger.info("routing path at stream end: %s -> %s", path, model_name)
 
@@ -2155,6 +2165,7 @@ class Controller:
                 session_id=session_id,
                 latency_ms=0,
                 area=area,
+                request_ctx=reqs,
             )
             return self._attach_path(res, path, model_to_use, sibling, sibling_reference)
 
@@ -2233,6 +2244,7 @@ class Controller:
                             started=started,
                             area=area,
                             comparison=primary_mark,
+                            reqs=reqs,
                         ),
                     )
 
@@ -2286,6 +2298,7 @@ class Controller:
                     latency_ms=latency_ms,
                     area=area,
                     comparison=primary_mark,
+                    request_ctx=reqs,
                 )
 
                 return self._attach_path(res, path, model_name, sibling, sibling_reference, walk)

@@ -799,7 +799,7 @@ areas:
   coding: [coding, coding_quality, coding_fast]   # per-area numbers, used inside those tiers
 ```
 
-Traces keep ids, scores, token usage, and a SHA-256 and length of the prompt and of the output; no prompt or response text unless `capture_content: true` (logs a startup WARNING). Scoring reads text, so it needs a capturing store and refuses digest-only traces naming the trace. Trace directory is `0700`, files `0600`. Record traces, score them offline against a rubric, aggregate, and restart: `python -m routellm.quality_scores score --traces .routellm_traces --scorer rubric:./rubric.yaml` then `aggregate --scores scores.jsonl --out quality.yaml`. Scoring needs the `fit` extra; aggregation needs nothing. An endpoint the sidecar does not name keeps the number it has, and each override logs one line naming both. The whole loop is in [docs/runbooks/traces-to-quality.md](docs/runbooks/traces-to-quality.md).
+Traces keep ids, scores, token usage, and a SHA-256 and length of the prompt and of the output; no prompt or response text unless `capture_content: true` (logs a startup WARNING). With a [policy](#policy-file) loaded, `capture_content: true` stores text only for a request whose effective class (the decision's, else the declared one) has treatment `raw`; a `redact`, `block` or `vault` class, or one the policy does not list, keeps digests, and the trace records `metadata.content_captured: false` with `metadata.content_withheld_reason` (`class_treatment:<treatment>` or `class_unknown`). Shadow and comparison traces follow the class of the request they ran for. Scoring reads text, so it needs a capturing store and refuses digest-only traces naming the trace. Trace directory is `0700`, files `0600`. Record traces, score them offline against a rubric, aggregate, and restart: `python -m routellm.quality_scores score --traces .routellm_traces --scorer rubric:./rubric.yaml` then `aggregate --scores scores.jsonl --out quality.yaml`. Scoring needs the `fit` extra; aggregation needs nothing. An endpoint the sidecar does not name keeps the number it has, and each override logs one line naming both. The whole loop is in [docs/runbooks/traces-to-quality.md](docs/runbooks/traces-to-quality.md).
 
 ### Comparison routing
 
@@ -828,7 +828,7 @@ traces:                       # the trace store; off unless enabled
   trace_dir: .routellm_traces # relative to this file
   max_files: 10000
   max_bytes: 536870912
-  capture_content: false      # true stores prompt and response text in plaintext
+  capture_content: false      # true stores prompt and response text in plaintext (raw classes only under a policy)
 ```
 
 `config.example.yaml` carries the same section, commented, with every key.
@@ -981,7 +981,7 @@ egress_gates:
 | Comparison judge | the `judge:<endpoint>` | shadow output recorded unscored |
 | Decision classifier | its `decision.endpoint` | it runs before the class is known, so startup fails unless every non-`vault` class may reach it |
 
-Audio transcription runs before the class is known too; a tier whose endpoints are all `local` already requires a `local` transcriber at load. An embedding call with no registry endpoint (`--allow-remote-embeddings`) carries no tags, so a request with a class under a policy is refused it.
+Audio transcription runs before the class is known too; a tier whose endpoints are all `local` already requires a `local` transcriber at load. An embedding call with no registry endpoint carries no tags, so `--allow-remote-embeddings` is refused at startup under a policy; give the server an embedding endpoint instead.
 
 **`require_policy_allow`** makes the gate depend on the request's [routing policy](#policy-routing): a leaf the gate selects is a candidate only when the selected policy's `allow_tags` lists one of the leaf's tags and its `deny_tags` list none; otherwise the reason is `gate:<name>:policy`. Without `policy_routing:` there is no selected policy, so such a gate refuses every request to its endpoints. The intent detector is not a request with a policy: a gated detector endpoint of such a gate gets no call.
 
@@ -1301,7 +1301,7 @@ class MyRouter(Router):
 
 `embed` sends the text to one registry endpoint: the one `embeddings.endpoint` names, else the endpoint called `embedding`. The endpoint's `model`, `api_base`, `api_key_env` and `extra` are used as written, so the call carries its reach and `jur:` tags like any model call. The semantic cache embeds through the same endpoint. There is no default endpoint and no default model: a server that loads such a router, or enables `cache.semantic_enabled`, with no endpoint refuses to start and names the missing key. The startup log names the endpoint and its reach.
 
-`--allow-remote-embeddings` falls back, for a server with no endpoint, to `OPENAI_BASE_URL` / `OPENAI_API_KEY`, with a WARNING naming the host the prompts go to. No tag describes that call, so no policy can gate it. Tests that need their own configuration call `configure_embeddings(registry, endpoint)` and `reset_embedding_client()`.
+`--allow-remote-embeddings` falls back, for a server with no endpoint, to `OPENAI_BASE_URL` / `OPENAI_API_KEY`, with a WARNING naming the host the prompts go to. No tag describes that call, so no policy can gate it: with `strict_registry: true` or a loaded `policy:` (which forces strict) the flag is refused at startup, naming `embeddings.endpoint` as the fix. Tests that need their own configuration call `configure_embeddings(registry, endpoint)` and `reset_embedding_client()`.
 
 ### Adding a new benchmark
 

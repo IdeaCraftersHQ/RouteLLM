@@ -99,6 +99,9 @@ class QualityManager:
         self._listing: list[tuple] | None = None
         self._listing_at: float = 0.0
         self._capped: set = set()
+        #: The loaded class policy, set by the controller. With one,
+        #: `_may_capture` holds text to classes whose treatment is `raw`.
+        self.policy: Any = None
 
         if self.fine_tune_config.enabled:
             directory = self.fine_tune_config.trace_dir
@@ -117,11 +120,41 @@ class QualityManager:
     def _may_capture(self, request_ctx: Any = None) -> bool:
         """Return whether this request's prompt and response text may be stored.
 
-        The single gate every trace write passes. It reads the
-        `capture_content` setting today; a per-request policy extends
-        it through `request_ctx`.
+        The single gate every trace write passes. See `_capture_verdict`.
         """
-        return bool(self.fine_tune_config.capture_content)
+        return self._capture_verdict(request_ctx)[0]
+
+    def _capture_verdict(self, request_ctx: Any = None) -> tuple[bool, str | None]:
+        """Return `(may capture, reason text is withheld)`.
+
+        Without `capture_content` the answer is `(False, None)`: digests
+        are the default, nothing was withheld. With it and no policy
+        loaded, text is kept as before. With a policy, text is kept only
+        for a request whose effective class has treatment `raw`; a
+        `redact`, `block` or `vault` class, and a class the policy does
+        not know (or none at all), keep digests.
+
+        Parameters
+        ----------
+        request_ctx : str, Requirements or RequestClass, optional
+            The effective class name, or an object whose `data_class`
+            is it.
+        """
+        if not self.fine_tune_config.capture_content:
+            return False, None
+        if self.policy is None:
+            return True, None
+        name = (
+            request_ctx
+            if isinstance(request_ctx, str)
+            else getattr(request_ctx, "data_class", None)
+        )
+        spec = self.policy.classes.get(name) if name else None
+        if spec is None:
+            return False, "class_unknown"
+        if spec.treatment != "raw":
+            return False, f"class_treatment:{spec.treatment}"
+        return True, None
 
     def should_canary(self) -> bool:
         """Determine if this request should be sent to canary model.
@@ -226,10 +259,15 @@ class QualityManager:
         score : float, optional
             A judge's score, stored as `reward.score`.
         request_ctx : Any, optional
-            Per-request context handed to `_may_capture`.
+            The request's effective class (a name, or an object with
+            `data_class`), handed to `_may_capture`.
 
         Notes
         -----
+        With `capture_content` on and a class policy loaded, text is
+        stored only when `request_ctx` names a `raw` class; otherwise the
+        trace holds digests and `metadata.content_withheld_reason`.
+
         Without capture (the default) the trace holds a SHA-256 and the
         length of the prompt and of the output, and neither text.
         """
@@ -241,6 +279,9 @@ class QualityManager:
 
             deepest = path[-1] if path else {}
             capture = self._may_capture(request_ctx)
+            withheld = None
+            if not capture and self.fine_tune_config.capture_content:
+                withheld = self._capture_verdict(request_ctx)[1] or "capture_denied"
             output_text = _extract_output(response)
             trace_id = f"trace-{int(time.time() * 1000)}-{secrets.token_hex(3)}"
             trace = {
@@ -287,6 +328,7 @@ class QualityManager:
                     "trace_version": "1.0",
                     "routellm_trace_version": 2,
                     "content_captured": capture,
+                    **({"content_withheld_reason": withheld} if withheld else {}),
                 },
                 "routed_model": routed_model,
             }
