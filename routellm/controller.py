@@ -59,6 +59,8 @@ from routellm.routing import (
 from routellm.streaming import RoutedStream
 from routellm.strict import check_pair, check_strict_registry
 from routellm.traffic import NoAllowedTarget, TrafficManager
+from routellm.transform import TransformRunner, context_for, forward_call
+from routellm.transform_stream import RestoringIterator
 from routellm.types import Middleware, ModelPair
 
 logger = logging.getLogger(__name__)
@@ -173,6 +175,7 @@ class Controller:
         policy_routing: PolicyRouter | None = None,
         embedding_endpoint: str | None = None,
         allow_remote_embeddings: bool = False,
+        transforms: list | None = None,
     ):
         """Initialize controller with routers and configuration.
 
@@ -223,6 +226,12 @@ class Controller:
         allow_remote_embeddings : bool
             Fall back to OPENAI_BASE_URL / OPENAI_API_KEY when no
             endpoint exists, with a WARNING naming the host. Default False.
+        transforms : list, optional
+            Request transforms (`routellm.transform.RequestTransform`), in
+            order. Each rewrites the messages of every upstream call
+            after the candidate is chosen and its inverse restores the
+            reply; see `routellm.transform`. Empty leaves the request
+            path untouched.
         traffic_manager : TrafficManager, optional
             Traffic management and load balancing.
         quality_manager : QualityManager, optional
@@ -368,6 +377,7 @@ class Controller:
 
         # Egress gates: model ids checked now, class and policy per request.
         self.egress_gates = egress_gates
+        self.transforms = TransformRunner(transforms)
         if egress_gates is not None:
             egress_gates.check(
                 self.endpoints,
@@ -1944,7 +1954,15 @@ class Controller:
         # and decision), never the declared or decided one alone.
         request_class = self._request_class(declared_class, decision, effective)
         cache_ns, cache_mode = self._cache_scope(request_class)
-        use_cache = not streaming and cache_mode != "none"
+        # A request a transform rewrites is never cached: a stored reply
+        # could not be restored without that request's own state.
+        use_cache = (
+            not streaming
+            and cache_mode != "none"
+            and not (
+                self.transforms.active and self.transforms.selects(context_for(self, reqs, None))
+            )
+        )
         fuzzy = cache_mode == "both" and self._semantic_cache_allowed(
             request_class,
             getattr(reqs, "route_policy", None),
@@ -1983,8 +2001,15 @@ class Controller:
             # 3. Resolve the endpoint, then apply load balancing
             model, curr_api_base, curr_api_key, extra = self._endpoint_call_params(model_name, reqs)
 
-            def _call():
-                kwargs_copy = {**extra, **kwargs}
+            # Rewrite the messages for this candidate. A transform that
+            # raises ends the request here: no call, no fallback.
+            call_src, applied = forward_call(self, kwargs, model_name, reqs, request_id)
+            rec_prompt = (
+                requirements_module._prompt_text(call_src["messages"]) if applied.active else prompt
+            )
+
+            def _call(call_src=call_src):
+                kwargs_copy = {**extra, **call_src}
                 kwargs_copy["model"] = model
                 log_dropped(model_name, model, curr_api_base, kwargs_copy)
                 kwargs_copy.pop("extra_headers", None)
@@ -2005,6 +2030,8 @@ class Controller:
                 latency_ms = int((time.monotonic() - started) * 1000)
 
                 if streaming:
+                    if applied.active:
+                        res = RestoringIterator(res, applied.stream_restore())
                     return self._attach_path(
                         res, path, model_name, sibling, sibling_reference, walk
                     )
@@ -2020,9 +2047,9 @@ class Controller:
 
                     logging.getLogger(__name__).error(f"Failed to cache response: {e!s}")
 
-                # Record trace
+                # Record trace: the transformed prompt and reply only
                 self.quality_manager.record_trace(
-                    prompt,
+                    rec_prompt,
                     model_name,
                     res.model_dump(),
                     {"is_canary": is_canary and model_name == model_to_use},
@@ -2035,6 +2062,7 @@ class Controller:
                     request_ctx=reqs,
                 )
 
+                res = applied.restore_response(res)
                 return self._attach_path(res, path, model_name, sibling, sibling_reference, walk)
             except Exception as e:
                 import logging
@@ -2219,7 +2247,15 @@ class Controller:
         # and decision), never the declared or decided one alone.
         request_class = self._request_class(declared_class, decision, effective)
         cache_ns, cache_mode = self._cache_scope(request_class)
-        use_cache = not streaming and cache_mode != "none"
+        # A request a transform rewrites is never cached: a stored reply
+        # could not be restored without that request's own state.
+        use_cache = (
+            not streaming
+            and cache_mode != "none"
+            and not (
+                self.transforms.active and self.transforms.selects(context_for(self, reqs, None))
+            )
+        )
         fuzzy = cache_mode == "both" and self._semantic_cache_allowed(
             request_class,
             getattr(reqs, "route_policy", None),
@@ -2282,8 +2318,15 @@ class Controller:
             # 3. Resolve the endpoint, then apply load balancing
             model, curr_api_base, curr_api_key, extra = self._endpoint_call_params(model_name, reqs)
 
-            async def _call(extra_headers=None):
-                kwargs_copy = {**extra, **kwargs}
+            # Rewrite the messages for this candidate. A transform that
+            # raises ends the request here: no call, no fallback.
+            call_src, applied = forward_call(self, kwargs, model_name, reqs, request_id)
+            rec_prompt = (
+                requirements_module._prompt_text(call_src["messages"]) if applied.active else prompt
+            )
+
+            async def _call(extra_headers=None, call_src=call_src):
+                kwargs_copy = {**extra, **call_src}
                 kwargs_copy["model"] = model
                 log_dropped(model_name, model, curr_api_base, kwargs_copy)
                 # The endpoint's headers, the request's, then a payment
@@ -2302,7 +2345,7 @@ class Controller:
             try:
                 started = time.monotonic()
 
-                async def _open(_call=_call, model_name=model_name):
+                async def _open(_call=_call, model_name=model_name, applied=applied):
                     res = await self._request_with_payment(_call, endpoint=model_name)
                     if not streaming:
                         return res
@@ -2314,8 +2357,8 @@ class Controller:
                         on_end=lambda chunks, err, model_name=model_name: self._stream_ended(
                             chunks,
                             err,
-                            prompt=prompt,
-                            messages=kwargs["messages"],
+                            prompt=rec_prompt,
+                            messages=call_src["messages"],
                             model_name=model_name,
                             is_canary=is_canary and model_name == model_to_use,
                             path=path,
@@ -2326,6 +2369,7 @@ class Controller:
                             comparison=primary_mark,
                             reqs=reqs,
                         ),
+                        restore=applied.stream_restore() if applied.active else None,
                     )
 
                 res = await self.resilience.wrap_acompletion(
@@ -2344,7 +2388,7 @@ class Controller:
                 # 4. Validate canary if needed
                 if is_canary and model_name == model_to_use:
                     passed = await self.quality_manager.validate_canary(
-                        res.choices[0].message.content, prompt
+                        res.choices[0].message.content, rec_prompt
                     )
                     if not passed:
                         import logging
@@ -2365,9 +2409,9 @@ class Controller:
 
                     logging.getLogger(__name__).error(f"Failed to cache response: {e!s}")
 
-                # Record trace
+                # Record trace: the transformed prompt and reply only
                 self.quality_manager.record_trace(
-                    prompt,
+                    rec_prompt,
                     model_name,
                     res.model_dump(),
                     {"is_canary": is_canary and model_name == model_to_use},
@@ -2381,6 +2425,7 @@ class Controller:
                     request_ctx=reqs,
                 )
 
+                res = applied.restore_response(res)
                 return self._attach_path(res, path, model_name, sibling, sibling_reference, walk)
             except Exception as e:
                 import logging

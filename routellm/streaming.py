@@ -12,6 +12,7 @@ consumer as the exception it was, and the server turns it into an error
 event; the sibling is never called.
 """
 
+import copy
 import inspect
 import logging
 from collections.abc import Callable
@@ -63,6 +64,11 @@ class RoutedStream:
         The object `source` was taken from, when it is a different object
         and has its own way to be closed (a provider stream whose
         iterator is a generator, say). Closed along with `source`.
+    restore : StreamRestore, optional
+        Restores each chunk on its way out (a request transform's
+        inverse). `on_end` still gets the chunks as the upstream sent
+        them, the transformed form, so a trace never holds the restored
+        text; only what the consumer reads is restored.
 
     The upstream is closed however the stream ends: exhausted, failed,
     or abandoned by `aclose()`.
@@ -74,8 +80,12 @@ class RoutedStream:
         source,
         on_end: Callable[[list, Exception | None], Any] | None = None,
         stream=None,
+        restore=None,
     ):
         self._pending = [first]
+        self._restore = restore
+        self._out: list = []
+        self._drained = False
         self._chunks: list = []
         self._source = source
         self._stream = stream
@@ -85,7 +95,7 @@ class RoutedStream:
         self._hidden_params: dict[str, Any] = {}
 
     @classmethod
-    async def open(cls, stream, on_end=None) -> "RoutedStream":
+    async def open(cls, stream, on_end=None, restore=None) -> "RoutedStream":
         """Read the first chunk of `stream` and return the primed stream.
 
         Raises whatever the first read raises, and `RuntimeError` for a
@@ -103,24 +113,43 @@ class RoutedStream:
         except BaseException:
             await _close_upstream(source, stream)
             raise
-        return cls(first, source, on_end, stream=stream)
+        return cls(first, source, on_end, stream=stream, restore=restore)
 
     def __aiter__(self):
         return self
 
     async def __anext__(self):
-        try:
-            chunk = self._pending.pop() if self._pending else await self._source.__anext__()
-        except StopAsyncIteration:
-            self._finish(None)
-            await self.aclose()
-            raise
-        except Exception as e:
-            self._finish(e)
-            await self.aclose()
-            raise
-        self._chunks.append(chunk)
-        return chunk
+        while True:
+            if self._out:
+                return self._out.pop(0)
+            try:
+                if self._drained:
+                    raise StopAsyncIteration
+                chunk = self._pending.pop() if self._pending else await self._source.__anext__()
+            except StopAsyncIteration:
+                if self._restore is not None and not self._drained:
+                    # Text still held back goes out before the end.
+                    self._drained = True
+                    self._out = self._restore.finish()
+                    continue
+                self._finish(None)
+                await self.aclose()
+                raise
+            except Exception as e:
+                self._finish(e)
+                await self.aclose()
+                raise
+            self._chunks.append(chunk)
+            if self._restore is None:
+                return chunk
+            try:
+                # A copy: `_chunks` is what the trace records, and it must
+                # keep the form the upstream sent.
+                self._out = self._restore.feed(copy.deepcopy(chunk))
+            except Exception as e:
+                self._finish(e)
+                await self.aclose()
+                raise
 
     def _finish(self, error: Exception | None) -> None:
         if self._ended:

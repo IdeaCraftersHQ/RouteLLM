@@ -12,6 +12,7 @@ from typing import Any
 from litellm import acompletion, stream_chunk_builder
 
 from routellm.leaf_params import drop_kwargs, log_dropped
+from routellm.transform import TransformError, forward_call
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,11 @@ class CallMixin:
         result = await self._call(name, kwargs, reqs, measure_ttft, plan)
         self._charge(result["metrics"]["cost_usd"], plan.experiment)
 
+        # What was sent is what is judged and recorded: the transformed
+        # prompt and the reply as the upstream returned it.
+        applied = result.pop("_applied", None)
+        prompt = result.pop("_prompt", prompt)
+
         if result["error"] is None:
             result["score"] = await self._judge(prompt, result["output"], plan.local_only, reqs)
 
@@ -91,6 +97,10 @@ class CallMixin:
         except Exception as exc:
             logger.warning("recording comparison trace failed: %s", exc)
         result.pop("_response", None)
+        # Only a candidate's output reaches a client (`/v1/compare`); a
+        # shadow's is read by nobody and stays as recorded.
+        if applied is not None and role == ROLE_CANDIDATE and result["error"] is None:
+            result["output"] = applied.restore_text(result["output"])
         return result
 
     async def _call(self, name, kwargs, reqs, measure_ttft, plan) -> dict[str, Any]:
@@ -131,10 +141,24 @@ class CallMixin:
             result["error"] = "budget_exhausted"
             return result
 
+        # The same rewrite as the primary call; a transform that raises
+        # means no call.
+        try:
+            call_kwargs, applied = forward_call(self.host, kwargs, name, reqs, shadow=True)
+        except TransformError as exc:
+            logger.warning("comparison call to %s refused: %s", name, exc)
+            result["error"] = "transform_failed"
+            return result
+        if applied.active:
+            from routellm import requirements as requirements_module
+
+            result["_applied"] = applied
+            result["_prompt"] = requirements_module._prompt_text(call_kwargs["messages"])
+
         started = time.monotonic()
         try:
             res, ttft = await asyncio.wait_for(
-                self._request(name, endpoint, kwargs, measure_ttft),
+                self._request(name, endpoint, call_kwargs, measure_ttft),
                 timeout=self.config.timeout_ms / 1000,
             )
         except TimeoutError:
