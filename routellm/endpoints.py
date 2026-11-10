@@ -132,10 +132,16 @@ class Selector(BaseModel):
         reads always sort last, whichever direction it runs. Both
         quality orders break ties on release date newest-first, so
         `quality_asc` reverses only the quality scores, not the dates.
+    pool : int
+        How many matching endpoints the side keeps, best first. The
+        first is the side itself; the rest are tried in order, after it
+        and before the other side, when it fails or is cooling after a
+        rate limit. Default 1: no pool.
     """
 
     select: str
     order: SelectorOrder = "quality_desc"
+    pool: int = Field(default=1, ge=1)
 
     @field_validator("select")
     @classmethod
@@ -469,6 +475,11 @@ class EndpointRegistry:
         # `areas: {area: [tier, ...]}`. Empty means no tier has an
         # area, and pairing then orders on overall quality as always.
         self.areas: dict[str, str] = {}
+
+        # `(tier, side)` to the ordered endpoint names a selector with
+        # `pool: N` resolved to, head first. A side with no pool has no
+        # entry; `pool_for` answers it with the side itself.
+        self._pools: dict[tuple[str, str], list[str]] = {}
 
         self._transcriber_raw: dict[str, Any] | None = transcriber
         self._transcribers: dict[str | None, TranscriberConfig] = {}
@@ -909,6 +920,21 @@ class EndpointRegistry:
             if existing is None or parse_cap(endpoint.max_payment) < parse_cap(existing):
                 caps[base] = endpoint.max_payment
         return caps
+
+    def set_pool(self, tier: str, side: str, names: list[str]) -> None:
+        """Record the ordered endpoints a tier side's selector resolved to."""
+        self._pools[(tier, side)] = list(names)
+
+    def pool_for(self, tier: str, side: str) -> list[str]:
+        """Return the endpoints a tier side tries, in order, head first.
+
+        A side that names one endpoint or tier, or a selector with no
+        pool, answers with just that side.
+        """
+        pooled = self._pools.get((tier, side))
+        if pooled is not None:
+            return list(pooled)
+        return [getattr(self.get_tier(tier), side)]
 
     def get_tier(self, name: str) -> Tier:
         """Return the tier registered under `name`.

@@ -502,6 +502,9 @@ def _split_terms(select: str) -> tuple[list[str], list[str], str]:
         key, _, value = term.partition(":")
         if key == "tag":
             tags.append(value)
+        elif key == "free":
+            # Judged by `_free_term` and `rank_candidates`, never by aim.
+            continue
         elif (
             key in CAPABILITY_KEYS
             or key in RANGE_KEYS
@@ -516,6 +519,43 @@ def _split_terms(select: str) -> tuple[list[str], list[str], str]:
             catalog_terms.append(term)
 
     return tags, capability_terms, " ".join(catalog_terms)
+
+
+def _free_term(select: str) -> bool | None:
+    """Return the value of a `free:` term in `select`, None when absent.
+
+    Raises
+    ------
+    ValueError
+        If the value is not `true` or `false`, or the term repeats with
+        both values.
+    """
+    values: set[bool] = set()
+    for term in select.split():
+        key, _, value = term.partition(":")
+        if key != "free":
+            continue
+        if value not in ("true", "false"):
+            raise ValueError(f"Selector term {term!r} in {select!r}: free takes true or false.")
+        values.add(value == "true")
+    if len(values) > 1:
+        raise ValueError(f"Selector {select!r} asks for free:true and free:false at once.")
+    return values.pop() if values else None
+
+
+def _is_free(record: ModelRecord | None) -> bool:
+    """Return whether the catalog prices input and output at zero.
+
+    An uncatalogued endpoint, or one whose record leaves either price
+    unstated, is not free: absence of a price is not a price of zero.
+    """
+    return (
+        record is not None
+        and record.cost_input is not None
+        and record.cost_output is not None
+        and record.cost_input == 0
+        and record.cost_output == 0
+    )
 
 
 def _catalog_filter(query: str, select: str):
@@ -719,6 +759,7 @@ def rank_candidates(
     tags, capability_terms, query = _split_terms(selector.select)
     capability_query = parse_capability_terms(capability_terms)
     filter_ = _catalog_filter(query, selector.select)
+    free = _free_term(selector.select)
 
     # A catalog term makes the catalog mandatory; an order that reads
     # catalog facts only makes it useful, so a failed fetch there
@@ -727,7 +768,7 @@ def rank_candidates(
     try:
         by_key = _index_catalog(load_catalog())
     except CatalogUnavailable as exc:
-        if filter_ is not None:
+        if filter_ is not None or free is not None:
             raise
         if not _blocks_answer(registry, capability_query):
             raise
@@ -749,6 +790,9 @@ def rank_candidates(
         key = catalog_provider_for(endpoint.model)
         if key is not None:
             record = by_key.get(key)
+
+        if free is not None and _is_free(record) != free:
+            continue
 
         capabilities = capabilities_for(endpoint, record)
 
@@ -839,6 +883,33 @@ def records_for_registry(
             found[name] = record
 
     return found
+
+
+def resolve_pool(
+    registry: EndpointRegistry,
+    selector: Selector,
+    area: str | None = None,
+) -> list[str]:
+    """Return the endpoints a selector keeps, best first, at most `pool`.
+
+    The first is what `resolve_pairing` returns. Raises as it does.
+    """
+    ranked = rank_candidates(registry, selector, area)
+    if not ranked:
+        raise ValueError(
+            f"Selector {selector.select!r} matches no configured endpoint. "
+            f"Configured endpoints: {', '.join(registry.names()) or '<none>'}"
+        )
+
+    logger.info(
+        "selector %r order %s%s picked %s from: %s",
+        selector.select,
+        selector.order,
+        f" in area {area}" if area else "",
+        ", ".join(name for name, _ in ranked[: selector.pool]),
+        ", ".join(describe_candidate(candidate) for _, candidate in ranked),
+    )
+    return [name for name, _ in ranked[: selector.pool]]
 
 
 def resolve_pairing(
@@ -932,10 +1003,12 @@ def resolve_registry_pairings(registry: EndpointRegistry) -> None:
     for tier in registry.tiers.values():
         area = registry.area_of(tier.name)
         resolved: dict[str, str] = {}
+        pools: dict[str, list[str]] = {}
         for side in ("strong", "weak"):
             value = getattr(tier, side)
             if isinstance(value, Selector):
-                resolved[side] = resolve_pairing(registry, value, area)
+                pools[side] = resolve_pool(registry, value, area)
+                resolved[side] = pools[side][0]
 
         if not resolved:
             continue
@@ -951,6 +1024,8 @@ def resolve_registry_pairings(registry: EndpointRegistry) -> None:
 
         for side, name in resolved.items():
             setattr(tier, side, name)
+            if len(pools[side]) > 1:
+                registry.set_pool(tier.name, side, pools[side])
             logger.info("tier %s %s resolved to %s", tier.name, side, name)
 
 
