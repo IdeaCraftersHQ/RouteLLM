@@ -69,6 +69,11 @@ dev = [
 # explosion/spaCy, no advisories on OSV or PyPI). The spaCy models are
 # not on PyPI and are an install step, see docs/redact.md.
 redact = ["presidio-analyzer==2.2.365", "spacy==3.8.16"]
+# `redact-encrypt`: AES-GCM protection of the token store's values
+# (`redact.store.encryption: aes-gcm`), imported only when selected.
+# cryptography 50.0.2 (Apache-2.0 OR BSD-3-Clause, released 2026-09-30,
+# pyca/cryptography; rsx analyze PASS; no advisories on OSV or PyPI).
+redact-encrypt = ["cryptography==50.0.2"]
 # A direct-URL dependency is rejected by PyPI, so this extra blocks an
 # upload of the package. Replace it with a version pin once hop-top-aim
 # is published.
