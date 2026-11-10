@@ -31,7 +31,9 @@ mf:
 #     - key_sha256: "<printf %s "$KEY" | shasum -a 256>"
 #       principal: team-a              # name audit and cache key on
 #       profile: default               # optional
-#       allowed_classes: [public]      # data classes this caller may send
+#       allowed_classes: [public]      # data classes this caller may send;
+#                                      # unused when a `policy:` is loaded (its
+#                                      # `principals` decides)
 #
 # A relative path resolves against this file's directory. Keep the file
 # owner-only (0600). The matched caller is on `request.state.principal`.
@@ -151,6 +153,11 @@ audio_tokens_per_second: 32
 #       treatment: vault           # every request refused, no model call
 #   principals:
 #     analyst: {classes: [public, internal]}
+#
+# Callers declare `X-Data-Class` / `X-Operation` headers or body
+# `metadata: {data_class, operation}` (never forwarded; see README,
+# "Request data class and operation"). With a policy, every principal it
+# names needs a key in `auth.keys_file`, and `auth:` must be on.
 
 # `strict_registry: true` (or `--strict-registry`) refuses every model
 # name that is not an endpoint below: raw --strong-model/--weak-model

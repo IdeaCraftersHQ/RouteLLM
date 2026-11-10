@@ -23,6 +23,7 @@ MESSAGES = [{"role": "user", "content": "hi"}]
 
 class Fake:
     model_counts = {}
+    decision = None
 
     def __init__(self, error):
         self.error = error

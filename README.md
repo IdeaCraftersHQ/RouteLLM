@@ -348,6 +348,19 @@ principals:
 - `block`: `cloud` in `reach` is a load error.
 - `redact`: `cloud` in `reach` is a load error until a redaction treatment is available.
 - An unknown class on a request is refused; so is a missing class when `default_class` is null. A principal reaches only the classes listed for it; an unlisted principal reaches none.
+
+#### Request data class and operation
+
+A caller declares what it sends, in either of:
+
+- headers `X-Data-Class` and `X-Operation`;
+- body `metadata: {data_class, operation}` (OpenAI-compatible; the rest of `metadata` is dropped).
+
+If the header and the body name the same field with different values the request is a `400`. `data_class` matches `[A-Za-z0-9][A-Za-z0-9_.-]{0,62}`; `operation` is free-form `<tool>.<step>`, 1 to 128 visible characters, recorded only (audit) and never used for routing. Both ride on `request.state.request_class` and `routellm.request_class.current_request_class`, next to the principal, and are never forwarded: not to an upstream, a shadow or comparison call, or the decision classifier.
+
+With a policy loaded: an unknown class, or none declared when `default_class` is null, is a `400` naming the class; a vaulted class, or a class the caller may not send, is a `403`. Only the policy's `principals` decides what a caller may send; the keys file's `allowed_classes` is unused (one startup warning if set), and every principal the policy names must hold a key (startup error). A policy with `principals` needs `auth:`: with auth off no request has a principal, so each is refused (`403`). The validated class is the one passed to the decision classifier.
+
+Without a policy: a declared class is checked against the keys file's `allowed_classes` (`403` if absent from it; empty means none), and handed to the decision classifier only if it is one of its `data_classes`, else ignored. `POST /v1/compare` obeys the same rules.
 - Unknown keys, reach labels, treatments or malformed `jur` codes are load errors.
 - The classifier's `decision.data_classes` must all be policy classes (the policy may list more, for classes callers declare); otherwise startup fails naming the class.
 
