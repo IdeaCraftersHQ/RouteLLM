@@ -366,14 +366,17 @@ tiers:
 
 # Trace store: one JSON file per request, the input to scoring (see
 # docs/runbooks/traces-to-quality.md) and where comparison results land.
-# Off unless enabled. Plaintext prompts and completions; keep the
-# directory private. A relative `trace_dir` resolves against this file.
+# Off unless enabled. By default a trace holds ids, scores, token usage
+# and a SHA-256 and length of the prompt and of the output, no text.
+# Scoring needs text: set capture_content to store plaintext prompts and
+# completions (logs a startup WARNING). Directory 0700, files 0600. A relative `trace_dir` resolves against this file.
 #
 # traces:
 #   enabled: true
 #   trace_dir: .routellm_traces
 #   max_files: 10000           # 0 is unbounded
 #   max_bytes: 536870912       # 0 is unbounded
+#   capture_content: false     # true: store prompt and response text
 
 # Every router named above ships with the base package, so this file
 # serves on a stock install. `jev` is registered by the typesafe

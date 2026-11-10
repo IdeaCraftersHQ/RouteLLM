@@ -142,3 +142,17 @@ def test_replay_obeys_the_budget(tmp_path, ups):
     assert ups["a"].hits == []
     rows = [json.loads(line) for line in (tmp_path / "out.jsonl").read_text().splitlines()]
     assert rows[0]["results"][0]["error"] == "budget_exhausted"
+
+
+def test_replay_records_digests_unless_asked_for_text(tmp_path, ups):
+    argv = setup(tmp_path, ups)
+    assert replay_cli.main([*argv, "--models", "a,b"]) == 0
+    for row in traces(tmp_path):
+        assert "prompt" not in row["input"] and row["input"]["prompt_sha256"]
+        assert "output" not in row["frontier"]
+
+
+def test_replay_capture_content_flag_stores_text(tmp_path, ups):
+    argv = setup(tmp_path, ups)
+    assert replay_cli.main([*argv, "--models", "a,b", "--capture-content"]) == 0
+    assert {r["input"]["prompt"] for r in traces(tmp_path)} == {"one", "two", "three"}

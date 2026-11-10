@@ -4,6 +4,7 @@ Provides canary testing and fine-tuning data collection utilities to monitor
 and improve router performance.
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -57,6 +58,10 @@ class FineTuneConfig(BaseModel):
     max_bytes : int, optional
         Keep at most this many bytes of traces; 0 is unbounded
         (default 512 MiB).
+    capture_content : bool, optional
+        Store prompt and response text in each trace (default False).
+        Off, a trace keeps ids, scores, token usage, a SHA-256 of the
+        prompt and of the output and their lengths, and no text.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -65,6 +70,7 @@ class FineTuneConfig(BaseModel):
     trace_dir: str = ".routellm_traces"
     max_files: int = 10000
     max_bytes: int = 512 * 1024 * 1024
+    capture_content: bool = False
 
     @model_validator(mode="before")
     @classmethod
@@ -95,7 +101,27 @@ class QualityManager:
         self._capped: set = set()
 
         if self.fine_tune_config.enabled:
-            os.makedirs(self.fine_tune_config.trace_dir, exist_ok=True)
+            directory = self.fine_tune_config.trace_dir
+            os.makedirs(directory, mode=0o700, exist_ok=True)
+            try:
+                os.chmod(directory, 0o700)
+            except OSError as exc:
+                logger.warning("could not restrict trace directory %s: %s", directory, exc)
+            if self.fine_tune_config.capture_content:
+                logger.warning(
+                    "traces.capture_content is on: prompt and response text is written "
+                    "to %s in plaintext; keep it private",
+                    directory,
+                )
+
+    def _may_capture(self, request_ctx: Any = None) -> bool:
+        """Return whether this request's prompt and response text may be stored.
+
+        The single gate every trace write passes. It reads the
+        `capture_content` setting today; a per-request policy extends
+        it through `request_ctx`.
+        """
+        return bool(self.fine_tune_config.capture_content)
 
     def should_canary(self) -> bool:
         """Determine if this request should be sent to canary model.
@@ -150,6 +176,7 @@ class QualityManager:
         area: str | None = None,
         comparison: dict[str, Any] | None = None,
         score: float | None = None,
+        request_ctx: Any = None,
     ) -> None:
         """Record one routed request as a fit-ingestible trace.
 
@@ -198,6 +225,13 @@ class QualityManager:
             the `routellm` block.
         score : float, optional
             A judge's score, stored as `reward.score`.
+        request_ctx : Any, optional
+            Per-request context handed to `_may_capture`.
+
+        Notes
+        -----
+        Without capture (the default) the trace holds a SHA-256 and the
+        length of the prompt and of the output, and neither text.
         """
         if not self.fine_tune_config.enabled:
             return
@@ -206,12 +240,19 @@ class QualityManager:
             self._enforce_cap()
 
             deepest = path[-1] if path else {}
+            capture = self._may_capture(request_ctx)
+            output_text = _extract_output(response)
             trace_id = f"trace-{int(time.time() * 1000)}-{secrets.token_hex(3)}"
             trace = {
                 "id": trace_id,
                 "session_id": session_id or str(uuid.uuid4()),
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "input": {"prompt": prompt, "context": {}},
+                "input": {
+                    **({"prompt": prompt} if capture else {}),
+                    "context": {},
+                    "prompt_sha256": _digest(prompt),
+                    "prompt_len": len(prompt or ""),
+                },
                 "advice": {
                     "domain": "routellm",
                     "steering_text": "",
@@ -223,7 +264,9 @@ class QualityManager:
                 "frontier": {
                     "model": routed_model,
                     "provider": provider or "",
-                    "output": _extract_output(response),
+                    **({"output": output_text} if capture else {}),
+                    "output_sha256": _digest(output_text),
+                    "output_len": len(output_text),
                     "usage": _extract_usage(response),
                 },
                 "reward": {"score": score, "breakdown": {}},
@@ -243,17 +286,20 @@ class QualityManager:
                     **(metadata or {}),
                     "trace_version": "1.0",
                     "routellm_trace_version": 2,
+                    "content_captured": capture,
                 },
-                "output": response,
                 "routed_model": routed_model,
             }
+            if capture:
+                trace["output"] = response
 
             if comparison is not None:
                 trace["routellm"]["comparison"] = comparison
 
             final = os.path.join(self.fine_tune_config.trace_dir, f"{trace_id}.json")
             temporary = f"{final}.tmp"
-            with open(temporary, "w") as handle:
+            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(descriptor, "w") as handle:
                 json.dump(trace, handle)
             os.replace(temporary, final)
             if self._listing is not None:
@@ -358,6 +404,11 @@ def _age_key(entry: tuple) -> tuple:
     except (IndexError, ValueError):
         stamp = 0
     return (stamp, entry[2], entry[0])
+
+
+def _digest(text: str | None) -> str:
+    """Return the SHA-256 hex digest of `text`."""
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
 
 
 def _extract_output(response: Any) -> str:

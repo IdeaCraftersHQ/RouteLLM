@@ -51,7 +51,7 @@ def ups():
         fake.server.server_close()
 
 
-def build(ups, comparison, tmp_path, *, tags=None, tiers=None, cache=False, traces=True):
+def build(ups, comparison, tmp_path, *, tags=None, tiers=None, cache=False, traces=True, capture=False):
     tags = tags or {}
     endpoints = {
         name: {
@@ -72,7 +72,9 @@ def build(ups, comparison, tmp_path, *, tags=None, tiers=None, cache=False, trac
         endpoints=EndpointRegistry.from_config(config),
         cache_config=CacheConfig(enabled=cache, db_path=str(tmp_path / "cache.db")),
         quality_manager=QualityManager(
-            fine_tune_config=FineTuneConfig(enabled=traces, trace_dir=str(tmp_path / "traces"))
+            fine_tune_config=FineTuneConfig(
+                enabled=traces, trace_dir=str(tmp_path / "traces"), capture_content=capture
+            )
         ),
         comparison_config=build_comparison_config({"comparison": comparison}),
     )
@@ -229,7 +231,7 @@ def test_local_judge_with_a_local_only_tier_is_fine(ups, tmp_path):
 
 
 def test_header_shadow_records_metrics_and_leaves_the_answer_alone(ups, tmp_path):
-    controller = build(ups, {"enabled": True}, tmp_path)
+    controller = build(ups, {"enabled": True}, tmp_path, capture=True)
     res = ask(controller, compare="b,c")
 
     assert res.choices[0].message.content == "hello from a"
@@ -275,7 +277,7 @@ def test_shadow_does_not_delay_the_primary(ups, tmp_path):
 
 def test_shadow_failure_is_invisible_and_recorded(ups, tmp_path):
     ups["b"].mode = "500"
-    controller = build(ups, {"enabled": True}, tmp_path)
+    controller = build(ups, {"enabled": True}, tmp_path, capture=True)
     res = ask(controller, compare="b")
     assert res.choices[0].message.content == "hello from a"
     (row,) = shadows(tmp_path)
@@ -601,7 +603,7 @@ def test_offline_scoring_skips_failed_comparison_traces(ups, tmp_path):
     from routellm.quality_scores import score_traces
 
     ups["b"].mode = "500"
-    controller = build(ups, {"enabled": True}, tmp_path)
+    controller = build(ups, {"enabled": True}, tmp_path, capture=True)
     ask(controller, compare="b,c")
     assert len(traces(tmp_path)) == 3
 
@@ -638,3 +640,23 @@ def test_untiered_compare_opt_out_still_refuses_a_pay_endpoint(ups, tmp_path):
 def test_allow_list_must_name_configured_endpoints(ups, tmp_path):
     with pytest.raises(ValueError, match="ghost"):
         build(ups, {"enabled": True, "compare_allowed_models": ["ghost"]}, tmp_path)
+
+
+def test_comparison_traces_hold_digests_not_text_by_default(ups, tmp_path):
+    controller = build(ups, {"enabled": True}, tmp_path)
+    ask(controller, compare="b,c")
+    rows = traces(tmp_path)
+    assert len(rows) == 3
+    for row in rows:
+        assert "prompt" not in row["input"] and row["input"]["prompt_sha256"]
+        assert "output" not in row["frontier"] and row["frontier"]["output_sha256"]
+        assert "output" not in row
+
+
+def test_offline_scoring_refuses_digest_only_comparison_traces(ups, tmp_path):
+    from routellm.quality_scores import TraceContentError, score_traces
+
+    controller = build(ups, {"enabled": True}, tmp_path)
+    ask(controller, compare="b,c")
+    with pytest.raises(TraceContentError):
+        score_traces(str(tmp_path / "traces"), SCORER, str(tmp_path / "scores.jsonl"))

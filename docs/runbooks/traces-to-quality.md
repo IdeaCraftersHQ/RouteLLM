@@ -32,11 +32,19 @@ controller.quality_manager = QualityManager(
     fine_tune_config=FineTuneConfig(
         enabled=True,
         trace_dir=".routellm_traces",
+        capture_content=True,  # scoring reads text; default False keeps digests only
         max_files=10_000,
         max_bytes=512 * 1024 * 1024,
     )
 )
 ```
+
+Scoring needs prompt and response text, which traces omit unless
+`capture_content` is on (`traces.capture_content: true` in the server
+config). A digest-only trace holds `input.prompt_sha256`, `prompt_len`,
+`frontier.output_sha256`, `output_len` and no text, and
+`quality_scores score` stops on it, naming the trace. Capture logs a
+startup WARNING; the directory is `0700` and files `0600`.
 
 One JSON file per request, named `trace-<epoch_ms>-<hex>.json`:
 

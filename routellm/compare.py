@@ -151,6 +151,11 @@ def _parser() -> argparse.ArgumentParser:
     rep.add_argument("--models", required=True, help="comma-separated endpoint names or a profile")
     rep.add_argument("--config", default=None, help="explicit config file, merged last")
     rep.add_argument("--trace-dir", default=".routellm_traces", help="where traces are recorded")
+    rep.add_argument(
+        "--capture-content",
+        action="store_true",
+        help="store prompt and response text in the traces (digests only by default)",
+    )
     rep.add_argument("--out", default=None, help="jsonl file for the per-row results")
     rep.add_argument("--tier", default=None, help="apply this tier's privacy rules")
     rep.add_argument("--judge", default=None, help="scorer spec, overriding comparison.judge")
@@ -186,7 +191,9 @@ def main(argv: list[str] | None = None) -> int:
     host = SimpleNamespace(
         endpoints=registry,
         quality_manager=QualityManager(
-            fine_tune_config=FineTuneConfig(enabled=True, trace_dir=args.trace_dir)
+            fine_tune_config=FineTuneConfig(
+                enabled=True, trace_dir=args.trace_dir, capture_content=args.capture_content
+            )
         ),
         api_base=None,
         api_key=None,

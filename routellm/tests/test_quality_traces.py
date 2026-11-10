@@ -22,6 +22,7 @@ def _response(text: str = "hi") -> dict:
 
 
 def _manager(tmp_path, **kwargs) -> QualityManager:
+    kwargs.setdefault("capture_content", True)
     config = FineTuneConfig(enabled=True, trace_dir=str(tmp_path / "traces"), **kwargs)
     return QualityManager(fine_tune_config=config)
 

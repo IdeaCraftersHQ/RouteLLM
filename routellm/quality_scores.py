@@ -334,6 +334,21 @@ class _JudgeScorer:
 # ---------------------------------------------------------------------------
 
 
+class TraceContentError(ValueError):
+    """A trace holds digests only, so there is no text to score."""
+
+
+def _require_content(trace: dict) -> None:
+    """Raise `TraceContentError` when `trace` carries no prompt or output text."""
+    prompt = (trace.get("input") or {}).get("prompt")
+    output = (trace.get("frontier") or {}).get("output")
+    if prompt is None or output is None:
+        raise TraceContentError(
+            f"trace {trace.get('id')} holds digests only, no prompt or response text; "
+            "scoring reads text. Record traces with traces.capture_content: true"
+        )
+
+
 def load_traces(directory: str) -> Iterator[dict]:
     """Yield every readable trace in `directory`, oldest name first.
 
@@ -456,6 +471,9 @@ def score_traces(
     ]
     if limit is not None:
         pending = pending[:limit]
+
+    for trace in pending:
+        _require_content(trace)
 
     if not pending:
         logger.info("every trace in %s is already scored", traces_dir)
