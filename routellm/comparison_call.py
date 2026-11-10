@@ -62,7 +62,7 @@ class CallMixin:
         self._charge(result["metrics"]["cost_usd"], plan.experiment)
 
         if result["error"] is None:
-            result["score"] = await self._judge(prompt, result["output"], plan.local_only)
+            result["score"] = await self._judge(prompt, result["output"], plan.local_only, reqs)
 
         comparison = {
             "id": plan.id,
@@ -227,12 +227,39 @@ class CallMixin:
 
     # ------------------------------------------------------------- judge
 
-    async def _judge(self, prompt: str, output: str, local_only: bool) -> float | None:
+    def _judge_denial(self, spec: str, reqs) -> str | None:
+        """Return why the request's class may not be judged by `spec`, or None.
+
+        Only `judge:<model>` calls a model; it is held to the same check
+        as any call carrying request content. A judge that names no
+        registry endpoint carries no tags, so a request with a class is
+        refused it.
+        """
+        data_class = getattr(reqs, "data_class", None)
+        kind, _, model = spec.partition(":")
+        denial = getattr(self.host, "_aux_denial", None)
+        if kind != "judge" or denial is None or data_class is None:
+            return None
+        names = self.registry.names()
+        match = (
+            model
+            if model in names
+            else next((n for n in names if self.registry.get(n).model == model), None)
+        )
+        if match is None:
+            return None if getattr(self.host, "policy", None) is None else "unregistered"
+        return denial(match, data_class)
+
+    async def _judge(self, prompt: str, output: str, local_only: bool, reqs=None) -> float | None:
         judge = self.config.judge
         if judge is None or self._scorer_failed:
             return None
         if local_only and not self._judge_local:
             logger.warning("not judging local-only data: the judge is not local")
+            return None
+        refused = self._judge_denial(judge.scorer, reqs)
+        if refused is not None:
+            logger.info("comparison judge skipped: %s", refused)
             return None
 
         loop = asyncio.get_running_loop()

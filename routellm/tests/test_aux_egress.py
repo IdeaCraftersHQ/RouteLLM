@@ -45,7 +45,16 @@ TIERS = ["default", "emb_tier"]
 POLICY = parse_policy(
     {
         "classes": {
-            "open": {"treatment": "raw", "reach": ["local", "cloud"], "tiers": TIERS},
+            "open": {
+                "treatment": "raw",
+                "reach": ["local", "cloud"],
+                "tiers": [*TIERS, "mixed"],
+            },
+            "site": {
+                "treatment": "raw",
+                "reach": ["local", "vpn"],
+                "tiers": [*TIERS, "site_tier"],
+            },
             "lan": {"treatment": "raw", "reach": ["local"], "tiers": TIERS},
             "redacted": {"treatment": "redact", "reach": ["local"], "tiers": TIERS},
             "sealed": {"treatment": "block", "reach": ["local"], "tiers": TIERS},
@@ -92,11 +101,14 @@ def build(world, *, embed_reach="cloud", tmp_path=None, semantic=False, **kw):
                 "loc": ep(chat["loc"].base, "local", quality=40),
                 "loc2": ep(chat["loc2"].base, "local", quality=80),
                 "cld": ep(chat["cld"].base, "cloud", jur="us"),
+                "vpn": ep(chat["loc2"].base, "vpn"),
                 "embedding": ep(emb.base, embed_reach, model="openai/embed-model"),
             },
             "tiers": {
                 "default": {"router": "pin", "threshold": 0.0, "strong": "loc", "weak": "loc2"},
                 "emb_tier": {"router": "emb", "threshold": 0.5, "strong": "loc", "weak": "loc2"},
+                "mixed": {"router": "pin", "threshold": 0.0, "strong": "loc", "weak": "cld"},
+                "site_tier": {"router": "pin", "threshold": 0.0, "strong": "loc", "weak": "vpn"},
             },
         }
     )
@@ -276,7 +288,7 @@ def _selector(c):
 # --- comparison judge ------------------------------------------------------------------------------
 
 
-def judge_calls(world, monkeypatch, declared):
+def judge_calls(world, monkeypatch, declared, model):
     built = []
 
     def fake_build(spec, allow_llm=False, trace_count=0):
@@ -294,22 +306,20 @@ def judge_calls(world, monkeypatch, declared):
     )
 
     async def go():
-        await c.acompletion(
-            model="default", messages=MESSAGES, declared_class=declared, compare="loc2"
-        )
+        await c.acompletion(model=model, messages=MESSAGES, declared_class=declared, compare="loc2")
         await c.comparison.drain()
 
     asyncio.run(go())
     return built
 
 
-@pytest.mark.parametrize("declared", ("lan", *RESTRICTED))
-def test_the_judge_is_not_built_or_called_for_a_class_it_fails(world, monkeypatch, declared):
-    assert judge_calls(world, monkeypatch, declared) == []
+def test_the_judge_is_not_built_or_called_for_a_class_whose_reach_it_fails(world, monkeypatch):
+    # The tier holds a vpn leaf, so it is not local-only: only the class can refuse the judge.
+    assert judge_calls(world, monkeypatch, "site", "site_tier") == []
 
 
 def test_the_judge_runs_for_a_class_it_passes(world, monkeypatch):
-    assert judge_calls(world, monkeypatch, "open") == ["judge:cld"]
+    assert judge_calls(world, monkeypatch, "open", "mixed") == ["judge:cld"]
 
 
 # --- decision classifier ---------------------------------------------------------------------------

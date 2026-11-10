@@ -967,7 +967,18 @@ egress_gates:
 
 **Order.** The class is final before any gated call: the gate reads the class the controller put on the request after the decision step (the strictest of the declared class, recognizers and the model), so a decision that raises the class, or fails into `on_error`, is what the gate sees. A request with no class at all (the operator's replay) counts as the most restrictive for `deny_classes` and is refused a gated endpoint (`gate:<name>:class:undecided`); `models` rules apply as at load only.
 
-**Detector.** A middleware whose detector calls a gated endpoint (`intents.model` on a gated endpoint) is not consulted for a request whose class the gate denies: zero calls, and the request stays in the tier it addressed. Other auxiliary paths (routers, semantic cache, transcription, judge) are not gated yet.
+**Auxiliary calls.** Some calls read a prompt before any leaf does. Each is held to the request's effective class by the same check (`Controller._aux_denial`: the class's reach and `jur`, then any egress gate) on the endpoint it sends content to; a call whose endpoint fails is not made, so the remote takes zero hits and an allowed leaf still answers.
+
+| Step | Endpoint judged | When refused |
+|------|-----------------|--------------|
+| Router that embeds (`mf`, `sw_ranking`) | the embedding endpoint | router not run; the tier's weak side is taken; the path entry carries `gate: gate:router` and `gate_reason` |
+| Hosted router (`requires_upstream`) | its `upstream` endpoint | same |
+| Intent detector | `intents.model` / the detector's `upstream` | not consulted; the request stays in the tier it addressed |
+| Semantic cache | the embedding endpoint | no lookup and no store (no embedding computed); a class whose treatment is not `raw` never takes part. The exact cache is unaffected |
+| Comparison judge | the `judge:<endpoint>` | shadow output recorded unscored |
+| Decision classifier | its `decision.endpoint` | it runs before the class is known, so startup fails unless every non-`vault` class may reach it |
+
+Audio transcription runs before the class is known too; a tier whose endpoints are all `local` already requires a `local` transcriber at load. An embedding call with no registry endpoint (`--allow-remote-embeddings`) carries no tags, so a request with a class under a policy is refused it.
 
 **`require_policy_allow`** is accepted but fails closed: it needs the request's policy, which is not built yet, so a gate that sets it refuses every request to its endpoints (`gate:<name>:policy`) until then.
 

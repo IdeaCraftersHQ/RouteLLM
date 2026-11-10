@@ -282,7 +282,9 @@ def resolve_tier(
     run_router : callable
         `(router, threshold, prompt, pair) -> (picked, win_rate)`, where
         `win_rate` is None for a router that reports no score. It is
-        also where the router name is validated.
+        also where the router name is validated. A third item, a dict,
+        is merged into the path entry (a router skipped by a gate says
+        why there).
     requirements : Requirements, optional
         What the request needs. None, or an empty one, leaves the
         existing code path untouched, byte for byte.
@@ -314,8 +316,9 @@ def resolve_tier(
         error_cls,
     )
 
+    gate: list[dict[str, Any]] = []
     if forced is None:
-        picked, win_rate = run_router(
+        picked, win_rate, *gate = run_router(
             level["router"],
             level["threshold"],
             prompt,
@@ -336,6 +339,8 @@ def resolve_tier(
     if forced is not None:
         entry["capability_forced"] = forced[1]
         entry["capability_requirement"] = forced[2]
+    elif gate:
+        entry.update(gate[0])
 
     if not registry.has_tier(picked):
         return picked, [entry]

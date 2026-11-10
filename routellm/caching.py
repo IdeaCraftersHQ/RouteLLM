@@ -226,7 +226,9 @@ class Cache:
             scoped["_conversation"] = params["_conversation"]
         return hashlib.sha256(json.dumps(scoped, sort_keys=True, default=str).encode()).hexdigest()
 
-    def get(self, prompt: str, model: str, params: dict[str, Any]) -> dict[str, Any] | None:
+    def get(
+        self, prompt: str, model: str, params: dict[str, Any], semantic: bool = True
+    ) -> dict[str, Any] | None:
         """Retrieve cached completion via exact or semantic match.
 
         Attempts exact match first, then falls back to semantic matching
@@ -240,6 +242,9 @@ class Cache:
             Model name.
         params : dict
             Generation parameters.
+        semantic : bool
+            False skips the semantic step, so nothing is embedded; the
+            exact match still runs.
 
         Returns
         -------
@@ -268,7 +273,7 @@ class Cache:
                 logger.debug("Cache entry expired (exact)")
 
         # 2. Try semantic match if enabled
-        if self.config.semantic_enabled:
+        if self.config.semantic_enabled and semantic:
             logger.debug("Cache: Attempting semantic match")
             prompt_emb = self._get_embedding(prompt)
             cursor.execute(
@@ -301,7 +306,9 @@ class Cache:
         conn.close()
         return None
 
-    async def aget(self, prompt: str, model: str, params: dict[str, Any]) -> dict[str, Any] | None:
+    async def aget(
+        self, prompt: str, model: str, params: dict[str, Any], semantic: bool = True
+    ) -> dict[str, Any] | None:
         """Async wrapper for get().
 
         Parameters
@@ -318,9 +325,18 @@ class Cache:
         dict or None
             Cached response dict, or None if cache miss.
         """
-        return await asyncio.get_event_loop().run_in_executor(None, self.get, prompt, model, params)
+        return await asyncio.get_event_loop().run_in_executor(
+            None, self.get, prompt, model, params, semantic
+        )
 
-    def put(self, prompt: str, model: str, params: dict[str, Any], response: dict[str, Any]):
+    def put(
+        self,
+        prompt: str,
+        model: str,
+        params: dict[str, Any],
+        response: dict[str, Any],
+        semantic: bool = True,
+    ):
         """Store completion in cache.
 
         Parameters
@@ -333,6 +349,9 @@ class Cache:
             Generation parameters.
         response : dict
             Model response dict (typically ModelResponse.model_dump()).
+        semantic : bool
+            False stores the entry without an embedding, so nothing is
+            embedded and it can never be a semantic match.
         """
         if not self.config.enabled:
             return
@@ -340,7 +359,7 @@ class Cache:
         key = self._get_key(prompt, model, params)
         logger.debug(f"Cache: Putting entry for model={model} key={key}")
         embedding = None
-        if self.config.semantic_enabled:
+        if self.config.semantic_enabled and semantic:
             try:
                 embedding = self._get_embedding(prompt)
                 logger.debug(f"Cache: Generated embedding for model={model}")
@@ -366,7 +385,14 @@ class Cache:
         conn.commit()
         conn.close()
 
-    async def aput(self, prompt: str, model: str, params: dict[str, Any], response: dict[str, Any]):
+    async def aput(
+        self,
+        prompt: str,
+        model: str,
+        params: dict[str, Any],
+        response: dict[str, Any],
+        semantic: bool = True,
+    ):
         """Async wrapper for put().
 
         Parameters
@@ -379,9 +405,11 @@ class Cache:
             Generation parameters.
         response : dict
             Model response dict.
+        semantic : bool
+            See `put`.
         """
         return await asyncio.get_event_loop().run_in_executor(
-            None, self.put, prompt, model, params, response
+            None, self.put, prompt, model, params, response, semantic
         )
 
     def _get_embedding(self, text: str) -> np.ndarray:
