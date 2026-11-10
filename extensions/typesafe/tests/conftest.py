@@ -12,6 +12,7 @@ This mirrors what the repo-root conftest does for the core suite; the
 extension carries its own copy because pytest's rootdir is this
 package, so the root conftest never loads.
 """
+
 import sys
 from unittest.mock import MagicMock
 

@@ -5,16 +5,13 @@ request here goes through httpx2.MockTransport, never the network, and
 every fixture sets TYPESAFE_API_KEY because TypeSafeClient checks for a
 key before it sends anything.
 """
+
 import json
 import pathlib
 import textwrap
 
 import httpx2
 import pytest
-
-from routellm.controller import ModelPair
-from routellm.middleware.intent_model_selector import IntentModelMapping
-from routellm.prompts import PromptFile
 from routellm_typesafe.intent_detector import (
     DEFAULT_INSTRUCTIONS as DETECTOR_DEFAULT_INSTRUCTIONS,
 )
@@ -29,6 +26,10 @@ from routellm_typesafe.router import (
     JevRouter,
 )
 from routellm_typesafe.router import PROMPT_SCHEMA as ROUTER_SCHEMA
+
+from routellm.controller import ModelPair
+from routellm.middleware.intent_model_selector import IntentModelMapping
+from routellm.prompts import PromptFile
 
 PACKAGE_ROOT = pathlib.Path(__file__).resolve().parents[1]
 EXAMPLE_PROMPT_FILE = PACKAGE_ROOT / "prompts" / "jev.example.yaml"

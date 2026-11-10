@@ -7,7 +7,7 @@ IntentModelSelector.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import typesafe_sdk
 
@@ -52,16 +52,16 @@ class JevIntentDetector:
 
     def __init__(
         self,
-        intent_mappings: List[IntentModelMapping],
-        model: Optional[str] = None,
-        timeout: Optional[float] = None,
+        intent_mappings: list[IntentModelMapping],
+        model: str | None = None,
+        timeout: float | None = None,
         confidence_floor: float = 0.5,
-        descriptions: Optional[Dict[str, str]] = None,
-        instructions: Optional[str] = None,
-        prompt_file: Optional[Any] = None,
-        transport: Optional[Any] = None,
-        base_url: Optional[str] = None,
-        upstream: Optional[str] = None,
+        descriptions: dict[str, str] | None = None,
+        instructions: str | None = None,
+        prompt_file: Any | None = None,
+        transport: Any | None = None,
+        base_url: str | None = None,
+        upstream: str | None = None,
     ):
         """Initialize the Jev-backed intent detector.
 
@@ -137,7 +137,7 @@ class JevIntentDetector:
             transport=transport,
         )
 
-    def _build_criteria(self) -> Dict[str, Optional[str]]:
+    def _build_criteria(self) -> dict[str, str | None]:
         """Build the Choice criteria from the configured mappings.
 
         Empty descriptions become None so the model relies on the label
@@ -148,13 +148,11 @@ class JevIntentDetector:
         dict[str, str | None]
             Criteria keyed by intent label, always including "general".
         """
-        criteria: Dict[str, Optional[str]] = {}
+        criteria: dict[str, str | None] = {}
         for mapping in self.intent_mappings:
             description = self.descriptions.get(mapping.intent, mapping.description)
             criteria[mapping.intent] = description or None
-        criteria[GENERAL_INTENT] = self.descriptions.get(
-            GENERAL_INTENT, self._general_description
-        )
+        criteria[GENERAL_INTENT] = self.descriptions.get(GENERAL_INTENT, self._general_description)
         return criteria
 
     def _ask(self, prompt: str):
@@ -210,7 +208,7 @@ class JevIntentDetector:
             return GENERAL_INTENT
         return answer.choice
 
-    def get_intent_confidence(self, prompt: str) -> Dict[str, float]:
+    def get_intent_confidence(self, prompt: str) -> dict[str, float]:
         """Get the probability of each configured intent for a prompt.
 
         Parameters

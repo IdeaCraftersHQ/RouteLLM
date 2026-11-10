@@ -10,4 +10,4 @@ resolvable.
 from routellm_typesafe.intent_detector import JevIntentDetector
 from routellm_typesafe.router import JevRouter
 
-__all__ = ["JevRouter", "JevIntentDetector"]
+__all__ = ["JevIntentDetector", "JevRouter"]
