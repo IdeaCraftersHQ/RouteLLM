@@ -134,7 +134,7 @@ def build_registry(file_config: dict | None, config_path: str | None = None) -> 
     if not args.strong_model:
         return registry
 
-    endpoints = {name: registry.get(name) for name in registry.names()}
+    added: dict[str, Endpoint] = {}
 
     # A flag may name a configured endpoint, which already carries its
     # own base URL and credential; only a raw model name needs wrapping.
@@ -143,7 +143,7 @@ def build_registry(file_config: dict | None, config_path: str | None = None) -> 
         ("strong", args.strong_model, IMPLICIT_STRONG),
         ("weak", args.weak_model, IMPLICIT_WEAK),
     ):
-        if flag in endpoints:
+        if flag in registry.names():
             sides[side] = flag
             continue
         if registry.strict_registry:
@@ -153,17 +153,19 @@ def build_registry(file_config: dict | None, config_path: str | None = None) -> 
                 f"strict_registry forbids raw model names. Configured "
                 f"endpoints: {known}"
             )
-        endpoints[wrapper] = Endpoint(name=wrapper, model=flag)
+        added[wrapper] = Endpoint(name=wrapper, model=flag)
         sides[side] = wrapper
 
-    tiers = registry.tiers
-    tiers["default"] = Tier(
+    # Added in place: the registry keeps every setting it was built
+    # with, none of which this function has to list.
+    default = Tier(
         name="default",
         router=args.routers[0] if args.routers else None,
         threshold=args.default_threshold,
         strong=sides["strong"],
         weak=sides["weak"],
     )
+    registry.extend(added, {"default": default})
 
     logging.info(
         "default tier: implicit, %s/%s at %s over %s",
@@ -172,14 +174,7 @@ def build_registry(file_config: dict | None, config_path: str | None = None) -> 
         args.default_threshold,
         args.routers[0] if args.routers else "<none>",
     )
-    return EndpointRegistry(
-        endpoints,
-        tiers,
-        registry.transcriber_raw,
-        registry.intent_targets,
-        audio_tokens_per_second=registry.audio_tokens_per_second,
-        strict_registry=registry.strict_registry,
-    )
+    return registry
 
 
 #: Detector backends the `intents:` section may ask for.
