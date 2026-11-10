@@ -31,7 +31,7 @@ from routellm.leaf_params import drop_kwargs, log_dropped
 from routellm.payment.gateway import PaymentGateway
 from routellm.payment.types import PaymentChallenge
 from routellm.quality import QualityManager
-from routellm.resilience import Resilience, ResilienceConfig
+from routellm.resilience import EndpointsCooling, Resilience, ResilienceConfig
 from routellm.routers.embeddings import configure_embeddings
 from routellm.routers.routers import ROUTER_CLS
 from routellm.routing import (
@@ -719,16 +719,87 @@ class Controller:
         if picked not in models_to_try:
             models_to_try.append(picked)
 
+        # A side backed by a candidate pool is walked to its end before
+        # the other side is tried.
+        for name in self._pool_tail(path, picked, reqs):
+            if name not in models_to_try:
+                models_to_try.append(name)
+
         found = sibling_of(path, self.endpoints, pair)
         sibling, reference = found if found is not None else (None, None)
 
-        if not usable_sibling(sibling, reqs, self._can_serve):
+        if not self._walkable(sibling, reqs):
             sibling, reference = None, None
 
         if sibling is not None and sibling not in models_to_try:
             models_to_try.append(sibling)
+            for name in self._pool_tail(path, sibling, reqs):
+                if name not in models_to_try:
+                    models_to_try.append(name)
 
         return model_to_use, models_to_try, sibling, reference
+
+    def _walkable(self, name: str | None, reqs) -> bool:
+        """Return whether `name` may be tried after the pick failed.
+
+        The one check every fallback candidate, a sibling or a pool
+        member, passes before it is added to the walk: a candidate that
+        cannot serve the request is dropped. Policy that restricts which
+        endpoints may be served (an egress gate, say) hooks in here, so
+        a pool cannot route around what the sibling is held to.
+        """
+        return usable_sibling(name, reqs, self._can_serve)
+
+    def _pool_tail(self, path: list[dict[str, Any]], head: str, reqs) -> list[str]:
+        """Return the pool members after `head` on its tier side, serveable ones.
+
+        Empty when the final level is a flat pair, `head` is not a tier
+        side's resolved endpoint, or the side has no pool.
+        """
+        last = path[-1] if path else None
+        if not last or last.get("tier") is None:
+            return []
+        tier = self.endpoints.get_tier(last["tier"])
+        for side in ("strong", "weak"):
+            if getattr(tier, side) != head:
+                continue
+            pool = self.endpoints.pool_for(tier.name, side)
+            return [name for name in pool[1:] if self._walkable(name, reqs)]
+        return []
+
+    def _no_inner_retries(self, call_kwargs: dict[str, Any]) -> None:
+        """Stop the client library retrying a call itself under cooldown.
+
+        The provider SDK underneath litellm retries a 429 on its own,
+        sleeping for the upstream's `Retry-After`: a call the resilience
+        layer counts once would reach the endpoint several times and
+        hold the request for the wait. With rate-limit cooldown on the
+        resilience layer owns every retry, so the SDK's are switched
+        off unless the request sets its own.
+        """
+        if self.resilience.config.rate_limit_cooldown:
+            call_kwargs.setdefault("num_retries", 0)
+
+    def _cooling_skip(self, name: str, walk: list[dict[str, Any]]) -> bool:
+        """Note `name` in `walk` and return True when it is rate-limit cooling."""
+        until = self.resilience.cooling(name)
+        if until is None:
+            return False
+        walk.append({"endpoint": name, "outcome": "cooling", "until": until})
+        logger.info("endpoint %s is cooling until %.0f; skipped without a call", name, until)
+        return True
+
+    def _raise_exhausted(self, names: list[str], last_err: Exception | None) -> None:
+        """Raise what ends a walk that reached no answer.
+
+        Every candidate cooling is `EndpointsCooling`, naming them; any
+        other mix raises the last real error.
+        """
+        cooling = {n: u for n in names if (u := self.resilience.cooling(n)) is not None}
+        if cooling and len(cooling) == len(set(names)):
+            raise EndpointsCooling(cooling, self.resilience.clock())
+        if last_err:
+            raise last_err
 
     def _attach_path(
         self,
@@ -737,6 +808,7 @@ class Controller:
         used: str,
         sibling: str | None,
         sibling_reference: str | None,
+        walk: list[dict[str, Any]] | None = None,
     ):
         """Log the decision path and attach it to a response.
 
@@ -761,6 +833,11 @@ class Controller:
         sibling_reference : str or None
             Name that sibling was written under on its tier, recorded as
             `fallback_from` when the sibling is what answered.
+        walk : list[dict], optional
+            What the fallback walk did before `used` answered: each
+            endpoint skipped while cooling or failed. Recorded on the
+            last entry as `walk`, ending with the one that served, and
+            left off when the pick answered at once.
 
         Returns
         -------
@@ -768,6 +845,8 @@ class Controller:
             The same response.
         """
         final = [dict(entry) for entry in path]
+        if final and walk:
+            final[-1]["walk"] = [*walk, {"endpoint": used, "outcome": "served"}]
         if final and sibling is not None and used == sibling:
             final[-1]["fallback_from"] = sibling_reference or sibling
 
@@ -1277,7 +1356,11 @@ class Controller:
             return self._attach_path(res, path, model_to_use, sibling, sibling_reference)
 
         last_err = None
+        walk: list[dict[str, Any]] = []
         for model_name in models_to_try:
+            if self._cooling_skip(model_name, walk):
+                continue
+
             # 3. Resolve the endpoint, then apply load balancing
             model, curr_api_base, curr_api_key, extra = self._endpoint_call_params(model_name)
 
@@ -1286,6 +1369,7 @@ class Controller:
                 kwargs_copy["model"] = model
                 log_dropped(model_name, model, curr_api_base, kwargs_copy)
                 kwargs_copy.pop("extra_headers", None)
+                self._no_inner_retries(kwargs_copy)
                 return completion(
                     api_base=curr_api_base,
                     api_key=curr_api_key,
@@ -1302,7 +1386,9 @@ class Controller:
                 latency_ms = int((time.monotonic() - started) * 1000)
 
                 if streaming:
-                    return self._attach_path(res, path, model_name, sibling, sibling_reference)
+                    return self._attach_path(
+                        res, path, model_name, sibling, sibling_reference, walk
+                    )
 
                 # Cache the response
                 try:
@@ -1326,18 +1412,24 @@ class Controller:
                     area=area,
                 )
 
-                return self._attach_path(res, path, model_name, sibling, sibling_reference)
+                return self._attach_path(res, path, model_name, sibling, sibling_reference, walk)
             except Exception as e:
                 import logging
 
                 logging.getLogger(__name__).warning(
                     f"Model {model_name} failed, trying fallback if available. Error: {e!s}"
                 )
+                walk.append(
+                    {
+                        "endpoint": model_name,
+                        "outcome": "failed",
+                        "error": type(e).__name__,
+                    }
+                )
                 last_err = e
                 continue
 
-        if last_err:
-            raise last_err
+        self._raise_exhausted(models_to_try, last_err)
 
     def _stream_ended(
         self,
@@ -1366,6 +1458,10 @@ class Controller:
         `[DONE]` do not wait on them. The write is tracked, never
         dropped, and a failure is logged.
         """
+        # Only now is the stream's outcome known: the breaker and the
+        # rate-limit cooldown hear it here, not at the first chunk.
+        self.resilience.record_stream_end(model_name, error)
+
         if error is not None:
             logger.warning(f"Model {model_name} failed mid-stream. Error: {error!s}")
             return
@@ -1492,7 +1588,11 @@ class Controller:
             return self._attach_path(res, path, model_to_use, sibling, sibling_reference)
 
         last_err = None
+        walk: list[dict[str, Any]] = []
         for model_name in models_to_try:
+            if self._cooling_skip(model_name, walk):
+                continue
+
             # 3. Resolve the endpoint, then apply load balancing
             model, curr_api_base, curr_api_key, extra = self._endpoint_call_params(model_name)
 
@@ -1503,6 +1603,7 @@ class Controller:
                 # The endpoint's headers, the request's, then a payment
                 # proof, merged into the one `extra_headers` litellm takes.
                 kwargs_copy.pop("extra_headers", None)
+                self._no_inner_retries(kwargs_copy)
                 return await acompletion(
                     api_base=curr_api_base,
                     api_key=curr_api_key,
@@ -1543,11 +1644,14 @@ class Controller:
                     model_name,
                     _open,
                     timeout_ms=self.endpoints.resolve(model_name).timeout_ms,
+                    defer_success=streaming,
                 )
                 latency_ms = int((time.monotonic() - started) * 1000)
 
                 if streaming:
-                    return self._attach_path(res, path, model_name, sibling, sibling_reference)
+                    return self._attach_path(
+                        res, path, model_name, sibling, sibling_reference, walk
+                    )
 
                 # 4. Validate canary if needed
                 if is_canary and model_name == model_to_use:
@@ -1584,15 +1688,21 @@ class Controller:
                     area=area,
                 )
 
-                return self._attach_path(res, path, model_name, sibling, sibling_reference)
+                return self._attach_path(res, path, model_name, sibling, sibling_reference, walk)
             except Exception as e:
                 import logging
 
                 logging.getLogger(__name__).warning(
                     f"Model {model_name} failed, trying fallback if available. Error: {e!s}"
                 )
+                walk.append(
+                    {
+                        "endpoint": model_name,
+                        "outcome": "failed",
+                        "error": type(e).__name__,
+                    }
+                )
                 last_err = e
                 continue
 
-        if last_err:
-            raise last_err
+        self._raise_exhausted(models_to_try, last_err)

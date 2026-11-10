@@ -8,6 +8,12 @@ which is either a string or a callable taking the parsed body:
 - `500`: HTTP 500 before any body.
 - `die_first`: HTTP 200, then the connection drops before any chunk.
 - `die_after`: one content chunk, then the connection drops mid-body.
+- `429`: HTTP 429; `Retry-After: <retry_after>` when that is set.
+- `429_daily`: HTTP 429 whose message names a daily limit; carries
+  `X-RateLimit-Reset: <reset_ms>` (epoch milliseconds) when that is set.
+- `stream_error_first` / `stream_error_after`: HTTP 200 stream whose
+  first / second event is an in-stream rate-limit error event
+  (`finish_reason: error` with an `error` object).
 
 `delay` holds every answer back, before the first byte.
 
@@ -25,6 +31,8 @@ class FakeUpstream:
         self.name = name
         self.mode = mode
         self.delay = 0.0  # seconds to wait before answering anything
+        self.retry_after = None  # `Retry-After` value on a 429, as sent
+        self.reset_ms = None  # `X-RateLimit-Reset` (epoch ms) on a 429_daily
         self.hits = []  # (path, headers, body)
         fake = self
 
@@ -49,6 +57,25 @@ class FakeUpstream:
                 if fake.delay:
                     time.sleep(fake.delay)
                 model = body.get("model", "m")
+
+                if mode in ("429", "429_daily"):
+                    daily = mode == "429_daily"
+                    message = (
+                        "Rate limit exceeded: free-models-per-day"
+                        if daily
+                        else "Rate limit exceeded"
+                    )
+                    data = json.dumps({"error": {"message": message, "code": 429}}).encode()
+                    self.send_response(429)
+                    self.send_header("content-type", "application/json")
+                    self.send_header("content-length", str(len(data)))
+                    if fake.retry_after is not None and not daily:
+                        self.send_header("Retry-After", str(fake.retry_after))
+                    if fake.reset_ms is not None and daily:
+                        self.send_header("X-RateLimit-Reset", str(fake.reset_ms))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
 
                 if mode == "500":
                     data = b'{"error":{"message":"boom"}}'
@@ -83,6 +110,26 @@ class FakeUpstream:
                         if usage:
                             out["usage"] = usage
                         return out
+
+                    if mode in ("stream_error_first", "stream_error_after"):
+                        error_event = {
+                            "id": "c1",
+                            "object": "chat.completion.chunk",
+                            "created": 1,
+                            "model": model,
+                            "error": {"code": 429, "message": "Rate limit exceeded"},
+                            "choices": [
+                                {"index": 0, "delta": {"content": ""}, "finish_reason": "error"}
+                            ],
+                        }
+                        if mode == "stream_error_after":
+                            self._event(
+                                chunk({"role": "assistant", "content": f"hello from {fake.name}"})
+                            )
+                        self._event(error_event)
+                        self._chunk(b"data: [DONE]\n\n")
+                        self._chunk(b"")
+                        return
 
                     if mode == "tools":
                         call = {"index": 0, "id": "call_1", "type": "function"}

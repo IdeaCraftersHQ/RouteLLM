@@ -50,6 +50,22 @@ resilience:
   cb_fail_wait_ms: 5000
   cb_rate_interval_ms: 60000
   cb_rate_minimum: 10
+  # A timeout is retried; the abandoned attempt may still run upstream,
+  # so a paid endpoint can bill both. Set false to not retry timeouts.
+  retry_on_timeout: true
+  # Rate-limit cooldown, off by default. When on, a 429 is not retried in
+  # place: the endpoint cools until the reset its error states (any header
+  # named below, or the body's metadata.headers), else the default, and
+  # the walk moves to the next candidate, skipping cooling endpoints
+  # without a call. A daily-quota message (any marker below) cools for
+  # `rate_limit_daily_cooldown_s` when no reset is stated. Nothing cools
+  # longer than the max. A 429 here does not count toward the breaker.
+  rate_limit_cooldown: false
+  rate_limit_default_cooldown_s: 60
+  rate_limit_daily_cooldown_s: 3600
+  rate_limit_max_cooldown_s: 86400
+  rate_limit_reset_headers: [retry-after, x-ratelimit-reset]
+  rate_limit_daily_markers: [per-day, per day, daily]
 
 # Advisory context cost of audio, in tokens per second of audio. The
 # token counter cannot count audio, so without this a long clip would add
@@ -217,6 +233,19 @@ tiers:
 #   threshold: 0.12
 #   strong: {select: "tool_call:true reasoning:true", order: quality_desc}
 #   weak: {select: "tag:local", order: cost_asc}
+
+# `free:true` keeps endpoints the catalog prices at 0 for input and output
+# (unpriced or uncatalogued ones are not free). `pool: N` keeps the best N
+# matches: the first is the side, the rest are tried after it, before the
+# other side, when it fails or is cooling (see `resilience:`). Tag every
+# metered gateway endpoint (`cloud`, plus the provider's own label) so a
+# `tag:local` selector can never reach it. Commented out.
+#
+# default_pooled:
+#   router: mf
+#   threshold: 0.12
+#   strong: cloud_strong
+#   weak: {select: "tag:gateway free:true", order: quality_desc, pool: 3}
 
 # Every router named above ships with the base package, so this file
 # serves on a stock install. `jev` is registered by the typesafe

@@ -23,7 +23,7 @@ RouteLLM now supports a suite of enterprise-grade features for reliability, perf
 
 ### Reliability & Resilience
 Ensure your system remains operational even when providers fail:
-- **Auto-Retry**: Exponential backoff for transient failures (e.g., 429, 5xx).
+- **Auto-Retry**: Exponential backoff for transient failures (e.g., 429, 5xx). Optional [rate-limit cooldown](#rate-limit-cooldown) skips a rate-limited endpoint until its reset instead.
 - **Circuit Breaker**: Prevents cascading failures by opening when success rates drop, automatically entering `HALF_OPEN` state to test recovery.
 - **Fallbacks**: Automatically falls back to the alternative model in your pair if the routed model fails after retries.
 - **Timeouts**: Enforce strict latency requirements on every call.
@@ -414,6 +414,43 @@ python -m routellm.pairing --config config.example.yaml
 ```
 
 Every selector is resolved to an endpoint name before the tier graph is validated a second time, so nothing downstream ever sees one.
+
+`free:true` keeps only endpoints whose models.dev record prices input and output at exactly 0; `free:false` keeps the rest. An endpoint the catalog does not list, or lists without a price, is not free: a missing price is not a price of zero, so an uncatalogued `:free` id fails `free:true`.
+
+#### Candidate pools
+
+`pool: N` keeps the best `N` matches instead of one. The first is the side, as before; the rest are tried in order, after it and before the other side, when it fails or is cooling after a rate limit ([below](#rate-limit-cooldown)). Every pool member passes the same capability check a sibling does, and a member that cannot serve the request is dropped.
+
+```yaml
+tiers:
+  default:
+    strong: {select: "tag:paid", order: quality_desc}
+    weak: {select: "tag:cheap free:true", order: quality_desc, pool: 3}
+```
+
+`pool` defaults to 1. A pool applies to tier sides only; a side that names an endpoint, and a flat `strong_model`/`weak_model` pair, has none. A side's pool is built from its own `select`, so a tier whose sides select `tag:local` can never list a cloud endpoint, whatever its pool size.
+
+The decision path records the walk on its last entry, `walk`: each endpoint skipped as `cooling` (with its `until`) or `failed`, ending with the one that `served`. It is absent when the pick answered at once.
+
+### Rate-limit cooldown
+
+Off by default. With `resilience.rate_limit_cooldown: true`, a 429 is not retried against the same endpoint. The endpoint cools until the reset the upstream stated, and the walk moves on at once; a cooling endpoint is skipped without a call until then. A 429 under cooldown is not a fault, so it does not count toward the circuit breaker, and the provider SDK's own retries are switched off for the call (a 429 would otherwise reach the endpoint again after the upstream's `Retry-After`).
+
+The reset is read, in the order of `rate_limit_reset_headers`, from the response headers of the error (and the error body's `metadata.headers`, which some gateways repeat there): `Retry-After` as seconds or an HTTP date, any other reset header as epoch milliseconds, epoch seconds, or seconds by magnitude. With none stated, `rate_limit_default_cooldown_s` applies, or `rate_limit_daily_cooldown_s` when the message contains one of `rate_limit_daily_markers` (a daily quota). No cooldown exceeds `rate_limit_max_cooldown_s`. When every candidate is cooling the request fails with an error naming each endpoint and when it is next tried. The cooldown is per process and in memory.
+
+A rate-limit error event inside a stream is handled the same: before the first chunk the sibling answers; after it the endpoint cools for the next request. A stream that fails after its first chunk counts as one breaker failure for that endpoint, and a clean end as one success; the breaker hears nothing at the first chunk.
+
+`retry_on_timeout: false` stops a timed-out call being retried. The abandoned attempt may still be running upstream, so on a paid endpoint a retry can be billed twice; the default (true) keeps the previous behaviour.
+
+### Free-model roster
+
+Free model lists churn. Diff a config's free endpoints against a provider's public models listing (report only, nothing is edited):
+
+```
+python -m routellm.roster --url <models-listing-url> --prefix <litellm-prefix>/ [--suffix :free] [--config path]
+```
+
+It lists ids the roster marks free that the config lacks, configured ids no longer listed, and configured ids carrying an `expiration_date`.
 
 ### Capabilities
 
