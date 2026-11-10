@@ -702,6 +702,38 @@ class EndpointRegistry:
             return None
         return self.areas.get(tier)
 
+    def extend(
+        self,
+        endpoints: dict[str, Endpoint] | None = None,
+        tiers: dict[str, Tier] | None = None,
+    ) -> None:
+        """Add endpoints and tiers to this registry, in place.
+
+        For a caller that derives names after the config was read, such
+        as the server's implicit `default` tier. Adding to the registry
+        rather than building a second one means every setting it was
+        configured with (`governance`, `tag_namespaces`, `areas`,
+        `strict_registry`, measured quality) carries over by
+        construction, not by a list of arguments that can fall behind.
+
+        Parameters
+        ----------
+        endpoints : dict[str, Endpoint], optional
+            Endpoints to add, keyed by name; replaces one of that name.
+        tiers : dict[str, Tier], optional
+            Tiers to add, keyed by name; replaces one of that name.
+
+        Raises
+        ------
+        ValueError
+            On the same conditions as construction: the additions are
+            held to the governance grammar and the tier rules.
+        """
+        self._endpoints.update(endpoints or {})
+        self._tiers.update(tiers or {})
+        self._validate_governance_tags()
+        self.revalidate()
+
     def revalidate(self) -> None:
         """Re-run tier validation after the tiers were rewritten in place.
 
