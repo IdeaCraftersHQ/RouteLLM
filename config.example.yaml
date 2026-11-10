@@ -188,6 +188,56 @@ tiers:
 #   strong: {select: "tool_call:true reasoning:true", order: quality_desc}
 #   weak: {select: "tag:local", order: cost_asc}
 
+# Comparison routing: send a request to 2+ models at once and record TTFT,
+# latency, tokens/s, token counts, cost, errors and output per model into
+# the trace store. Everything below is off until `enabled: true`.
+#   - Shadow: the normal request is answered by its primary, unchanged;
+#     shadows run concurrently in the background and are only recorded.
+#   - POST /v1/compare returns every model's result side by side
+#     (`endpoint: false` turns it off).
+#   - Triggers, first match wins: the X-RouteLLM-Compare header (an
+#     experiment, a profile, or comma-separated endpoint names), a named
+#     experiment sampled at its rate, a per-tier sampling rule.
+# A tier whose endpoints are all tagged `local` may only be shadowed to
+# `local` endpoints (checked here at load, and per request for the
+# header). Endpoints with `pay: true` are never comparison targets.
+# Budgets are USD, in memory, per process. Commented out: the sample
+# should shadow nothing by default.
+#
+# comparison:
+#   enabled: true
+#   endpoint: true             # serve POST /v1/compare
+#   allow_header: true         # honour X-RouteLLM-Compare
+#   max_concurrency: 4         # shadow calls in flight at once, overall
+#   max_models: 4              # most models in one comparison
+#   timeout_ms: 60000          # per comparison call; calls are not retried
+#   measure_ttft: false        # stream shadows upstream to time first token
+#   budget_usd: 5.00           # stop all comparison calls after this spend
+#   profiles:                  # named endpoint lists
+#     frontier_vs_local: [cloud_strong, local_glm]
+#   sampling:                  # per entered tier
+#     default: {rate: 0.05, models: [local_glm]}   # a list or a profile
+#   experiments:
+#     bench:
+#       models: frontier_vs_local
+#       rate: 0.1              # ignored when named in the header
+#       tiers: [premium]       # optional; omit for every request
+#       budget_usd: 1.00
+#       max_concurrency: 2
+#   judge:                     # optional; any routellm.quality_scores spec
+#     scorer: "rubric:rubric.yaml"   # judge:<endpoint> must be `local` for local-only data
+
+# Trace store: one JSON file per request, the input to scoring (see
+# docs/runbooks/traces-to-quality.md) and where comparison results land.
+# Off unless enabled. Plaintext prompts and completions; keep the
+# directory private. A relative `trace_dir` resolves against this file.
+#
+# traces:
+#   enabled: true
+#   trace_dir: .routellm_traces
+#   max_files: 10000           # 0 is unbounded
+#   max_bytes: 536870912       # 0 is unbounded
+
 # Every router named above ships with the base package, so this file
 # serves on a stock install. `jev` is registered by the typesafe
 # extension instead: install it with `pip install -e
