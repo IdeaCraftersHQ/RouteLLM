@@ -2,8 +2,6 @@
 
 Last run: 2026-04-29 (paper)
 Author: jadb
-Task: T-0105
-Slug: RLM-NEW-DEPLOY
 
 ## Use case
 
