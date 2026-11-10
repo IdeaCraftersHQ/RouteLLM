@@ -16,6 +16,7 @@ import pytest
 import yaml
 
 from routellm.endpoints import EndpointRegistry
+from routellm.interpolate import interpolate_tree
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -359,6 +360,8 @@ def test_config_example_loads_into_the_registry():
     """Every documented `endpoints:`/`tiers:` key survives a real load."""
     with open(REPO_ROOT / "config.example.yaml") as handle:
         config = yaml.safe_load(handle)
+    # `${VAR:-default}` is expanded by the config loader before validation.
+    config = interpolate_tree(config, origin_of=lambda key: None)
 
     registry = EndpointRegistry.from_config(config)
 
@@ -406,6 +409,8 @@ def test_config_example_builds_a_controller_on_a_stock_install(monkeypatch):
 
     with open(REPO_ROOT / "config.example.yaml") as handle:
         config = yaml.safe_load(handle)
+    # `${VAR:-default}` is expanded by the config loader before validation.
+    config = interpolate_tree(config, origin_of=lambda key: None)
 
     registry = EndpointRegistry.from_config(config)
 

@@ -77,11 +77,13 @@ model-name grammar that splits on '-'.
 """
 
 import difflib
+import ipaddress
 import logging
 import os
 import re
 from functools import cached_property
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 
 from pydantic import (
     BaseModel,
@@ -162,6 +164,57 @@ class Selector(BaseModel):
         return value
 
 
+_LOCAL_SUFFIXES = (".local", ".internal", ".localhost")
+
+# Loopback, RFC 1918, ULA and link-local only. Shared (100.64/10),
+# unspecified, documentation and reserved space are not "this machine or
+# its private network", so they are refused like any public host.
+_LOCAL_NETWORKS = tuple(
+    ipaddress.ip_network(n)
+    for n in (
+        "127.0.0.0/8",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "169.254.0.0/16",
+        "::1/128",
+        "fc00::/7",
+        "fe80::/10",
+    )
+)
+
+
+def is_non_public_base(api_base: str) -> bool:
+    """Whether `api_base` names a host on this machine or its private network.
+
+    True for IP literals in loopback, RFC 1918, ULA or link-local space,
+    `localhost`, and names ending `.local`, `.internal` or `.localhost`.
+    Anything else is False: other IP space, other names (including
+    single-label names, which a resolver search domain can send
+    anywhere), and unparseable or hostless values. Purely syntactic: no
+    DNS.
+    """
+    text = api_base.strip()
+    if "://" not in text:
+        text = "//" + text
+    try:
+        host = urlsplit(text).hostname
+    except ValueError:
+        return False
+    if not host:
+        return False
+    host = host.rstrip(".").lower()
+    if not host:
+        return False
+    try:
+        ip = ipaddress.ip_address(host.split("%", 1)[0])
+    except ValueError:
+        return host == "localhost" or host.endswith(_LOCAL_SUFFIXES)
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return any(ip in net for net in _LOCAL_NETWORKS if net.version == ip.version)
+
+
 class Endpoint(BaseModel):
     """A named, individually addressable model endpoint.
 
@@ -211,6 +264,11 @@ class Endpoint(BaseModel):
         and fails on anything else; `true` drops anything the provider
         rejects; `false` drops nothing; a list of names drops those
         for this endpoint as well. See `routellm.leaf_params`.
+    allow_public_base : bool
+        Opt-out of the host check on a `local` endpoint's `api_base`.
+        Default False. Dangerous: with it a `local` endpoint may point
+        at a public host, so the tag no longer means the prompt stays
+        on the machine or network.
     max_payment : str, optional
         The most a single payment to this endpoint may be, as human
         money ("$0.01"). It may only lower the process-wide
@@ -235,6 +293,7 @@ class Endpoint(BaseModel):
     strict: bool = False
     quality_measured: bool = False
     pay: StrictBool = False
+    allow_public_base: StrictBool = False
     max_payment: str | None = None
     timeout_ms: int | None = Field(default=None, gt=0)
     drop_params: StrictBool | list[Annotated[str, StringConstraints(min_length=1)]] | None = None
@@ -315,20 +374,35 @@ class Endpoint(BaseModel):
 
     @model_validator(mode="after")
     def _validate_local_has_base(self) -> "Endpoint":
-        """A `local` endpoint names where it lives, or it does not load.
+        """A `local` endpoint names where it lives, on a non-public host.
 
         Without `api_base` the call goes to the provider's default base
         (public OpenAI for an `openai/` model), so a leaf meant to stay
-        on the machine would send its prompts to the cloud. Tag-only
-        enforcement of the privacy intent: no implicit fallback.
+        on the machine would send its prompts to the cloud. A base that
+        names a public host does the same by another road. The host is
+        judged as written, after `${VAR}` expansion and with no DNS
+        lookup: a public name that happens to resolve privately is not
+        trusted, and a load never touches the network. `allow_public_base`
+        is the explicit opt-out.
         """
-        if LOCAL_TAG in self.tags and not self.api_base:
+        if LOCAL_TAG not in self.tags:
+            return self
+        if not self.api_base:
             raise ValueError(
                 f"endpoint {self.name!r} is tagged `local` but sets no `api_base`; "
                 "without one the call would go to the provider's default (public) "
                 "base. Set `api_base`, or drop the `local` tag."
             )
-        return self
+        if self.allow_public_base or is_non_public_base(self.api_base):
+            return self
+        raise ValueError(
+            f"endpoint {self.name!r} is tagged `local` but its `api_base` "
+            f"{self.api_base!r} is not a loopback, private, link-local, "
+            ".local, .internal, .lan or single-label host, so its prompts "
+            "would leave the machine or network. Point `api_base` at a local "
+            "host, drop the `local` tag, or set `allow_public_base: true` "
+            "(dangerous: it lets a `local` endpoint reach a public host)."
+        )
 
     @model_validator(mode="after")
     def _validate_cap_needs_pay(self) -> "Endpoint":

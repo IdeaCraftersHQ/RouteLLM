@@ -92,6 +92,8 @@ def test_a_dash_cloud_ollama_model_fails_the_lint_too():
 def test_a_local_leaf_on_a_remote_host_fails_the_lint():
     cfg = _config()
     cfg["endpoints"]["local_small"]["api_base"] = "https://models.example.com/v1"
+    # The load now refuses this unless opted out; the lint backs the opt-out.
+    cfg["endpoints"]["local_small"]["allow_public_base"] = True
     assert any("not on the host" in p for p in lint_private_reach(cfg))
 
 
