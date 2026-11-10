@@ -53,3 +53,11 @@ def test_the_control_reaches_off_host_leaves(results):
     # The zeros above mean something only if the fakes can be hit.
     assert results["general_reaches_cloud"]["hits"]["cloud_main"] == 1
     assert results["general_falls_back_to_gated"]["obs"]["gated"] == 1
+
+
+def test_selector_tier_resolves_to_local_leaves_only(results):
+    # `tag:local !tag:cloud` on both sides; the cloud leaf out-ranks every
+    # local one, so only the `!` keeps it from winning the strong side.
+    sides = results["selector_resolves_to_local_leaves_only"]["obs"]["sides"]
+    assert sides == ["local_main", "local_small"]
+    assert set(sides) <= set(pf.LOCAL)

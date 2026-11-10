@@ -34,6 +34,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from routellm.pairing import CATALOG_CACHE_ENV, write_snapshot
 from routellm.tests.fake_upstream import FakeUpstream  # noqa: F401  used by the subprocess script
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -52,7 +53,19 @@ OFF_HOST = tuple(n for n, r in LEAVES.items() if r != "local")
 CASE_MODULES = [
     "routellm.tests.privacy_cases_structural",
     "routellm.tests.privacy_cases_clients",
+    "routellm.tests.privacy_cases_selectors",
 ]
+
+
+#: Quality per leaf, so a selector tier orders deterministically. The
+#: cloud leaf is the best on purpose: a selector that lets it through wins it.
+QUALITY = {
+    "local_main": 80,
+    "local_small": 40,
+    "local_audio": 60,
+    "cloud_main": 90,
+    "gated_main": 70,
+}
 
 
 def endpoints(bases: dict[str, str]) -> dict:
@@ -65,6 +78,7 @@ def endpoints(bases: dict[str, str]) -> dict:
 
     def leaf(name, tags, caps):
         return {
+            "quality": QUALITY[name],
             "model": f"openai/model-{name.replace('_', '-')}",
             "api_base": bases[name],
             "api_key_env": "FAKE_KEY",
@@ -103,13 +117,19 @@ def endpoints(bases: dict[str, str]) -> dict:
     }
 
 
+#: The local-only selector: reach local, never cloud.
+SELECTOR = "tag:local !tag:cloud"
+
+
 def tiers() -> dict:
     """Return the tier section.
 
     `private` has a local primary and a local sibling; `private_audio`
     swaps in the leaf that hears audio; `default` is what the legacy
     `router-<name>-<threshold>` form lands on and is local-only;
-    `general` is the control that reaches off the host.
+    `general` is the control that reaches off the host;
+    `private_selector` is `private` written as selectors, local and not
+    cloud on both sides, so it must land on the same two leaves.
     """
     pair = {"router": "random", "threshold": 0.0}
     return {
@@ -117,6 +137,11 @@ def tiers() -> dict:
         "private_audio": {**pair, "strong": "local_audio", "weak": "local_small"},
         "default": {**pair, "strong": "private", "weak": "local_small"},
         "general": {**pair, "strong": "cloud_main", "weak": "gated_main"},
+        "private_selector": {
+            **pair,
+            "strong": {"select": SELECTOR, "order": "quality_desc"},
+            "weak": {"select": SELECTOR, "order": "quality_asc"},
+        },
     }
 
 
@@ -250,6 +275,10 @@ def run_cases(tmp_path, names, extra_config=None, resilience=None):
     `extra_config` is merged over the fixture config (top-level keys),
     `resilience` sets `ResilienceConfig` fields before the first request.
     """
+    # Selector tiers consult the models.dev catalog on construction; an
+    # empty snapshot keeps that off the network (tags need no catalog).
+    catalog = tmp_path / "models_dev.json"
+    write_snapshot(catalog, [])
     script = _SCRIPT.format(
         config=str(tmp_path / "config.json"),
         extra=json.dumps(extra_config or {}),
@@ -266,6 +295,7 @@ def run_cases(tmp_path, names, extra_config=None, resilience=None):
             "PATH": "/usr/bin:/bin",
             "HOME": str(tmp_path),
             "XDG_CONFIG_HOME": str(tmp_path / "xdg"),
+            CATALOG_CACHE_ENV: str(catalog),
             "LITELLM_LOCAL_MODEL_COST_MAP": "True",
             "FAKE_KEY": "sk-fake",
         },
