@@ -111,6 +111,30 @@ audio_tokens_per_second: 32
 # tag_namespaces: [team]
 # governance: true
 
+# `policy: <path>` loads a policy file (see README, "Policy file"): data
+# classes mapped to reach, jurisdiction, entry tiers and treatment, deny
+# by default. Loading one turns on `governance` and `strict_registry`.
+# A relative path resolves against the config file that sets it.
+# policy: /etc/routellm/policy.yaml
+#
+# Example policy file:
+#   default_class: null            # null: a request with no class is refused
+#   classes:
+#     public:
+#       treatment: raw             # raw | redact | block | vault
+#       reach: [local, vpn, cloud]
+#       tiers: [default]
+#     internal:
+#       treatment: block           # never cloud
+#       reach: [local, vpn]
+#       jur: [ca]                  # empty = any jurisdiction
+#       tiers: [private]
+#       cache: none                # none | exact | both
+#     sealed:
+#       treatment: vault           # every request refused, no model call
+#   principals:
+#     analyst: {classes: [public, internal]}
+
 # `strict_registry: true` (or `--strict-registry`) refuses every model
 # name that is not an endpoint below: raw --strong-model/--weak-model
 # values, the legacy default pair, and raw targets in traffic rules,

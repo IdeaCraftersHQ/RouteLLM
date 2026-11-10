@@ -304,6 +304,41 @@ Tags are free-form, with one rule: a tag written `<ns>:<value>` is namespaced, a
 
 Setting `governance: true` (top-level, off by default) additionally requires every endpoint to carry at least one reach tag and exactly one `jur:` tag.
 
+#### Policy file
+
+`policy: <path>` (top-level) loads a policy file mapping data classes to what may happen to them. It denies by default and fails closed: any load error stops startup, naming the file, class and field. A relative path resolves against the config file that sets it. Loading a policy implies `governance: true` and `strict_registry: true`.
+
+```yaml
+default_class: null              # a class name, or null to refuse a request with none
+classes:
+  public:
+    treatment: raw               # raw | redact | block | vault
+    reach: [local, vpn, cloud]   # reach labels an endpoint may carry
+    jur: []                      # allowed jurisdictions; empty = any
+    tiers: [default]             # entry tiers a request of this class may use
+    cache: exact                 # none | exact | both
+  internal:
+    treatment: block
+    reach: [local, vpn]
+    jur: [ca]
+    tiers: [private]
+  sealed:
+    treatment: vault
+principals:
+  analyst: {classes: [public, internal]}
+```
+
+- `cache` defaults to `exact` for `raw` and `none` for the other treatments.
+- `reach` and `tiers` need at least one entry on every class except `vault`; an empty list would allow nothing.
+- `vault`: every request is refused with no model call; it takes no `reach`, `jur`, `tiers`, and `cache` must be `none`.
+- `block`: `cloud` in `reach` is a load error.
+- `redact`: `cloud` in `reach` is a load error until a redaction treatment is available.
+- An unknown class on a request is refused; so is a missing class when `default_class` is null. A principal reaches only the classes listed for it; an unlisted principal reaches none.
+- Unknown keys, reach labels, treatments or malformed `jur` codes are load errors.
+- The classifier's `decision.data_classes` must all be policy classes (the policy may list more, for classes callers declare); otherwise startup fails naming the class.
+
+`routellm.policy.Policy` is the loaded object (`routellm.openai_server.POLICY`; None without a `policy:` key): `resolve(declared)` returns `(name, ClassPolicy)` or raises `PolicyRefusal` with `code` `unknown_class`, `missing_class` or `vault`; `principal_allows(principal, name)`; `classes[name].reach/jur/tiers/treatment/cache`.
+
 #### Strict endpoint keys
 
 Unknown keys under an endpoint are a load error naming the endpoint and the key, with a "did you mean" for near misses (`api_base_env` for `api_base`). A silently ignored key would leave the endpoint on its provider's default base.
