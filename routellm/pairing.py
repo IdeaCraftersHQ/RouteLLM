@@ -66,6 +66,7 @@ from routellm.capabilities import (
 )
 from routellm.config import ConfigError, load_config
 from routellm.endpoints import Endpoint, EndpointRegistry, Selector
+from routellm.governance import TagTerm, check_tag_term, parse_tag_term
 
 logger = logging.getLogger(__name__)
 
@@ -455,7 +456,7 @@ def catalog_provider_for(model: str) -> tuple[str, str] | None:
 # ---------------------------------------------------------------------------
 
 
-def _split_terms(select: str) -> tuple[list[str], list[str], str]:
+def _split_terms(select: str) -> tuple[list[TagTerm], list[str], str]:
     """Split a `select` expression into tags, capability terms, and a query.
 
     A term is routed by its key: `tag:` goes to the tag bucket; a key
@@ -479,8 +480,8 @@ def _split_terms(select: str) -> tuple[list[str], list[str], str]:
 
     Returns
     -------
-    tuple[list[str], list[str], str]
-        Labels from the `tag:` terms, the capability terms verbatim,
+    tuple[list[TagTerm], list[str], str]
+        Parsed `tag:` / `!tag:` terms, the capability terms verbatim,
         and the remaining terms joined back into an aim query string.
 
     Raises
@@ -488,11 +489,14 @@ def _split_terms(select: str) -> tuple[list[str], list[str], str]:
     ValueError
         If a term carries no colon, which would be free text.
     """
-    tags: list[str] = []
+    tags: list[TagTerm] = []
     capability_terms: list[str] = []
     catalog_terms: list[str] = []
 
     for term in select.split():
+        if term.startswith("!") or term.startswith("tag:"):
+            tags.append(parse_tag_term(term, select))
+            continue
         if ":" not in term:
             raise ValueError(
                 f"Selector term {term!r} in {select!r} is bare free text. "
@@ -500,9 +504,7 @@ def _split_terms(select: str) -> tuple[list[str], list[str], str]:
                 "models.dev key."
             )
         key, _, value = term.partition(":")
-        if key == "tag":
-            tags.append(value)
-        elif key == "free":
+        if key == "free":
             # Judged by `_free_term` and `rank_candidates`, never by aim.
             continue
         elif (
@@ -757,6 +759,8 @@ def rank_candidates(
     declare themselves resolves with no network at all.
     """
     tags, capability_terms, query = _split_terms(selector.select)
+    for tag_term in tags:
+        check_tag_term(tag_term, registry.known_namespaces, selector.select)
     capability_query = parse_capability_terms(capability_terms)
     filter_ = _catalog_filter(query, selector.select)
     free = _free_term(selector.select)
@@ -783,7 +787,7 @@ def rank_candidates(
     candidates: list[Candidate] = []
     for name in registry.names():
         endpoint = registry.get(name)
-        if not set(tags).issubset(set(endpoint.tags)):
+        if not all(term.matches(endpoint.tags) for term in tags):
             continue
 
         record = None
