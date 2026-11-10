@@ -19,6 +19,28 @@ import pytest
 import routellm.config as cfg
 
 
+def _pairing_installed() -> bool:
+    try:
+        from hop import aim  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip `@pytest.mark.pairing` tests when the `pairing` extra is absent.
+
+    A test that needs an optional extra must skip, naming the extra,
+    rather than fail with a bare `ModuleNotFoundError`.
+    """
+    if _pairing_installed():
+        return
+    skip = pytest.mark.skip(reason="needs the 'pairing' extra: pip install 'routellm[pairing]'")
+    for item in items:
+        if item.get_closest_marker("pairing"):
+            item.add_marker(skip)
+
+
 @pytest.fixture(autouse=True)
 def _isolate_ambient_config(tmp_path_factory, monkeypatch):
     """Point HOME, XDG_CONFIG_HOME and SYSTEM_PATH at empty temp dirs.

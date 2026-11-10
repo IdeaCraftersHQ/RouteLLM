@@ -64,6 +64,7 @@ fit = [
 [tool.pytest.ini_options]
 markers = [
 	"slow: imports the heavy ML stack or spawns a subprocess",
+	"pairing: needs the optional `pairing` extra; skipped when it is not installed",
 ]
 
 [tool.hatch.metadata]

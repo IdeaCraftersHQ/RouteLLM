@@ -837,6 +837,16 @@ A sample configuration is provided in the `config.example.yaml` file - it provid
 
 We welcome contributions! Please feel free to open an issue or a pull request if you have any suggestions or improvements.
 
+### Running the tests
+
+```
+pip install -e ".[dev,serve]"
+python -m pytest routellm/tests -q -rs
+```
+
+Tests that need an optional extra (`pairing`) skip with a reason naming the
+extra when it is absent. To run them, install it: `pip install -e ".[dev,serve,pairing]"`.
+
 ### Adding a new router
 
 There is only a single method to implement: `calculate_strong_win_rate`, which takes in the user prompt and returns the win rate for the strong model conditioned on that given prompt - if this win rate is great than user-specified cost threshold, then the request is routed to the strong model. Otherwise, it is routed to the weak model.

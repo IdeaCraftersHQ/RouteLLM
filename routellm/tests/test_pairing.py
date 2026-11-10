@@ -350,6 +350,7 @@ def test_no_candidate_raises_naming_the_select(registry, catalog, cache_dir):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.pairing
 def test_unknown_query_key_surfaces_the_term(registry, catalog, cache_dir):
     selector = Selector(select="wizardry:true")
     with pytest.raises(ValueError, match="wizardry:true"):
@@ -362,6 +363,7 @@ def test_bare_free_text_token_rejected(registry, catalog, cache_dir):
         resolve_pairing(registry, selector)
 
 
+@pytest.mark.pairing
 @pytest.mark.parametrize("key", ["temperature", "family"])
 @pytest.mark.parametrize("value", ["true", "false"])
 def test_unsupported_catalog_term_rejected_whatever_its_value(
@@ -492,6 +494,7 @@ def test_successful_fetch_writes_the_snapshot(registry, catalog, cache_dir):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.pairing
 def test_fetch_gives_up_at_the_timeout_without_waiting_for_the_worker(monkeypatch, cache_dir):
     """A hung fetch must not hold startup past the timeout.
 
