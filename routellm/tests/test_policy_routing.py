@@ -331,3 +331,55 @@ def test_without_the_section_attributes_are_ignored_and_nothing_is_recorded(L):
         for f in fakes.values():
             f.server.shutdown()
             f.server.server_close()
+
+
+# --- the policy is bound to the caller -----------------------------------------------------
+
+
+def test_a_caller_may_use_a_policy_the_policy_file_lists_for_it(world):
+    res = world.ask(project=world.L.projects["open"], principal="limited")
+    assert world.record(res)["policy"] == world.L.projects["open"]
+
+
+def test_a_header_naming_a_policy_the_caller_lacks_is_403_naming_it(world):
+    with pytest.raises(PolicyDenied) as exc:
+        world.ask(project=world.L.projects["nofb"], principal="limited")
+    assert exc.value.status == 403 and world.L.projects["nofb"] in str(exc.value)
+    assert world.hits() == {}
+
+
+def test_a_caller_with_no_project_list_may_use_only_the_default_policy(world):
+    assert world.record(world.ask(principal="plain"))["policy"] == "default"
+    with pytest.raises(PolicyDenied):
+        world.ask(project=world.L.projects["open"], principal="plain")
+
+
+def test_without_auth_a_non_default_policy_is_403(world):
+    with pytest.raises(PolicyDenied):
+        world.ask(project=world.L.projects["open"], principal=None)
+    assert world.hits() == {}
+
+
+def test_without_auth_the_default_policy_and_unknown_values_still_apply(world):
+    assert world.record(world.ask(principal=None))["policy"] == "default"
+    rec = world.record(world.ask(project="nobody", principal=None))
+    assert (rec["policy"], rec["policy_from"]) == ("default", "unknown")
+
+
+def test_a_spoofed_project_cannot_unlock_a_gated_endpoint(L):
+    w = make_world(L, gates=[GATE])
+    try:
+        with pytest.raises(PolicyDenied, match=L.projects["gate"]):
+            w.ask(model=L.tiers["gated"], project=L.projects["gate"], principal="limited")
+        assert w.hits() == {}
+    finally:
+        close(w)
+
+
+def test_an_authorised_policy_unlocks_the_gated_endpoint(L):
+    w = make_world(L, gates=[GATE])
+    try:
+        w.ask(model=L.tiers["gated"], project=L.projects["gate"], principal="tester")
+        assert w.hits() == {"gat": 1}
+    finally:
+        close(w)

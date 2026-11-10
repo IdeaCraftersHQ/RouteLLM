@@ -23,7 +23,7 @@ classes:
   sealed:
     treatment: vault           # every request refused, no model call
 principals:
-  analyst: {classes: [public, secret]}
+  analyst: {classes: [public, secret], projects: [research]}
 ```
 
 Nothing here reads a request or an endpoint. `Policy` is the loaded,
@@ -151,9 +151,14 @@ class ClassPolicy(_Strict):
 
 
 class PrincipalPolicy(_Strict):
-    """The classes one principal may send."""
+    """The classes one principal may send, and the routing policies it may select.
+
+    `projects` names `policy_routing` policies a request header may ask
+    for; empty means the default policy only.
+    """
 
     classes: list[str] = Field(default_factory=list)
+    projects: list[str] = Field(default_factory=list)
 
 
 class Policy(_Strict):
@@ -217,6 +222,11 @@ class Policy(_Strict):
         if spec.refuses_all:
             raise PolicyRefusal("vault", f"data class {name!r} is vaulted: requests are refused")
         return name, spec
+
+    def principal_projects(self, principal: str | None) -> list[str]:
+        """The routing policies `principal` may select; none for an unknown or absent one."""
+        spec = self.principals.get(principal) if principal is not None else None
+        return list(spec.projects) if spec is not None else []
 
     def principal_allows(self, principal: str | None, name: str) -> bool:
         """Whether `principal` may send class `name`; unknown principals may send none."""

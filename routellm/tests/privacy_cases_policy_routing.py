@@ -12,6 +12,7 @@ and a lower class: the cloud fake can be hit, so the zeros mean something.
 
 from routellm.tests.privacy_fixture import (
     OPEN_PROJECT,
+    RESTRICTED_PROJECT,
     ROUTE_CLIENT_HEADER,
     ROUTE_PROJECT_HEADER,
     case,
@@ -127,3 +128,10 @@ def not_forwarded(w):
 def control(w):
     r = w.post(ENTRY, data_class="general", headers=_project(OPEN_PROJECT))
     return {"status": r.status_code, "policy": _record(r)["policy"]}
+
+
+@case("route_a_spoofed_project_is_403_and_takes_no_hit", 403, route=True)
+def spoofed(w):
+    # The caller's policy-file entry does not list this project: naming
+    # it in a header is refused, not downgraded, and nothing is called.
+    return _reason(w.post(ENTRY, data_class="general", headers=_project(RESTRICTED_PROJECT)))

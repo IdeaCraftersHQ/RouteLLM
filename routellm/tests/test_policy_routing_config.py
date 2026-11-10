@@ -40,8 +40,9 @@ def registry():
 
 def load(section=None, **over):
     raw = {**(section or routing_section(A)), **over}
-    router = build_policy_routing({"policy_routing": raw}, class_policy(A))
-    router.check(registry(), class_policy(A))
+    pol = class_policy(A, only=set(raw["policies"]))
+    router = build_policy_routing({"policy_routing": raw}, pol)
+    router.check(registry(), pol)
     return router
 
 
@@ -159,3 +160,18 @@ def test_a_rule_intent_must_be_a_decision_intent():
     cfg = SimpleNamespace(data_classes={"general": "", "private": ""}, intents={"chat": ""})
     with pytest.raises(PolicyRoutingError, match="'hard'"):
         router.check(registry(), class_policy(A), cfg)
+
+
+def test_a_principal_listing_an_unknown_policy_is_a_startup_error():
+    from routellm.policy import parse_policy
+
+    raw = {
+        "classes": {
+            "general": {"treatment": "raw", "reach": ["local", "cloud"], "tiers": ["code"]}
+        },
+        "principals": {"ops": {"classes": ["general"], "projects": ["ghost"]}},
+    }
+    pol = parse_policy(raw, "p.yaml")
+    router = build_policy_routing({"policy_routing": routing_section(A)}, pol)
+    with pytest.raises(PolicyRoutingError, match="ghost"):
+        router.check(registry(), pol)

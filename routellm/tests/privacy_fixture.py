@@ -212,6 +212,7 @@ GATE_CONFIG = {
 ROUTE_PROJECT_HEADER = "X-Route-Project"
 ROUTE_CLIENT_HEADER = "X-Route-Client"
 OPEN_PROJECT = "open-project"
+RESTRICTED_PROJECT = "restricted-project"  # a policy the suite caller may not select
 
 
 def route_config() -> dict:
@@ -246,6 +247,7 @@ def route_config() -> dict:
             "policies": {
                 "default": {"data_class": "private", "tiers": ["private"], "fallback": "private"},
                 OPEN_PROJECT: {"data_class": "general", "tiers": ["private", "general"]},
+                RESTRICTED_PROJECT: {"data_class": "general", "tiers": ["private", "general"]},
             },
         },
     }
@@ -282,7 +284,9 @@ def class_policy_files(tmp_path: Path, route: bool = False) -> dict:
             "general": {"treatment": "raw", "reach": ["local", "cloud"], "tiers": ["general"]},
             "private": policy["classes"]["private"],
         }
-        policy["principals"] = {"suite": {"classes": ["general", "private"]}}
+        policy["principals"] = {
+            "suite": {"classes": ["general", "private"], "projects": [OPEN_PROJECT]}
+        }
     (tmp_path / "policy.json").write_text(json.dumps(policy))
     digest = hashlib.sha256(POLICY_KEY.encode()).hexdigest()
     (tmp_path / "keys.yaml").write_text(

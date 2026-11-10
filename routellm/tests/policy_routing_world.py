@@ -8,6 +8,7 @@ names has to pass the same suite: nothing in `routellm` may depend on one.
 import asyncio
 from dataclasses import dataclass, field
 
+from routellm.auth import Principal
 from routellm.caching import CacheConfig
 from routellm.controller import Controller
 from routellm.decision import Decision
@@ -130,8 +131,10 @@ def tier_config(L: Labels) -> dict:
     }
 
 
-def class_policy(L: Labels):
+def class_policy(L: Labels, only=None):
+    """The class policy; `only` limits the principals' projects to those names."""
     t = L.tiers
+    keep = [p for p in L.projects.values() if only is None or p in only]
     open_tiers = [t["code"], t["hard"], t["light"], t["vision"], t["gated"]]
     return parse_policy(
         {
@@ -143,7 +146,15 @@ def class_policy(L: Labels):
                     "jur": ["ca"],
                     "tiers": [t["private"]],
                 },
-            }
+            },
+            "principals": {
+                "tester": {"classes": [L.low, L.high], "projects": keep},
+                "limited": {
+                    "classes": [L.low, L.high],
+                    "projects": [p for p in [L.projects["open"]] if p in keep],
+                },
+                "plain": {"classes": [L.low, L.high]},
+            },
         },
         "classes.yaml",
     )
@@ -230,6 +241,7 @@ class World:
         decision=None,
         model=None,
         messages=MESSAGES,
+        principal="tester",
         **kw,
     ):
         self.controller.decision = decision
@@ -239,6 +251,7 @@ class World:
                 messages=messages,
                 declared_class=declared or self.L.low,
                 attributes=self.attrs(project, client),
+                principal=Principal(principal) if principal else None,
                 **kw,
             )
         )
@@ -259,8 +272,9 @@ def make_world(L: Labels, *, section=None, gates=(), policy=None, **kwargs) -> W
     registry = EndpointRegistry.from_config(
         {"endpoints": eps, "tiers": tier_config(L), "strict_registry": True}
     )
-    pol = policy or class_policy(L)
-    router = build_policy_routing({"policy_routing": section or routing_section(L)}, pol)
+    section = section or routing_section(L)
+    pol = policy or class_policy(L, only=set(section["policies"]))
+    router = build_policy_routing({"policy_routing": section}, pol)
     kwargs.setdefault("cache_config", CacheConfig(enabled=False))
     controller = Controller(
         routers=["random"],

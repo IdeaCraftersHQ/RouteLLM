@@ -529,7 +529,7 @@ class Controller:
             return reqs
         return dataclasses.replace(reqs, data_class=effective)
 
-    def _policy_route(self, tier, declared_class, decision, reqs, attributes):
+    def _policy_route(self, tier, declared_class, decision, reqs, attributes, principal=None):
         """Apply policy routing; no-op without it.
 
         Returns
@@ -549,7 +549,9 @@ class Controller:
         """
         if self.policy_routing is None:
             return tier, None, reqs, None
-        sel = self.policy_routing.select(tier, declared_class, decision, reqs, attributes)
+        sel = self.policy_routing.select(
+            tier, declared_class, decision, reqs, attributes, principal
+        )
         if reqs is not None:
             reqs = dataclasses.replace(reqs, route_policy=sel.policy)
         return sel.tier, sel.effective, reqs, sel
@@ -1685,7 +1687,7 @@ class Controller:
         # 0. Decide: label the request before anything routes it.
         decision = self._decide_sync(kwargs, declared_class, conversation_id)
         tier, effective, reqs, route_record = self._policy_route(
-            tier, declared_class, decision, reqs, attributes
+            tier, declared_class, decision, reqs, attributes, principal
         )
         reqs = self._check_entry_tier(tier, declared_class, decision, reqs, effective)
 
@@ -1941,7 +1943,7 @@ class Controller:
         #    so a slow decision model never holds the event loop.
         decision = await self._decide(kwargs, declared_class, conversation_id)
         tier, effective, reqs, route_record = self._policy_route(
-            tier, declared_class, decision, reqs, attributes
+            tier, declared_class, decision, reqs, attributes, principal
         )
         reqs = self._check_entry_tier(tier, declared_class, decision, reqs, effective)
 

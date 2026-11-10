@@ -339,7 +339,7 @@ classes:
   sealed:
     treatment: vault
 principals:
-  analyst: {classes: [public, internal]}
+  analyst: {classes: [public, internal], projects: [research]}  # projects: policy_routing policies a header may select
 ```
 
 - `cache` defaults to `exact` for `raw` and `none` for the other treatments.
@@ -1004,6 +1004,8 @@ policy_routing:
 **Attributes.** Each is read off the request headers, validated against its `pattern` and stored on `request.state.attributes` and `routellm.policy_routing.current_attributes`, next to the declared class. A missing, empty or malformed value is an unknown attribute, never an error. No header is copied upstream, so an attribute never reaches a provider, a shadow or comparison call, or the decision classifier.
 
 **Policy.** The value of the `key` attribute names the policy. A missing, invalid or unknown value takes `default_policy` (a policy with that name is required); the path says which (`policy_from`: `attribute`, `absent`, `invalid`, `unknown`).
+
+**Bound to the caller.** The header is a claim, not a right. A value naming a non-default policy is honoured only if the policy file lists it for the authenticated caller: `principals.<name>.projects: [policy, ...]` (a caller with no list may use `default_policy` only). A caller naming a policy it may not use is refused (`403`, naming the policy, `policy_from: forbidden`), never silently moved to the default. With auth off there is no caller, so only `default_policy` applies and a header naming any other policy is a `403`: policy routing with non-default policies requires `auth:`. This is what makes `require_policy_allow` safe: only a policy the caller is authorised for can admit a gated endpoint. A caller listing a policy that `policy_routing:` does not define is a startup error. A missing, invalid or unknown value is still the default policy.
 
 **Effective class.** The most restrictive of the policy's `data_class`, the declared class and the decision step's class, where restrictiveness is the order of the policy file's `classes:` (least restrictive first, the order `decision.data_classes` already uses; startup fails if the two disagree). No source can lower it. Without a `decision:` section the intent is unknown and intent rules never match.
 

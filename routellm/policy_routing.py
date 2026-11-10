@@ -336,6 +336,7 @@ class PolicyRouter:
         decision,
         reqs,
         attrs: RequestAttributes | None,
+        principal=None,
     ) -> Selection:
         """Pick the policy, the effective class and the tier for one request.
 
@@ -354,15 +355,31 @@ class PolicyRouter:
             Read for the request's modality.
         attrs : RequestAttributes, optional
             The request's attributes; None is no attribute at all.
+        principal : Principal, optional
+            The authenticated caller. A header may select a non-default
+            policy only if the policy file's `principals.<name>.projects`
+            lists it; with no principal only the default applies.
 
         Raises
         ------
         PolicyDenied
-            A tier the policy does not allow with no fallback (naming
+            A policy the caller may not use (`policy_from: forbidden`), a
+            tier the policy does not allow with no fallback (naming
             policy and tier), or a class the policy file does not list.
         """
         attrs = attrs or RequestAttributes()
         name, why = self.policy_for(attrs)
+        if why == "attribute" and name != self.config.default_policy:
+            allowed = (
+                self.class_policy.principal_projects(principal.principal if principal else None)
+                if self.class_policy is not None
+                else []
+            )
+            if name not in allowed:
+                raise PolicyDenied(
+                    f"routing policy {name!r} is not allowed for this caller "
+                    "(policy_from: forbidden)"
+                )
         route_policy = self.policies[name]
         classes = {
             "policy": route_policy.data_class,
@@ -489,6 +506,13 @@ class PolicyRouter:
                 problems.append(
                     f"policies.{pname}.data_class: {rp.data_class!r} is not a policy class"
                 )
+        for who, spec in class_policy.principals.items():
+            for project in spec.projects:
+                if project not in cfg.policies:
+                    problems.append(
+                        f"principals.{who}.projects: {project!r} is not a routing policy "
+                        f"(known: {', '.join(cfg.policies)})"
+                    )
         if not problems:
             problems += self._walk(registry, classes)
         if problems:

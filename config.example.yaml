@@ -329,7 +329,9 @@ endpoints:
 # order (least restrictive first); nothing lowers it. A policy never widens a
 # class: the tier it picks must still be an entry tier of the class, and every
 # leaf under it still passes the class, `deny_tags` and the egress gates. A
-# missing, invalid or unknown `key` value takes `default_policy`. Header
+# missing, invalid or unknown `key` value takes `default_policy`. A non-default
+# policy named in a header needs the policy file's
+# `principals.<name>.projects` to list it (else 403; no auth: default only). Header
 # names, classes, intents and tiers below are placeholders. Attribute headers
 # are never forwarded upstream.
 # policy_routing:
