@@ -95,7 +95,9 @@ async def replay(
 
     async def one(index: int, row: dict[str, Any]) -> dict[str, Any]:
         async with gate:
-            body = await manager.compare(models, row, tier=tier, measure_ttft=measure_ttft)
+            body = await manager.compare(
+                models, row, tier=tier, measure_ttft=measure_ttft, operator=True
+            )
         return {"index": index, **body}
 
     return list(await asyncio.gather(*(one(i, row) for i, row in enumerate(rows))))

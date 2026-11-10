@@ -211,6 +211,10 @@ tiers:
 #   max_concurrency: 4         # shadow calls in flight at once, overall
 #   max_models: 4              # most models in one comparison
 #   timeout_ms: 60000          # per comparison call; calls are not retried
+#   compare_allowed_models: [local_glm]   # /v1/compare without `tier` may name only these
+#                                          # (and profile/experiment models)
+#   allow_untiered_compare: false  # DANGEROUS if true: any caller may send any
+#                                  # prompt to any configured endpoint
 #   measure_ttft: false        # stream shadows upstream to time first token
 #   budget_usd: 5.00           # stop all comparison calls after this spend
 #   profiles:                  # named endpoint lists

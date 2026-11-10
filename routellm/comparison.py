@@ -152,6 +152,14 @@ class ComparisonConfig(_Strict):
         Off by default: shadows are non-streaming and report no TTFT.
     budget_usd : float, optional
         Stop all comparison calls once this much is spent.
+    compare_allowed_models : list[str]
+        Endpoints `POST /v1/compare` may name without a `tier`. Models
+        in `profiles` and `experiments` are allowed too, since the
+        operator named them.
+    allow_untiered_compare : bool
+        DANGEROUS. Lets an untiered `/v1/compare` name any configured
+        endpoint, so any caller can send any prompt to any model,
+        including paid and cloud ones. Off by default.
     profiles : dict
         Named endpoint lists, usable in the header and in `models:`.
     sampling : dict
@@ -170,6 +178,8 @@ class ComparisonConfig(_Strict):
     timeout_ms: int = Field(default=60000, gt=0)
     measure_ttft: StrictBool = False
     budget_usd: float | None = Field(default=None, ge=0)
+    compare_allowed_models: list[str] = Field(default_factory=list)
+    allow_untiered_compare: StrictBool = False
     profiles: dict[str, list[str]] = Field(default_factory=dict)
     sampling: dict[str, SamplingRule] = Field(default_factory=dict)
     experiments: dict[str, Experiment] = Field(default_factory=dict)
@@ -260,6 +270,7 @@ class ComparisonManager:
 
         for name, models in config.profiles.items():
             self._check_endpoints(models, f"profile {name!r}")
+        self._check_endpoints(config.compare_allowed_models, "compare_allowed_models")
 
         local_only_tiers: set[str] = set()
 
@@ -543,6 +554,7 @@ class ComparisonManager:
         *,
         tier: str | None = None,
         measure_ttft: bool | None = None,
+        operator: bool = False,
     ) -> dict[str, Any]:
         """Run every model on one request and return the side-by-side results.
 
@@ -561,13 +573,20 @@ class ComparisonManager:
             model must be `local`-tagged.
         measure_ttft : bool, optional
             Stream upstream to measure TTFT; the config default if None.
+        operator : bool, optional
+            The caller is the operator (the replay CLI), not a client,
+            so the untiered allow-list does not apply.
 
         Raises
         ------
         ValueError
-            On an unknown model, too many models, or a privacy breach.
+            On an unknown model, too many models, a privacy breach, or
+            an untiered request naming a model the operator did not
+            allow-list.
         """
         names, local_only = self.check_models(models, tier)
+        if tier is None and not operator:
+            self._require_allowed(names)
 
         from routellm import requirements as requirements_module
 
@@ -595,6 +614,24 @@ class ComparisonManager:
             )
         )
         return {"object": "comparison", "id": plan.id, "results": list(results)}
+
+    def _require_allowed(self, names: list[str]) -> None:
+        """Refuse an untiered request for models the operator did not list."""
+        config = self.config
+        if config.allow_untiered_compare:
+            return
+        allowed = set(config.compare_allowed_models)
+        for models in config.profiles.values():
+            allowed.update(models)
+        for experiment in config.experiments.values():
+            allowed.update(self._expand(experiment.models, "experiment"))
+        bad = [n for n in names if n not in allowed]
+        if bad:
+            raise ValueError(
+                f"{', '.join(bad)} may not be compared without a `tier`: name a tier "
+                "(its privacy rule then applies), or list the model in "
+                "comparison.compare_allowed_models or a profile"
+            )
 
     def check_models(
         self, models: list[str] | str, tier: str | None = None

@@ -59,7 +59,11 @@ with TestClient(server.app, raise_server_exceptions=False) as client:
 
 
 def _run(tmp_path, body, comparison=None, tags=None, traces=None):
-    comparison = {"enabled": True} if comparison is None else comparison
+    comparison = (
+        {"enabled": True, "compare_allowed_models": ["a", "b", "c"]}
+        if comparison is None
+        else comparison
+    )
     preamble = _PREAMBLE.format(
         config=str(tmp_path / "config.json"),
         comparison=comparison,
@@ -167,7 +171,7 @@ def test_compare_endpoint_can_be_switched_off(tmp_path):
 r = client.post("/v1/compare", json={"models": ["a", "b"], "messages": MESSAGES})
 emit({"status": r.status_code})
 """,
-        comparison={"enabled": True, "endpoint": False},
+        comparison={"enabled": True, "endpoint": False, "compare_allowed_models": ["a", "b"]},
     )
     assert out["status"] == 404
 
@@ -309,3 +313,49 @@ def test_a_relative_trace_dir_resolves_against_the_config_directory(tmp_path):
         {"traces": {"enabled": True, "trace_dir": "t"}}, str(tmp_path / "c.yaml")
     )
     assert manager.fine_tune_config.trace_dir == str(tmp_path / "t")
+
+
+def _compare(tmp_path, models, comparison, **body):
+    extra = "".join(f", {k!r}: {v!r}" for k, v in body.items())
+    return _run(
+        tmp_path,
+        f"""
+r = client.post("/v1/compare", json={{"models": {models!r}, "messages": MESSAGES{extra}}})
+emit({{"status": r.status_code, "hits": len(A.hits) + len(B.hits) + len(C.hits)}})
+""",
+        comparison=comparison,
+        tags=body_tags(body),
+    )
+
+
+def body_tags(body):
+    return {"a": ["local"], "b": ["local"], "c": ["cloud"]} if body.get("tier") else None
+
+
+def test_untiered_compare_with_an_unlisted_model_is_refused(tmp_path):
+    out = _compare(tmp_path, ["a", "c"], {"enabled": True, "compare_allowed_models": ["a", "b"]})
+    assert out == {"status": 400, "hits": 0}
+
+
+def test_untiered_compare_with_no_allow_list_is_refused(tmp_path):
+    assert _compare(tmp_path, ["a", "b"], {"enabled": True}) == {"status": 400, "hits": 0}
+
+
+def test_untiered_compare_with_listed_models_is_served(tmp_path):
+    out = _compare(tmp_path, ["a", "b"], {"enabled": True, "compare_allowed_models": ["a", "b"]})
+    assert out == {"status": 200, "hits": 2}
+
+
+def test_untiered_compare_accepts_models_from_a_profile(tmp_path):
+    out = _compare(tmp_path, "duo", {"enabled": True, "profiles": {"duo": ["b", "c"]}})
+    assert out == {"status": 200, "hits": 2}
+
+
+def test_tiered_compare_needs_no_allow_list(tmp_path):
+    out = _compare(tmp_path, ["a", "b"], {"enabled": True}, tier="default")
+    assert out == {"status": 200, "hits": 2}
+
+
+def test_opt_out_allows_any_endpoint_untiered(tmp_path):
+    out = _compare(tmp_path, ["a", "c"], {"enabled": True, "allow_untiered_compare": True})
+    assert out == {"status": 200, "hits": 2}

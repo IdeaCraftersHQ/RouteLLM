@@ -610,3 +610,31 @@ def test_offline_scoring_skips_failed_comparison_traces(ups, tmp_path):
     rows = [json.loads(line) for line in out.read_text().splitlines()]
     assert written == 2
     assert sorted(r["endpoint"] for r in rows) == ["a", "c"]
+
+
+def test_untiered_compare_opt_out_still_refuses_a_pay_endpoint(ups, tmp_path):
+    endpoints = {
+        "a": {"model": "openai/x", "api_base": ups["a"].base},
+        "p": {"model": "openai/y", "api_base": ups["b"].base, "pay": True},
+        "q": {"model": "openai/z", "api_base": ups["c"].base},
+    }
+    config = {
+        "endpoints": endpoints,
+        "tiers": {
+            "default": {"router": "pin_strong", "threshold": 0.0, "strong": "a", "weak": "q"}
+        },
+    }
+    controller = Controller(
+        routers=["random"],
+        endpoints=EndpointRegistry.from_config(config),
+        comparison_config=build_comparison_config(
+            {"comparison": {"enabled": True, "allow_untiered_compare": True}}
+        ),
+    )
+    with pytest.raises(ValueError, match="pay"):
+        asyncio.run(controller.comparison.compare(["a", "p"], {"messages": MESSAGES}))
+
+
+def test_allow_list_must_name_configured_endpoints(ups, tmp_path):
+    with pytest.raises(ValueError, match="ghost"):
+        build(ups, {"enabled": True, "compare_allowed_models": ["ghost"]}, tmp_path)
