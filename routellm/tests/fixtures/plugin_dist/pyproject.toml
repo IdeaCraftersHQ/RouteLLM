@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rllm-test-plugin"
+version = "0.0.1"
+description = "Test-only plugin registering every routellm entry-point group."
+
+[project.entry-points."routellm.decision_providers"]
+rllm_ok = "rllm_test_plugin.provider:make_provider"
+rllm_bad_labels = "rllm_test_plugin.provider:make_bad_provider"
+rllm_boom = "rllm_test_plugin.boom:factory"
+
+[project.entry-points."routellm.decision_recognizers"]
+rllm_word = "rllm_test_plugin.recognizer:make_recognizer"
+rllm_boom = "rllm_test_plugin.boom:factory"
+
+[project.entry-points."routellm.transforms"]
+rllm_tag = "rllm_test_plugin.transform:TagTransform"
+rllm_boom = "rllm_test_plugin.boom:factory"
+
+[tool.setuptools]
+packages = ["rllm_test_plugin"]
