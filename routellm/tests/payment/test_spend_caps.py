@@ -824,8 +824,8 @@ def test_the_server_hands_the_limits_to_both_seams():
         server.build_registry = (
             lambda file_config, origin: EndpointRegistry.from_config({CONFIG!r})
         )
-        server.load_config = lambda explicit=None: type(
-            "Loaded", (), {{"layers": [], "data": {{}}}}
+        server.load_config = lambda explicit=None, skip_user=None: type(
+            "Loaded", (), {{"layers": [], "chain": [], "data": {{}}, "resolve_path": staticmethod(lambda p: p)}}
         )()
 
         async def main():

@@ -126,7 +126,7 @@ def test_quality_manager_traces(tmp_path):
     from routellm.quality import FineTuneConfig, QualityManager
 
     trace_dir = str(tmp_path / "traces")
-    config = FineTuneConfig(enabled=True, trace_dir=trace_dir)
+    config = FineTuneConfig(enabled=True, trace_dir=trace_dir, capture_content=True)
     qm = QualityManager(fine_tune_config=config)
 
     prompt = "hello"
