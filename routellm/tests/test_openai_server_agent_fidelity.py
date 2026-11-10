@@ -346,6 +346,12 @@ server.CONTROLLER.quality_manager.record_trace = spy
 with client.stream("POST", "/v1/chat/completions",
                    json={{"model": "default", "messages": {_USER}, "stream": True}}) as r:
     sse(r)
+# The trace is written off the event loop, a moment after the stream ends.
+import time
+for _ in range(100):
+    if traces:
+        break
+    time.sleep(0.05)
 t = traces[0] if traces else None
 print(json.dumps({{"n": len(traces), "model": t and t[0],
                   "text": t and t[1]["choices"][0]["message"]["content"],

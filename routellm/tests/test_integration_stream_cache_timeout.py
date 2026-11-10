@@ -8,6 +8,7 @@ are threads on 127.0.0.1; nothing leaves the machine.
 
 import asyncio
 import os
+import threading
 import time
 
 import pytest
@@ -153,3 +154,28 @@ def test_tool_call_conversation_is_cached_under_the_whole_conversation(pair, tmp
     params = controller._cache_params(kwargs)
     assert params["_conversation"]
     assert controller.cache.get("one", "a", params) is not None
+
+
+def test_stream_end_does_not_wait_on_a_slow_trace_writer(pair, tmp_path):
+    a, b = pair
+    controller = _controller(tmp_path, a, b, cache=False)
+    recorded = threading.Event()
+
+    def slow_trace(*args, **kwargs):
+        time.sleep(1.5)
+        recorded.set()
+
+    controller.quality_manager.record_trace = slow_trace
+
+    async def go():
+        stream = await controller.acompletion(model="default", messages=_USER, stream=True)
+        started = time.monotonic()
+        chunks = [chunk async for chunk in stream]
+        return chunks, time.monotonic() - started
+
+    chunks, elapsed = asyncio.run(go())
+
+    assert chunks
+    assert elapsed < 0.75
+    # The write was not dropped: it finished before the loop shut down.
+    assert recorded.is_set()

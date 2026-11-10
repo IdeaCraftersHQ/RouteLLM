@@ -239,7 +239,7 @@ class Cache:
             return None
 
         key = self._get_key(prompt, model, params)
-        logger.debug(f"Cache: Checking for model={model} prompt='{prompt}' key={key}")
+        logger.debug(f"Cache: Checking for model={model} key={key}")
         conn = sqlite3.connect(self.config.db_path)
         cursor = conn.cursor()
 
@@ -258,7 +258,7 @@ class Cache:
 
         # 2. Try semantic match if enabled
         if self.config.semantic_enabled:
-            logger.debug(f"Cache: Attempting semantic match for '{prompt}'")
+            logger.debug("Cache: Attempting semantic match")
             prompt_emb = self._get_embedding(prompt)
             cursor.execute(
                 "SELECT response, embedding, created_at FROM completion_cache "

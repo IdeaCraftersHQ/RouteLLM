@@ -588,21 +588,64 @@ class ChatCompletionResponse(BaseModel):
     usage: UsageInfo
 
 
-async def stream_response(response) -> AsyncGenerator:
+def _has_images(messages: Any) -> bool:
+    """Whether any message carries an image part."""
+    if not isinstance(messages, list):
+        return False
+    return any(
+        isinstance(part, dict) and part.get("type") in ("image_url", "input_image")
+        for message in messages
+        if isinstance(message, dict) and isinstance(message.get("content"), list)
+        for part in message["content"]
+    )
+
+
+def request_summary(request: "ChatCompletionRequest") -> str:
+    """One log line describing a request, without any of its content.
+
+    Prompts are the user's data and stay out of the logs: the line holds
+    the model name, counts and flags only.
+    """
+    messages = request.messages
+    count = len(messages) if isinstance(messages, list) else 1
+    return (
+        f"Received request: model={request.model} messages={count} "
+        f"tools={bool(request.tools)} images={_has_images(messages)} "
+        f"stream={bool(request.stream)}"
+    )
+
+
+def _error_body(request_id: str) -> dict:
+    """The only thing a client learns of an upstream failure."""
+    return {
+        "message": f"Upstream request failed (request id {request_id})",
+        "type": "server_error",
+        "request_id": request_id,
+    }
+
+
+async def stream_response(response, request_id: str | None = None) -> AsyncGenerator:
     """Frame a chunk stream as server-sent events.
 
     A stream that fails after its first chunk has already sent a 200, so
     the status cannot carry the failure. An `error` event does, and the
     stream then ends without `[DONE]`: a clean terminator would let a
     client take a truncated answer for a complete one.
+
+    The event is generic: a message and a request id. The exception
+    itself (which can name the upstream and echo its text) is logged
+    server-side under the same id.
     """
+    request_id = request_id or shortuuid.uuid()
     try:
         async for chunk in response:
             yield f"data: {chunk.model_dump_json()}\n\n"
     except Exception as e:
-        logging.getLogger(__name__).error(f"Stream failed after its first chunk: {e!s}")
-        error = {"error": {"message": str(e) or type(e).__name__, "type": type(e).__name__}}
-        yield f"data: {json.dumps(error)}\n\n"
+        logging.getLogger(__name__).error(
+            f"Stream failed after its first chunk (request id {request_id}): "
+            f"{type(e).__name__}: {e!s}"
+        )
+        yield f"data: {json.dumps({'error': _error_body(request_id)})}\n\n"
         return
     finally:
         # A client that disconnects cancels this generator mid-stream;
@@ -650,7 +693,8 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
     carries it in the server logs only, since its chunks follow the SSE
     shape the client parses.
     """
-    logging.info(f"Received request: {request}")
+    request_id = shortuuid.uuid()
+    logging.info(f"{request_summary(request)} request_id={request_id}")
 
     # Only what the client actually sent is forwarded. `exclude_unset`
     # drops the fields the body never named, `exclude_none` drops the
@@ -673,6 +717,13 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
             ErrorResponse(message=str(e)).model_dump(),
             status_code=400,
         )
+    except Exception as e:
+        # Whatever an upstream raised can name it and echo its text: the
+        # client gets a generic message and an id; the detail stays here.
+        logging.getLogger(__name__).error(
+            f"Request failed (request id {request_id}): {type(e).__name__}: {e!s}"
+        )
+        return JSONResponse({"object": "error", **_error_body(request_id)}, status_code=502)
 
     logging.info(CONTROLLER.model_counts)
 
@@ -681,7 +732,9 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
     logging.info(f"Routing path: {path}")
 
     if request.stream:
-        return StreamingResponse(content=stream_response(res), media_type="text/event-stream")
+        return StreamingResponse(
+            content=stream_response(res, request_id), media_type="text/event-stream"
+        )
 
     body = res.model_dump()
     if path is not None:

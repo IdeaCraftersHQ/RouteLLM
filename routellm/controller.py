@@ -5,6 +5,7 @@ models based on prompt difficulty. Supports caching, resilience,
 quality management, and payment gateway integration.
 """
 
+import asyncio
 import logging
 import time
 import uuid
@@ -247,6 +248,9 @@ class Controller:
         self.api_base = api_base
         self.api_key = api_key
         self.model_counts = defaultdict(lambda: defaultdict(int))
+        # Stream traces being written off the event loop; held so a
+        # task is not garbage collected before it finishes.
+        self._trace_writes: set[asyncio.Future] = set()
         self.progress_bar = progress_bar
         self.middleware = middleware or []
         self.payment_gateway = payment_gateway
@@ -1108,6 +1112,12 @@ class Controller:
         SQLite cache keys, and prior entries for the same model go
         unread.
 
+        Streaming: with `stream=True` this returns the provider's stream
+        as it is. Unlike `acompletion`, it reads no first chunk, so a
+        leaf that fails on the first read is not replaced by its sibling,
+        and it records no trace. Streaming fallback and tracing hold only
+        on the async path (`acompletion`, and so the server).
+
         Parameters
         ----------
         router : str, optional
@@ -1268,28 +1278,52 @@ class Controller:
         trace needs the whole answer. A failed stream records nothing,
         since a partial answer is not one the quality data should learn
         from; the failure itself is logged.
+
+        Assembling the answer and writing the trace are blocking work,
+        so they run on the default executor: the stream's last chunk and
+        `[DONE]` do not wait on them. The write is tracked, never
+        dropped, and a failure is logged.
         """
         if error is not None:
             logger.warning(f"Model {model_name} failed mid-stream. Error: {error!s}")
             return
 
-        res = stream_chunk_builder(chunks, messages=messages)
-        if res is None:
-            return
+        # Taken now: how long the stream took, not how long the write waited.
+        latency_ms = int((time.monotonic() - started) * 1000)
+        chunks = list(chunks)
 
-        self.quality_manager.record_trace(
-            prompt,
-            model_name,
-            res.model_dump(),
-            {"is_canary": is_canary},
-            path=path,
-            request_model=request_name,
-            endpoint=model_name,
-            session_id=session_id,
-            latency_ms=int((time.monotonic() - started) * 1000),
-            area=area,
-        )
-        logger.info("routing path at stream end: %s -> %s", path, model_name)
+        def record():
+            res = stream_chunk_builder(chunks, messages=messages)
+            if res is None:
+                return
+            self.quality_manager.record_trace(
+                prompt,
+                model_name,
+                res.model_dump(),
+                {"is_canary": is_canary},
+                path=path,
+                request_model=request_name,
+                endpoint=model_name,
+                session_id=session_id,
+                latency_ms=latency_ms,
+                area=area,
+            )
+            logger.info("routing path at stream end: %s -> %s", path, model_name)
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            record()
+            return
+        write = loop.run_in_executor(None, record)
+        self._trace_writes.add(write)
+        write.add_done_callback(self._trace_written)
+
+    def _trace_written(self, write: asyncio.Future) -> None:
+        """Forget a finished stream-trace write, logging a failure."""
+        self._trace_writes.discard(write)
+        if not write.cancelled() and write.exception() is not None:
+            logger.error(f"Recording a stream trace failed: {write.exception()!s}")
 
     # Matches OpenAI's Async Chat Completions interface, but also supports optional router and threshold args
     async def acompletion(
