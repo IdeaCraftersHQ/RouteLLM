@@ -51,7 +51,9 @@ def ups():
         fake.server.server_close()
 
 
-def build(ups, comparison, tmp_path, *, tags=None, tiers=None, cache=False, traces=True, capture=False):
+def build(
+    ups, comparison, tmp_path, *, tags=None, tiers=None, cache=False, traces=True, capture=False
+):
     tags = tags or {}
     endpoints = {
         name: {

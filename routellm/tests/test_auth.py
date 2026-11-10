@@ -91,9 +91,7 @@ def test_clear_text_key_in_file_is_a_startup_error(tmp_path, field):
 
 
 def test_clear_text_in_hash_field_is_a_startup_error(tmp_path):
-    path = write_keys(
-        tmp_path / "k.yaml", f"keys:\n  - key_sha256: {KEY_A}\n    principal: x\n"
-    )
+    path = write_keys(tmp_path / "k.yaml", f"keys:\n  - key_sha256: {KEY_A}\n    principal: x\n")
     with pytest.raises(ConfigError) as exc:
         auth.load_keys_file(path)
     assert KEY_A not in str(exc.value)
@@ -339,8 +337,13 @@ def test_clear_text_key_file_stops_startup_without_echoing_it(tmp_path):
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
-        env={"PYTHONPATH": ".", "PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
-             "XDG_CONFIG_HOME": str(tmp_path / "xdg"), "LITELLM_LOCAL_MODEL_COST_MAP": "True"},
+        env={
+            "PYTHONPATH": ".",
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(tmp_path),
+            "XDG_CONFIG_HOME": str(tmp_path / "xdg"),
+            "LITELLM_LOCAL_MODEL_COST_MAP": "True",
+        },
         timeout=120,
     )
     assert result.returncode != 0

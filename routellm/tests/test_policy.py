@@ -66,7 +66,10 @@ def test_explicit_cache_kept_on_block_class():
     [
         (cls("a", treatment="shred", reach=["local"], tiers=["t"]), r"class 'a' treatment"),
         (cls("a", treatment="raw", reach=["mars"], tiers=["t"]), r"class 'a' reach: 'mars'"),
-        (cls("a", treatment="raw", reach=["local"], jur=["CA"], tiers=["t"]), r"class 'a' jur: 'CA'"),
+        (
+            cls("a", treatment="raw", reach=["local"], jur=["CA"], tiers=["t"]),
+            r"class 'a' jur: 'CA'",
+        ),
         (cls("a", treatment="raw", reach=["local"], jur=["usa"], tiers=["t"]), r"class 'a' jur"),
         (cls("a", treatment="raw", reach=["local"], tiers=["t"], cache="all"), r"class 'a' cache"),
         (cls("a", treatment="raw", reach=["local"], tiers=["t"], color="x"), r"class 'a' color"),
@@ -260,11 +263,7 @@ def _decision(classes):
 
 def _policy_for(names):
     return parse_policy(
-        {
-            "classes": {
-                n: {"treatment": "raw", "reach": ["local"], "tiers": ["t"]} for n in names
-            }
-        },
+        {"classes": {n: {"treatment": "raw", "reach": ["local"], "tiers": ["t"]} for n in names}},
         "p.yaml",
     )
 
