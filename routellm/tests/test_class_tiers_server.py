@@ -46,3 +46,24 @@ def test_a_leaf_outside_the_class_reach_stops_startup(tmp_path):
     err = result.stderr
     assert "class 'open'" in err and "tier 'default'" in err
     assert "leaf 'a'" in err and "'local'" in err
+
+
+@pytest.mark.slow
+def test_compare_naming_a_tier_outside_the_class_is_403(tmp_path):
+    out = _run(
+        tmp_path,
+        f"""
+h = H("{KEY_B}", **{{"X-Data-Class": "open"}})
+cmp = {{"messages": MESSAGES, "models": ["a", "b"]}}
+bad = client.post("/v1/compare", headers=h, json={{**cmp, "tier": "other"}})
+n0 = hits()
+ok = client.post("/v1/compare", headers=h, json={{**cmp, "tier": "default"}})
+emit({{"bad": [bad.status_code, bad.json()], "ok": ok.status_code, "before": n0}})
+""",
+        config_extra={"tiers": TIERS},
+    )
+    status, body = out["bad"]
+    assert status == 403
+    assert "'open'" in body["message"] and "'other'" in body["message"]
+    assert out["before"] == 0
+    assert out["ok"] == 200

@@ -28,6 +28,7 @@ decorated function in a module the subprocess imports.
 Nothing here leaves the loopback interface.
 """
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -54,7 +55,11 @@ CASE_MODULES = [
     "routellm.tests.privacy_cases_structural",
     "routellm.tests.privacy_cases_clients",
     "routellm.tests.privacy_cases_selectors",
+    "routellm.tests.privacy_cases_class_policy",
 ]
+
+#: The caller every class-policy case sends as, and its key.
+POLICY_KEY = "sk-suite-0000"
 
 
 #: Quality per leaf, so a selector tier orders deterministically. The
@@ -82,7 +87,7 @@ def endpoints(bases: dict[str, str]) -> dict:
             "model": f"openai/model-{name.replace('_', '-')}",
             "api_base": bases[name],
             "api_key_env": "FAKE_KEY",
-            "tags": tags,
+            "tags": [*tags, "jur:ca"],
             "strict": True,
             "extra": {"max_retries": 0},
             "capabilities": caps,
@@ -145,6 +150,55 @@ def tiers() -> dict:
     }
 
 
+def policy_tiers() -> dict:
+    """Extra tiers for the class-policy world, each a way a leaf could be reached.
+
+    None is in any class's tiers at startup (the startup walk would refuse
+    it); a case admits one to the class it attacks with `World.admit`, the
+    stand-in for a config change the startup check never saw.
+    """
+    pair = {"router": "pin_strong", "threshold": 0.0}
+    return {
+        "leaky_both": {**pair, "strong": "cloud_main", "weak": "gated_main"},
+        "leaky_forced": {**pair, "strong": "cloud_main", "weak": "local_audio"},
+        "leaky_forced_local": {**pair, "strong": "cloud_main", "weak": "local_main"},
+        "leaky_sibling": {**pair, "strong": "local_main", "weak": "cloud_main"},
+        "leaky_pool": {
+            **pair,
+            "strong": {"select": "tag:jur:ca", "order": "quality_asc", "pool": 3},
+            "weak": "cloud_main",
+        },
+    }
+
+
+def class_policy_files(tmp_path: Path) -> dict:
+    """Write the policy and the keys file; return the config keys naming them."""
+    leaky = list(policy_tiers())
+    policy = {
+        "classes": {
+            "private": {
+                "treatment": "block",
+                "reach": ["local"],
+                "jur": ["ca"],
+                "tiers": ["private", "private_audio", "private_selector", "default"],
+            },
+            "leaky": {"treatment": "raw", "reach": ["local", "cloud"], "tiers": leaky},
+            "general": {"treatment": "raw", "reach": ["local", "cloud"], "tiers": ["general"]},
+        },
+        "principals": {"suite": {"classes": ["private", "leaky", "general"]}},
+    }
+    (tmp_path / "policy.json").write_text(json.dumps(policy))
+    digest = hashlib.sha256(POLICY_KEY.encode()).hexdigest()
+    (tmp_path / "keys.yaml").write_text(
+        f'keys:\n  - key_sha256: "{digest}"\n    principal: suite\n'
+    )
+    return {
+        "policy": str(tmp_path / "policy.json"),
+        "auth": {"keys_file": str(tmp_path / "keys.yaml")},
+        "tiers": {**tiers(), **policy_tiers()},
+    }
+
+
 def build_config(bases: dict[str, str]) -> dict:
     return {"endpoints": endpoints(bases), "tiers": tiers()}
 
@@ -156,23 +210,30 @@ class Case:
     local: dict | None = field(default_factory=dict)  # leaf -> expected hits; None: use total
     local_total: int | None = None  # with local=None: hits across all local leaves
     reaches_off_host: bool = False  # the control: off-host leaves ARE expected to be hit
+    policy: bool = False  # runs in the class-policy world (see `run_cases`)
 
 
 CASES: dict[str, Case] = {}
 
 
-def case(name, status=None, local=None, total=None, reaches_off_host=False):
+def case(name, status=None, local=None, total=None, reaches_off_host=False, policy=False):
     """Register a case. `status` and `local` are what the test asserts.
 
     `local` maps a local leaf to its expected hit count; a leaf left out
     is expected at zero. `total` replaces it when the case cannot say
     which local leaf answers. Off-host leaves are expected at zero unless
-    the case is a control (`reaches_off_host=True`).
+    the case is a control (`reaches_off_host=True`). `policy=True` runs
+    it only in the class-policy world.
     """
 
     def deco(fn):
         CASES[name] = Case(
-            fn, status, None if total is not None else dict(local or {}), total, reaches_off_host
+            fn,
+            status,
+            None if total is not None else dict(local or {}),
+            total,
+            reaches_off_host,
+            policy,
         )
         return fn
 
@@ -182,12 +243,26 @@ def case(name, status=None, local=None, total=None, reaches_off_host=False):
 class World:
     """The fakes plus the live app, as a case sees them."""
 
-    def __init__(self, fakes, client, server):
+    def __init__(self, fakes, client, server, class_policy=False):
         self.fakes = fakes
         self.client = client
         self.server = server
+        self.class_policy = class_policy
+        self._admitted: list[tuple[str, str]] = []
+
+    @property
+    def headers(self) -> dict:
+        return {"Authorization": f"Bearer {POLICY_KEY}"} if self.class_policy else {}
+
+    def admit(self, data_class, tier):
+        """Add `tier` to a class's tiers after startup (undone by `reset`)."""
+        self.server.CONTROLLER.policy.classes[data_class].tiers.append(tier)
+        self._admitted.append((data_class, tier))
 
     def reset(self):
+        for data_class, tier in self._admitted:
+            self.server.CONTROLLER.policy.classes[data_class].tiers.remove(tier)
+        self._admitted.clear()
         for fake in self.fakes.values():
             fake.mode = "ok"
             fake.hits.clear()
@@ -200,13 +275,19 @@ class World:
         for name in names or LOCAL:
             self.fakes[name].mode = mode
 
-    def post(self, model, messages=None, **kw):
-        body = {"model": model, "messages": messages or TEXT, **kw}
-        return self.client.post("/v1/chat/completions", json=body)
+    def _headers(self, data_class):
+        return {**self.headers, **({"X-Data-Class": data_class} if data_class else {})}
 
-    def stream(self, model, messages=None, **kw):
+    def post(self, model, messages=None, data_class=None, **kw):
+        body = {"model": model, "messages": messages or TEXT, **kw}
+        return self.client.post(
+            "/v1/chat/completions", json=body, headers=self._headers(data_class)
+        )
+
+    def stream(self, model, messages=None, data_class=None, **kw):
         body = {"model": model, "messages": messages or TEXT, "stream": True, **kw}
-        with self.client.stream("POST", "/v1/chat/completions", json=body) as r:
+        headers = self._headers(data_class)
+        with self.client.stream("POST", "/v1/chat/completions", json=body, headers=headers) as r:
             events = [ln[6:] for ln in r.iter_lines() if ln.startswith("data: ")]
             return r.status_code, events
 
@@ -249,6 +330,11 @@ cfg = pf.build_config({{n: f.base for n, f in fakes.items()}})
 cfg.update(json.loads({extra!r}))
 open({config!r}, "w").write(json.dumps(cfg))
 sys.argv = ["x", "--config", {config!r}, "--routers", "random"]
+from routellm.routers.routers import ROUTER_CLS
+class _Pin:
+    def route(self, prompt, threshold, pair):
+        return pair.strong
+ROUTER_CLS["pin_strong"] = lambda **_: _Pin()
 for module in pf.CASE_MODULES:
     importlib.import_module(module)
 import routellm.openai_server as server
@@ -260,7 +346,7 @@ with TestClient(server.app, raise_server_exceptions=False) as client:
     for name, setting in json.loads({settings!r}).items():
         for key, value in setting.items():
             setattr(server.CONTROLLER.resilience.config, key, value)
-    world = pf.World(fakes, client, server)
+    world = pf.World(fakes, client, server, class_policy={policy!r})
     for name in {names!r}:
         world.reset()
         obs = pf.CASES[name].fn(world)
@@ -269,12 +355,16 @@ print("@@RESULT@@" + json.dumps(out))
 """
 
 
-def run_cases(tmp_path, names, extra_config=None, resilience=None):
+def run_cases(tmp_path, names, extra_config=None, resilience=None, class_policy=False):
     """Run the named cases in one subprocess; return {case: {obs, hits}}.
 
     `extra_config` is merged over the fixture config (top-level keys),
     `resilience` sets `ResilienceConfig` fields before the first request.
+    `class_policy` starts the app under a policy file and an auth key, with
+    the extra tiers of `policy_tiers`; cases then declare a class.
     """
+    if class_policy:
+        extra_config = {**class_policy_files(tmp_path), **(extra_config or {})}
     # Selector tiers consult the models.dev catalog on construction; an
     # empty snapshot keeps that off the network (tags need no catalog).
     catalog = tmp_path / "models_dev.json"
@@ -284,6 +374,7 @@ def run_cases(tmp_path, names, extra_config=None, resilience=None):
         extra=json.dumps(extra_config or {}),
         settings=json.dumps({"r": resilience or {}}),
         names=list(names),
+        policy=class_policy,
     )
     result = subprocess.run(
         [sys.executable, "-c", script],

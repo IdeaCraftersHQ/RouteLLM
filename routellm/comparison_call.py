@@ -26,6 +26,23 @@ class CallMixin:
     `registry`, `over_budget`, `_charge`, `_scorer`, `_scorer_failed`.
     """
 
+    def policy_reasons(self, models: list[str], reqs) -> dict[str, str]:
+        """Return `{endpoint: policy reason}` for every model the request's class may not use.
+
+        Empty without a loaded policy or a class on `reqs`. Asked of the
+        host, so a comparison target is held to the one check every
+        routed candidate passes.
+        """
+        reason_of = getattr(self.host, "_policy_reason", None)
+        if reason_of is None:
+            return {}
+        out: dict[str, str] = {}
+        for name in models:
+            reason = reason_of(name, reqs)
+            if reason is not None:
+                out[name] = reason
+        return out
+
     async def _one(
         self,
         name,
@@ -101,7 +118,10 @@ class CallMixin:
             try:
                 reason = can_serve(name, reqs)
             except Exception:
-                reason = None
+                # A check that cannot answer serves nothing for a classed
+                # request: the data class fails closed, a capability
+                # guess stays open as it always was.
+                reason = "policy" if getattr(reqs, "data_class", None) else None
             if reason:
                 result["error"] = f"unsupported: {reason}"
                 return result

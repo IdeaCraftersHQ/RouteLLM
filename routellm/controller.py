@@ -6,6 +6,7 @@ quality management, and payment gateway integration.
 """
 
 import asyncio
+import dataclasses
 import logging
 import time
 import uuid
@@ -26,7 +27,7 @@ from routellm.capabilities import (
     side_capabilities,
     usable_sibling,
 )
-from routellm.class_tiers import check_class_tiers, check_entry_tier
+from routellm.class_tiers import check_class_tiers, check_entry_tier, class_denial, route_error
 from routellm.comparison import ComparisonConfig, ComparisonManager
 from routellm.decision import DecisionRefused, set_decision
 from routellm.endpoints import EndpointRegistry, Selector
@@ -34,7 +35,7 @@ from routellm.hints import TYPESAFE_INSTALL_HINT
 from routellm.leaf_params import drop_kwargs, log_dropped
 from routellm.payment.gateway import PaymentGateway
 from routellm.payment.types import PaymentChallenge
-from routellm.policy import Policy
+from routellm.policy import Policy, PolicyDenied
 from routellm.quality import QualityManager
 from routellm.resilience import EndpointsCooling, Resilience, ResilienceConfig
 from routellm.routers.embeddings import configure_embeddings
@@ -48,7 +49,7 @@ from routellm.routing import (
 )
 from routellm.streaming import RoutedStream
 from routellm.strict import check_pair, check_strict_registry
-from routellm.traffic import TrafficManager
+from routellm.traffic import NoAllowedTarget, TrafficManager
 from routellm.types import Middleware, ModelPair
 
 logger = logging.getLogger(__name__)
@@ -472,16 +473,32 @@ class Controller:
         with ThreadPoolExecutor(max_workers=1) as pool:
             return pool.submit(asyncio.run, coro).result()
 
-    def _check_entry_tier(self, tier, declared_class, decision) -> None:
+    def _check_entry_tier(self, tier, declared_class, decision, reqs=None):
         """Refuse a tier the request's effective class may not enter.
 
         Runs after the decision step, so the class is the strictest of
         the declared one and whatever the step concluded; before any
         routing, so nothing is called for a refused request.
+
+        Returns
+        -------
+        Requirements or None
+            `reqs` carrying the effective class under a loaded policy,
+            which makes `_can_serve` hold every candidate to it; `reqs`
+            unchanged without one.
         """
-        if self.policy is not None:
-            effective = decision.data_class if decision is not None else declared_class
-            check_entry_tier(self.policy, tier, effective)
+        if self.policy is None:
+            return reqs
+        effective = decision.data_class if decision is not None else declared_class
+        check_entry_tier(self.policy, tier, effective)
+        if reqs is None:
+            return reqs
+        return dataclasses.replace(reqs, data_class=effective)
+
+    async def effective_class(self, kwargs, declared_class, conversation_id=None):
+        """Return the class a request is held to: the decision's, else the declared one."""
+        decision = await self._decide(kwargs, declared_class, conversation_id)
+        return decision.data_class if decision is not None else declared_class
 
     def _get_model_pair_for_prompt(self, prompt: str) -> ModelPair | None:
         """Get the model pair a middleware asks for, or None."""
@@ -519,7 +536,7 @@ class Controller:
         return None
 
     def _apply_intent_tier(
-        self, prompt: str, tier: str | None
+        self, prompt: str, tier: str | None, data_class: str | None = None
     ) -> tuple[str | None, str | None, str | None]:
         """Let a middleware choose the tier this request enters.
 
@@ -536,6 +553,10 @@ class Controller:
             The request's prompt.
         tier : str, optional
             Tier addressed by the model name, if any.
+        data_class : str, optional
+            The request's effective class under a policy. A tier the
+            class may not enter is not honoured, and is reported like
+            one the addressed tier passed over.
 
         Returns
         -------
@@ -569,6 +590,14 @@ class Controller:
                 chosen,
             )
             return tier, None, chosen
+
+        # A class never leaves its own tiers because a detector said so:
+        # the switch is ignored, the request stays where it entered.
+        if self.policy is not None and data_class is not None:
+            spec = self.policy.classes.get(data_class)
+            if spec is None or chosen not in spec.tiers:
+                logger.info("intent tier %s is outside class %s; ignored", chosen, data_class)
+                return tier, None, chosen
 
         return chosen, "intent", None
 
@@ -654,13 +683,34 @@ class Controller:
             return None
         return config
 
+    def _policy_reason(self, name: str, reqs) -> str | None:
+        """Return `policy:<class>:<reach|jur>` when the request's class may not use `name`.
+
+        None without a loaded policy or a class on the request. A tier
+        is judged by every leaf it can reach.
+        """
+        data_class = getattr(reqs, "data_class", None)
+        if self.policy is None or data_class is None:
+            return None
+        return class_denial(self.policy, self.endpoints, name, data_class)
+
     def _can_serve(self, name: str, reqs) -> str | None:
         """Return the first requirement `name` cannot serve, or None.
+
+        The request's data class comes first: under a policy, a leaf
+        outside the class's reach or jurisdiction (or a tier with such a
+        leaf) returns `policy:<class>:<reach|jur>`, whatever its
+        capabilities. This is the one check every tier side, forced
+        side, sibling, pool member, balancer target and comparison
+        target passes.
 
         A tier reads its cached union and is never strict: a tier is
         not an endpoint, and its union already assumes the best of
         every reachable leaf. See `capabilities.satisfies`.
         """
+        denial = self._policy_reason(name, reqs)
+        if denial is not None:
+            return denial
         caps = side_capabilities(name, self.endpoints, self._tier_caps, self._catalog_records)
         strict = not self.endpoints.has_tier(name) and bool(
             getattr(self.endpoints.resolve(name), "strict", False)
@@ -732,7 +782,9 @@ class Controller:
 
         tier_from = ignored_tier = None
         if overridden is None:
-            tier, tier_from, ignored_tier = self._apply_intent_tier(prompt, tier)
+            tier, tier_from, ignored_tier = self._apply_intent_tier(
+                prompt, tier, getattr(reqs, "data_class", None)
+            )
             overridden = self._get_model_pair_for_prompt(prompt)
             pair_from = "middleware"
 
@@ -745,7 +797,7 @@ class Controller:
                 self._run_router,
                 requirements=reqs,
                 check=self._can_serve,
-                error_cls=RoutingError,
+                error_cls=route_error(RoutingError),
             )
             if decision is not None:
                 path[0]["decision"] = decision.as_dict()
@@ -785,7 +837,7 @@ class Controller:
             str(pair.weak),
             reqs,
             self._can_serve,
-            RoutingError,
+            route_error(RoutingError),
         )
 
         if forced is None:
@@ -818,6 +870,7 @@ class Controller:
         path: list[dict[str, Any]],
         pair: ModelPair | None,
         reqs=None,
+        denied: list[str] | None = None,
     ) -> tuple[str, list[str], str | None, str | None]:
         """Build the fallback chain for one request.
 
@@ -838,6 +891,10 @@ class Controller:
         reqs : Requirements, optional
             What the request needs; a sibling that cannot serve it is
             dropped. See `capabilities.usable_sibling`.
+        denied : list[str], optional
+            Receives the `policy:` reason of every candidate dropped
+            for its class, so a walk that ends with none left can
+            refuse 403 instead of reporting an upstream error.
 
         Returns
         -------
@@ -846,8 +903,9 @@ class Controller:
             to try, the sibling endpoint itself, and the name it was
             written under.
         """
-        if self.quality_manager.should_canary():
-            model_to_use = self.quality_manager.canary_config.canary_model
+        canary = self.quality_manager.canary_config.canary_model
+        if self.quality_manager.should_canary() and self._walkable(canary, reqs, denied):
+            model_to_use = canary
         else:
             model_to_use = picked
 
@@ -857,36 +915,44 @@ class Controller:
 
         # A side backed by a candidate pool is walked to its end before
         # the other side is tried.
-        for name in self._pool_tail(path, picked, reqs):
+        for name in self._pool_tail(path, picked, reqs, denied):
             if name not in models_to_try:
                 models_to_try.append(name)
 
         found = sibling_of(path, self.endpoints, pair)
         sibling, reference = found if found is not None else (None, None)
 
-        if not self._walkable(sibling, reqs):
+        if not self._walkable(sibling, reqs, denied):
             sibling, reference = None, None
 
         if sibling is not None and sibling not in models_to_try:
             models_to_try.append(sibling)
-            for name in self._pool_tail(path, sibling, reqs):
+            for name in self._pool_tail(path, sibling, reqs, denied):
                 if name not in models_to_try:
                     models_to_try.append(name)
 
         return model_to_use, models_to_try, sibling, reference
 
-    def _walkable(self, name: str | None, reqs) -> bool:
+    def _walkable(self, name: str | None, reqs, denied: list[str] | None = None) -> bool:
         """Return whether `name` may be tried after the pick failed.
 
         The one check every fallback candidate, a sibling or a pool
         member, passes before it is added to the walk: a candidate that
         cannot serve the request is dropped. Policy that restricts which
         endpoints may be served (an egress gate, say) hooks in here, so
-        a pool cannot route around what the sibling is held to.
+        a pool cannot route around what the sibling is held to. A
+        candidate refused for its class is noted in `denied`.
         """
-        return usable_sibling(name, reqs, self._can_serve)
+        if usable_sibling(name, reqs, self._can_serve):
+            return True
+        reason = self._policy_reason(name, reqs) if name is not None else None
+        if reason is not None and denied is not None:
+            denied.append(reason)
+        return False
 
-    def _pool_tail(self, path: list[dict[str, Any]], head: str, reqs) -> list[str]:
+    def _pool_tail(
+        self, path: list[dict[str, Any]], head: str, reqs, denied: list[str] | None = None
+    ) -> list[str]:
         """Return the pool members after `head` on its tier side, serveable ones.
 
         Empty when the final level is a flat pair, `head` is not a tier
@@ -900,7 +966,7 @@ class Controller:
             if getattr(tier, side) != head:
                 continue
             pool = self.endpoints.pool_for(tier.name, side)
-            return [name for name in pool[1:] if self._walkable(name, reqs)]
+            return [name for name in pool[1:] if self._walkable(name, reqs, denied)]
         return []
 
     def _no_inner_retries(self, call_kwargs: dict[str, Any]) -> None:
@@ -925,15 +991,24 @@ class Controller:
         logger.info("endpoint %s is cooling until %.0f; skipped without a call", name, until)
         return True
 
-    def _raise_exhausted(self, names: list[str], last_err: Exception | None) -> None:
+    def _raise_exhausted(
+        self,
+        names: list[str],
+        last_err: Exception | None,
+        denied: list[str] | None = None,
+    ) -> None:
         """Raise what ends a walk that reached no answer.
 
-        Every candidate cooling is `EndpointsCooling`, naming them; any
-        other mix raises the last real error.
+        Every candidate cooling is `EndpointsCooling`, naming them. A
+        candidate dropped for the request's class means the walk could
+        not go on where it would have: `PolicyDenied`, never a move to
+        another class. Any other mix raises the last real error.
         """
         cooling = {n: u for n in names if (u := self.resilience.cooling(n)) is not None}
         if cooling and len(cooling) == len(set(names)):
             raise EndpointsCooling(cooling, self.resilience.clock())
+        if denied:
+            raise PolicyDenied(f"{denied[0]}: no endpoint this class may reach could answer")
         if last_err:
             raise last_err
 
@@ -1019,7 +1094,7 @@ class Controller:
         return self.endpoints.area_of(path[-1].get("tier"))
 
     def _endpoint_call_params(
-        self, model_name: str
+        self, model_name: str, reqs=None
     ) -> tuple[str, str | None, str | None, dict[str, Any]]:
         """Turn a model name into the parameters of one litellm call.
 
@@ -1032,6 +1107,9 @@ class Controller:
         ----------
         model_name : str
             Endpoint name, or a raw litellm model name.
+        reqs : Requirements, optional
+            The request's. With a data class, a load balancer selects
+            only among targets the class may use.
 
         Returns
         -------
@@ -1048,7 +1126,16 @@ class Controller:
         # argument when none is registered, which is indistinguishable
         # from a balancer whose target model equals the routed name.
         if model_name in self.traffic_manager.load_balancers:
-            model, balanced_key, balanced_base = self.traffic_manager.balance(model_name)
+            try:
+                model, balanced_key, balanced_base = self.traffic_manager.balance(
+                    model_name, self._balancer_filter(reqs)
+                )
+            except NoAllowedTarget:
+                targets = self.traffic_manager.load_balancers[model_name].config.endpoints
+                reason = self._policy_reason(targets[0].model, reqs) or "policy:?:reach"
+                raise PolicyDenied(
+                    f"{reason}: no target of load balancer {model_name!r} is allowed"
+                ) from None
             if self.endpoints.strict_registry:
                 # A target names a registry endpoint, so the call carries
                 # that endpoint's model, reach and params, never a raw
@@ -1065,6 +1152,12 @@ class Controller:
             **drop_kwargs(model, api_base, endpoint.drop_params, endpoint.extra),
         }
         return model, api_base, balanced_key or api_key, extra
+
+    def _balancer_filter(self, reqs):
+        """Return the target check a balancer applies, None when the class gates nothing."""
+        if self.policy is None or getattr(reqs, "data_class", None) is None:
+            return None
+        return lambda target: self._policy_reason(target, reqs) is None
 
     @staticmethod
     def _cache_params(kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -1471,11 +1564,11 @@ class Controller:
 
         # 0. Decide: label the request before anything routes it.
         decision = self._decide_sync(kwargs, declared_class, conversation_id)
-        self._check_entry_tier(tier, declared_class, decision)
+        reqs = self._check_entry_tier(tier, declared_class, decision, reqs)
 
         # 1. Route: traffic rules and middleware bypass the tree, a tier
         #    walks it, and a bare pair routes flat. Each side is checked
-        #    for fitness before its router runs.
+        #    for fitness and class before its router runs.
         routed_model, path, effective_pair = self._route(
             prompt, kwargs, tier, router, threshold, reqs, decision=decision
         )
@@ -1483,8 +1576,9 @@ class Controller:
 
         # 2. Apply canary testing and build the fallback chain, which
         #    stays inside the pair this request was routed against.
+        denied: list[str] = []
         model_to_use, models_to_try, sibling, sibling_reference = self._models_to_try(
-            routed_model, path, effective_pair, reqs
+            routed_model, path, effective_pair, reqs, denied
         )
         is_canary = model_to_use != routed_model
 
@@ -1524,7 +1618,7 @@ class Controller:
                 continue
 
             # 3. Resolve the endpoint, then apply load balancing
-            model, curr_api_base, curr_api_key, extra = self._endpoint_call_params(model_name)
+            model, curr_api_base, curr_api_key, extra = self._endpoint_call_params(model_name, reqs)
 
             def _call():
                 kwargs_copy = {**extra, **kwargs}
@@ -1591,7 +1685,7 @@ class Controller:
                 last_err = e
                 continue
 
-        self._raise_exhausted(models_to_try, last_err)
+        self._raise_exhausted(models_to_try, last_err, denied)
 
     def _stream_ended(
         self,
@@ -1715,11 +1809,11 @@ class Controller:
         # 0. Decide: label the request before anything routes it. Awaited,
         #    so a slow decision model never holds the event loop.
         decision = await self._decide(kwargs, declared_class, conversation_id)
-        self._check_entry_tier(tier, declared_class, decision)
+        reqs = self._check_entry_tier(tier, declared_class, decision, reqs)
 
         # 1. Route: traffic rules and middleware bypass the tree, a tier
         #    walks it, and a bare pair routes flat. Each side is checked
-        #    for fitness before its router runs.
+        #    for fitness and class before its router runs.
         routed_model, path, effective_pair = self._route(
             prompt, kwargs, tier, router, threshold, reqs, decision=decision
         )
@@ -1727,8 +1821,9 @@ class Controller:
 
         # 2. Apply canary testing and build the fallback chain, which
         #    stays inside the pair this request was routed against.
+        denied: list[str] = []
         model_to_use, models_to_try, sibling, sibling_reference = self._models_to_try(
-            routed_model, path, effective_pair, reqs
+            routed_model, path, effective_pair, reqs, denied
         )
         is_canary = model_to_use != routed_model
 
@@ -1768,7 +1863,11 @@ class Controller:
         primary_mark = None
         if self.comparison is not None:
             plan = self.comparison.plan(
-                header=compare, path=path, pair=effective_pair, picked=routed_model
+                header=compare,
+                path=path,
+                pair=effective_pair,
+                picked=routed_model,
+                reqs=reqs,
             )
             if plan is not None:
                 primary_mark = {"id": plan.id, "role": "primary"}
@@ -1789,7 +1888,7 @@ class Controller:
                 continue
 
             # 3. Resolve the endpoint, then apply load balancing
-            model, curr_api_base, curr_api_key, extra = self._endpoint_call_params(model_name)
+            model, curr_api_base, curr_api_key, extra = self._endpoint_call_params(model_name, reqs)
 
             async def _call(extra_headers=None):
                 kwargs_copy = {**extra, **kwargs}
@@ -1902,4 +2001,4 @@ class Controller:
                 last_err = e
                 continue
 
-        self._raise_exhausted(models_to_try, last_err)
+        self._raise_exhausted(models_to_try, last_err, denied)

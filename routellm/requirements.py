@@ -94,6 +94,12 @@ class Requirements:
         Estimated prompt tokens plus `max_tokens`, or None when no
         count could be made. Advisory: it is compared against an
         endpoint's context window only when both numbers are known.
+    data_class : str, optional
+        The request's effective data class under a loaded policy, set
+        by the controller once the class is final. A request that
+        carries one is never empty: every candidate is then checked
+        against the class's reach and jurisdiction. None (no policy)
+        leaves the request exactly as it was.
     """
 
     vision: bool = False
@@ -101,6 +107,7 @@ class Requirements:
     tools: bool = False
     structured_output: bool = False
     context_needed: int | None = None
+    data_class: str | None = None
 
     def is_empty(self) -> bool:
         """Return whether this request needs nothing in particular.
@@ -120,6 +127,7 @@ class Requirements:
             and not self.tools
             and not self.structured_output
             and self.context_needed is None
+            and self.data_class is None
         )
 
 

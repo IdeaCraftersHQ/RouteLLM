@@ -17,6 +17,14 @@ to the same rule for every class: traffic-rule pairs, the canary model,
 middleware pairs, and the targets of a load balancer keyed on a
 reachable leaf.
 
+At request time the same rule runs per candidate: `class_denial` answers
+for one name (a leaf, or a tier, all of whose leaves must pass), and
+`Controller._can_serve` asks it for every tier side, forced side,
+sibling, pool member, load-balancer target, canary, traffic-rule or
+middleware pair and comparison target. A denied candidate is never
+called and never replaced by another class or tier; when none is left
+the request is refused with `policy:<class>:<reach|jur>`.
+
 Nothing here reads a request body; the request path passes the class
 and the tier in.
 """
@@ -27,7 +35,66 @@ from typing import Any
 from routellm.policy import ClassPolicy, Policy, PolicyDenied, PolicyError
 from routellm.routing import sibling_of
 
-__all__ = ["check_class_tiers", "check_entry_tier", "reachable_leaves"]
+__all__ = [
+    "check_class_tiers",
+    "check_entry_tier",
+    "class_denial",
+    "reachable_leaves",
+    "route_error",
+]
+
+
+def class_denial(policy: Policy, registry, name: str, data_class: str | None) -> str | None:
+    """Return `policy:<class>:<reach|jur>` when `name` may not serve `data_class`.
+
+    Parameters
+    ----------
+    policy : Policy
+        The loaded policy.
+    registry : EndpointRegistry
+        The registry; a tier name is judged by every leaf it can reach.
+    name : str
+        An endpoint or tier name.
+    data_class : str, optional
+        The effective class. None, or a class the policy does not know
+        or vaults, serves nothing.
+
+    Returns
+    -------
+    str or None
+        The reason, naming the class and what it was refused on (reach
+        before jurisdiction); None when every leaf passes.
+    """
+    spec = policy.classes.get(data_class) if data_class is not None else None
+    if spec is None or spec.refuses_all:
+        return f"policy:{data_class}:reach"
+    if registry.has_tier(name):
+        leaves = list(reachable_leaves(registry, name))
+    else:
+        leaves = [name]
+    for leaf in leaves:
+        try:
+            endpoint = registry.resolve(leaf)
+        except Exception:
+            return f"policy:{data_class}:reach"
+        for _tag, allowed in _offending(endpoint, spec):
+            return f"policy:{data_class}:{allowed.split()[0]}"
+    return None
+
+
+def route_error(plain: type[Exception]):
+    """Return a factory for the error a failed candidate check raises.
+
+    A message carrying a `policy:` reason becomes `PolicyDenied` (403),
+    anything else is `plain` (a capability the side cannot serve).
+    """
+
+    def make(message: str) -> Exception:
+        if "policy:" in message:
+            return PolicyDenied(message)
+        return plain(message)
+
+    return make
 
 
 def check_entry_tier(policy: Policy, tier: str | None, data_class: str | None) -> None:

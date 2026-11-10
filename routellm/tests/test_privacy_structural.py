@@ -20,7 +20,8 @@ for _module in CASE_MODULES:
     importlib.import_module(_module)
 
 BREAKER = ["breaker_open_on_every_local_leaf"]
-BATCH = [n for n in CASES if n not in BREAKER]
+BATCH = [n for n in CASES if n not in BREAKER and not CASES[n].policy]
+POLICY_BATCH = [n for n in CASES if CASES[n].policy]
 
 
 @pytest.fixture(scope="module")
@@ -35,6 +36,26 @@ def breaker_results(tmp_path_factory):
         BREAKER,
         resilience={"cb_fail_max": 1, "cb_fail_wait_ms": 600000},
     )
+
+
+@pytest.fixture(scope="module")
+def policy_results(tmp_path_factory):
+    return pf.run_cases(tmp_path_factory.mktemp("privacy-policy"), POLICY_BATCH, class_policy=True)
+
+
+@pytest.mark.parametrize("name", POLICY_BATCH)
+def test_a_class_policy_deny_is_a_403_and_never_a_downgrade(name, policy_results):
+    check(name, policy_results[name])
+
+
+def test_class_policy_denials_name_the_class_and_the_reason(policy_results):
+    for name in (
+        "policy_deny_is_403_and_never_downgrades_to_local",
+        "policy_forced_side_onto_a_cloud_leaf_is_403",
+        "policy_cloud_sibling_is_never_called",
+        "policy_denied_pool_members_are_never_called",
+    ):
+        assert "policy:private:reach" in policy_results[name]["obs"]["message"], name
 
 
 @pytest.mark.parametrize("name", BATCH)

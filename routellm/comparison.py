@@ -45,12 +45,14 @@ by their own cost.
 
 import asyncio
 import copy
+import dataclasses
 import logging
 import random
 import secrets
 import time
 from typing import Any
 
+from routellm.class_tiers import check_entry_tier
 from routellm.comparison_call import ROLE_CANDIDATE, ROLE_PRIMARY, ROLE_SHADOW, CallMixin
 from routellm.comparison_config import (
     ComparisonConfig,
@@ -63,6 +65,7 @@ from routellm.comparison_config import (
     tier_is_local_only,
     validate_config,
 )
+from routellm.policy import PolicyDenied
 from routellm.transcription import LOCAL_TAG
 
 __all__ = [
@@ -171,6 +174,7 @@ class ComparisonManager(CallMixin):
         path: list[dict] | None,
         pair,
         picked: str,
+        reqs=None,
     ) -> Plan | None:
         """Decide whether this request is shadowed, and to which models.
 
@@ -188,6 +192,10 @@ class ComparisonManager(CallMixin):
             The flat pair, when the request was routed flat.
         picked : str
             The endpoint the primary was routed to; never shadowed.
+        reqs : Requirements, optional
+            The request's; with a data class, a target the class may
+            not use is dropped before anything is called, and noted in
+            the primary's path as `comparison_denied`.
 
         Returns
         -------
@@ -206,6 +214,21 @@ class ComparisonManager(CallMixin):
             trigger, experiment, models = self._from_config(tier)
         if not models:
             return None
+
+        # The class gate comes first, so a target it refuses is recorded
+        # as refused rather than as whatever else would have dropped it.
+        candidates = [
+            m for m in dict.fromkeys(models) if m != picked and m in self.registry.names()
+        ]
+        denied = self.policy_reasons(candidates, reqs)
+        if denied:
+            for name, reason in denied.items():
+                logger.warning("comparison skips %s: %s", name, reason)
+            if path:
+                path[0].setdefault("comparison_denied", []).extend(
+                    {"endpoint": name, "reason": reason} for name, reason in denied.items()
+                )
+            models = [m for m in models if m not in denied]
 
         models = self._filter(models, picked, local_only)
         if not models:
@@ -357,6 +380,7 @@ class ComparisonManager(CallMixin):
         tier: str | None = None,
         measure_ttft: bool | None = None,
         operator: bool = False,
+        data_class: str | None = None,
     ) -> dict[str, Any]:
         """Run every model on one request and return the side-by-side results.
 
@@ -377,7 +401,12 @@ class ComparisonManager(CallMixin):
             Stream upstream to measure TTFT; the config default if None.
         operator : bool, optional
             The caller is the operator (the replay CLI), not a client,
-            so the untiered allow-list does not apply.
+            so the untiered allow-list does not apply. With no
+            `data_class` the operator's run is not class-gated either.
+        data_class : str, optional
+            The request's effective class. Under a loaded policy it is
+            required for a client request: the named `tier` must be one
+            of its tiers, and every model must be one it may use.
 
         Raises
         ------
@@ -385,6 +414,9 @@ class ComparisonManager(CallMixin):
             On an unknown model, too many models, a privacy breach, or
             an untiered request naming a model the operator did not
             allow-list.
+        PolicyDenied
+            Under a policy, if the class may not enter `tier` or may not
+            use one of the models. Nothing is called.
         """
         names, local_only = self.check_models(models, tier)
         if tier is None and not operator:
@@ -395,6 +427,7 @@ class ComparisonManager(CallMixin):
         messages = kwargs["messages"]
         prompt = requirements_module._prompt_text(messages)
         reqs = requirements_module.derive(messages, kwargs, None)
+        reqs = self._gate(reqs, names, tier, data_class, operator)
         plan = Plan(names, "compare", None, tier, local_only)
         results = await asyncio.gather(
             *(
@@ -416,6 +449,20 @@ class ComparisonManager(CallMixin):
             )
         )
         return {"object": "comparison", "id": plan.id, "results": list(results)}
+
+    def _gate(self, reqs, names: list[str], tier: str | None, data_class, operator: bool):
+        """Hold an explicit comparison to the class policy; return `reqs` carrying the class."""
+        policy = getattr(self.host, "policy", None)
+        if policy is None or (operator and data_class is None):
+            return reqs
+        if tier is not None or data_class is None:
+            check_entry_tier(policy, tier, data_class)
+        reqs = dataclasses.replace(reqs, data_class=data_class)
+        denied = self.policy_reasons(names, reqs)
+        if denied:
+            name, reason = next(iter(denied.items()))
+            raise PolicyDenied(f"{reason}: {name!r} may not receive this request")
+        return reqs
 
     def _require_allowed(self, names: list[str]) -> None:
         """Refuse an untiered request for models the operator did not list."""
