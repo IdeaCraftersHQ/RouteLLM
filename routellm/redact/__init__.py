@@ -22,21 +22,37 @@ Offline: no call here touches the network. See docs/redact.md.
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from routellm.redact.placeholders import (
+    MappingError,
+    MappingExpired,
+    RedactContext,
+    RedactError,
+    Redactor,
+    split_incomplete,
+)
 from routellm.redact.recognizers import (
     LANGUAGES,
     Span,
     analyze_patterns,
     compile_client_id_patterns,
 )
+from routellm.redact.tokens import TokenStore
 
 __all__ = [
     "LANGUAGES",
+    "MappingError",
+    "MappingExpired",
+    "RedactContext",
+    "RedactError",
     "RedactUnavailable",
+    "Redactor",
     "Span",
+    "TokenStore",
     "analyze",
     "analyze_patterns",
     "build_analyzer",
     "compile_client_id_patterns",
+    "split_incomplete",
 ]
 
 _cache: dict[tuple, Any] = {}

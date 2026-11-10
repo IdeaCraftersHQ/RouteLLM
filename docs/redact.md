@@ -79,6 +79,57 @@ build_analyzer({"client_id_patterns": [...]}).analyze(text, "fr")  # Span object
 `analyze` builds the engine on first use and reuses it per configuration;
 building loads the models, which takes seconds.
 
+## Reversible placeholders
+
+`Redactor` swaps spans for `[[CATEGORY_n]]` and puts the values back on
+the way return. Pure Python: it takes spans from `analyze` (needs the
+extra) or from any `analyze(text, language)` you pass in.
+
+```python
+from routellm.redact import RedactContext, Redactor, TokenStore
+
+redactor = Redactor(TokenStore("/var/lib/routellm/tokens.db"))
+ctx = RedactContext(principal="team-a", request_id="r1", language="fr")
+text, mapping_id = redactor.redact("Écrire à Marie Gagnon", ctx)
+# "Écrire à [[PERSON_1]]"
+redactor.restore(model_reply, mapping_id, ctx)
+```
+
+- Placeholder: `[[` + category upper-cased + `_` + number + `]]`. Same
+  value, same placeholder within the scope; matching is exact, so
+  `Jean` and `jean` are two values and each restores as written.
+- Scope: one request by default. Numbers are never reused for a
+  principal, so two requests cannot be linked through their placeholders.
+  `Redactor(..., stable_across_requests=True)` scopes to the conversation
+  (`RedactContext.conversation_id` required): the same value keeps its
+  placeholder for as long as the mapping lives.
+- Text already shaped like a placeholder (`[[PERSON_1]]`, `[[ person_1 ]]`)
+  is reserved: never assigned, never restored. If a mapping that already
+  exists would collide with it, `redact` raises `RedactError`.
+- `restore` is one pass. It forgives case and spaces inside the brackets.
+  Anything else a model might do (`[[PERSON_1`, `PERSON_1]]`, a changed
+  number) is left as written, never guessed. A mapping that is unknown,
+  expired or belongs to another principal, request or conversation raises
+  `MappingError` / `MappingExpired`; no text is returned.
+- `split_incomplete(chunk)` -> `(safe, pending)`: hold `pending` (a
+  trailing `[[PERS`) until the next stream chunk.
+
+### Token store
+
+`TokenStore(path, key=None, ttl_s=86400)`: SQLite on the gateway host,
+read by nothing but `restore`. Never logged, traced, cached, audited or
+sent upstream.
+
+- Directory 0700, database and key file 0600 (a looser existing file is
+  tightened).
+- Values are found by `HMAC-SHA256(gateway key, scope || value)`; the
+  key is `<path>.key`, generated on first use, or passed in.
+- The values themselves are stored in the clear, as the response cache
+  stores prompts: the file mode is the protection. Put the directory on
+  an encrypted volume if that is not enough.
+- A mapping and each token expire `ttl_s` after creation / last use;
+  expired rows are purged on the next write.
+
 ## Licences
 
 | Component | Version | Licence |
