@@ -287,6 +287,6 @@ def test_split_terms_routes_each_key_to_its_bucket():
         "tag:local vision:true context:>=1000 provider:openai"
     )
 
-    assert tags == ["local"]
+    assert [(t.any_of, t.negated) for t in tags] == [(("local",), False)]
     assert capability_terms == ["vision:true", "context:>=1000"]
     assert query == "provider:openai"

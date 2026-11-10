@@ -134,7 +134,8 @@ class Selector(BaseModel):
     ----------
     select : str
         Space-separated terms, all ANDed. `tag:<label>` matches an
-        endpoint's own tags; every other `key:value` term is a
+        endpoint's own tags, `!tag:<label>` excludes it, and
+        `tag:<a>|<b>` matches any alternative; every other `key:value` term is a
         models.dev catalog term.
     order : str
         Which matching endpoint wins, one of `SelectorOrder`.

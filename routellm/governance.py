@@ -15,6 +15,7 @@ than silently widening a selector.
 """
 
 import re
+from dataclasses import dataclass
 
 from routellm.transcription import LOCAL_TAG
 
@@ -22,10 +23,13 @@ __all__ = [
     "BUILTIN_NAMESPACES",
     "JUR_NAMESPACE",
     "REACH_TAGS",
+    "TagTerm",
     "check_namespaces",
     "check_tag_namespaces_config",
+    "check_tag_term",
     "parse_jur",
     "parse_reach",
+    "parse_tag_term",
     "split_tag",
 ]
 
@@ -111,3 +115,71 @@ def check_tag_namespaces_config(raw: object) -> frozenset[str]:
         if item in REACH_TAGS:
             raise ValueError(f"`tag_namespaces:` entry {item!r} collides with a reach tag.")
     return BUILTIN_NAMESPACES | frozenset(raw)
+
+
+@dataclass(frozen=True)
+class TagTerm:
+    """One `tag:` selector term.
+
+    `any_of` holds the alternatives (one for a plain `tag:x`); the term
+    holds for an endpoint carrying at least one. `negated` flips it, so
+    `!tag:a|b` means carrying neither.
+    """
+
+    any_of: tuple[str, ...]
+    negated: bool = False
+
+    def matches(self, tags: "list[str] | set[str] | frozenset[str]") -> bool:
+        hit = any(alt in tags for alt in self.any_of)
+        return hit != self.negated
+
+
+def parse_tag_term(term: str, select: str = "") -> TagTerm:
+    """Parse `tag:<a>[|<b>...]` or `!tag:<a>[|<b>...]`.
+
+    Raises
+    ------
+    ValueError
+        On an empty label or alternative, or on alternatives that share
+        no namespace and are not all reach labels. A malformed term
+        never degrades to a match-all.
+    """
+    where = f"Selector term {term!r}" + (f" in {select!r}" if select else "")
+    negated = term.startswith("!")
+    body = term[1:] if negated else term
+    if not body.startswith("tag:"):
+        raise ValueError(f"{where}: `!` negates `tag:` terms only.")
+    alts = tuple(body[len("tag:") :].split("|"))
+    if any(not alt for alt in alts):
+        raise ValueError(f"{where}: empty tag label or alternative.")
+    if len(alts) > 1:
+        spaces = {(split_tag(a) or (None,))[0] for a in alts}
+        all_reach = all(a in REACH_TAGS for a in alts)
+        if not all_reach and (len(spaces) != 1 or None in spaces):
+            raise ValueError(
+                f"{where}: `|` alternatives must share one namespace "
+                "(e.g. `jur:ca|jur:fr`) or all be reach labels (`local|vpn|cloud`)."
+            )
+    for alt in alts:
+        parts = split_tag(alt)
+        if parts is not None and not parts[1]:
+            raise ValueError(f"{where}: empty value in {alt!r}.")
+    return TagTerm(alts, negated)
+
+
+def check_tag_term(term: TagTerm, known: frozenset[str], select: str = "") -> None:
+    """Refuse a term naming an unknown namespace.
+
+    A negated or alternative term with a typo would widen the match; a
+    plain positive one would silently match nothing, so it is refused
+    too, as endpoint tags are.
+    """
+    for alt in term.any_of:
+        parts = split_tag(alt)
+        if parts is not None and parts[0] not in known:
+            raise ValueError(
+                f"Selector tag {alt!r}"
+                + (f" in {select!r}" if select else "")
+                + f": unknown tag namespace {parts[0]!r} "
+                f"(known: {', '.join(sorted(known))})."
+            )

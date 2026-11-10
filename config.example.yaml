@@ -245,6 +245,14 @@ tiers:
 #   threshold: 0.12
 #   strong: {select: "tool_call:true reasoning:true", order: quality_desc}
 #   weak: {select: "tag:local", order: cost_asc}
+#
+# `tag:` terms take `!` (must not carry) and `|` (carries at least one):
+#   {select: "!tag:cloud"}               anything but cloud
+#   {select: "tag:jur:ca|jur:fr"}        either jurisdiction
+#   {select: "tag:vpn !tag:jur:fr"}      vpn, not in fr
+# `|` alternatives share one namespace or are all reach labels
+# (`local|vpn|cloud`); anything else, or an unknown namespace in any
+# `tag:` term, fails at startup.
 
 # `free:true` keeps endpoints the catalog prices at 0 for input and output
 # (unpriced or uncatalogued ones are not free). `pool: N` keeps the best N
