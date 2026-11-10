@@ -106,7 +106,7 @@ pip install -e ".[serve]"
 
 | Extra | Adds | Needed for |
 |-------|------|------------|
-| `serve` | fastapi, uvicorn | the OpenAI-compatible server |
+| `serve` | fastapi, uvicorn, `mcp` | the OpenAI-compatible server (`mcp` is imported by litellm on any request carrying `tools`) |
 | `ml` | torch, transformers, datasets, huggingface_hub | the `mf`, `bert`, `causal_llm` and `sw_ranking` routers; calibration |
 | `eval` | matplotlib, pandarallel, sglang, tiktoken, psutil | the evaluation scripts |
 | `pairing` | `hop-top-aim` (models.dev client) | policy-based tier selectors |
@@ -122,6 +122,9 @@ pip install "routellm[serve,ml]"
 
 If you installed the previous default (which bundled torch), add `ml` to keep
 the model-backed routers.
+
+Supported litellm versions: `>=1.106.4,<1.109`. CI runs the suite on the oldest
+and the newest version in that range.
 
 **Policy-based pairing (optional)**
 

@@ -12,17 +12,32 @@ classifiers = ["Programming Language :: Python :: 3"]
 dependencies = [
 	'pyyaml',
 	'pydantic',
-	'numpy<2',
+	# No upper bound, deliberately. The old `numpy<2` cap is the only
+	# thing in this tree that pinned it; the suite passes under numpy 2.
+	# The cap also broke the `ml` extra: `datasets` pulls `pyarrow>=21`
+	# with no ceiling, pyarrow 26 refuses to import under numpy 1.x
+	# ("requires NumPy 2.0 or newer"), and pyarrow does not declare
+	# numpy in its metadata, so the resolver happily built an
+	# environment that fails at import.
+	'numpy',
 	'pandas',
 	'scikit-learn',
 	'tqdm',
 	'openai',
-	'litellm',
+	# Tested range: the lower bound is the oldest version the suite was
+	# verified against, the upper bound the first minor not yet verified.
+	# CI runs both ends (.github/workflows/tests.yml); move the two
+	# together.
+	'litellm>=1.106.4,<1.109',
 	'x402[evm]>=2.0.0'
 ]
 
 [project.optional-dependencies]
-serve = ["fastapi", "shortuuid", "uvicorn"]
+# `mcp`: litellm's OpenAI path imports `mcp.types` on any request that
+# carries `tools`, and litellm does not declare it. Vetted at 2.3.0
+# (MIT, released 2026-10-02, official modelcontextprotocol/python-sdk,
+# no advisories on PyPI).
+serve = ["fastapi", "shortuuid", "uvicorn", "mcp>=2.3.0,<3"]
 # The `bert`, `mf`, `causal_llm` and `sw_ranking` routers run a model.
 # The `random` router, threshold routing over config tiers and the
 # server need none of it, so none of it is a core dependency.
