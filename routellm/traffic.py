@@ -52,6 +52,10 @@ class LoadBalancerConfig(BaseModel):
     endpoints: list[LoadBalancerEndpoint]
 
 
+class NoAllowedTarget(ValueError):
+    """Every target of a load balancer was refused by the caller's check."""
+
+
 class LoadBalancer:
     """Load balancer for distributing requests across endpoints.
 
@@ -69,8 +73,14 @@ class LoadBalancer:
         self.config = config
         self._current_index = 0
 
-    def select(self) -> LoadBalancerEndpoint:
+    def select(self, allowed=None) -> LoadBalancerEndpoint:
         """Select endpoint based on configured strategy.
+
+        Parameters
+        ----------
+        allowed : callable, optional
+            `(model) -> bool`. A target it refuses is never selected,
+            whatever the strategy; the round-robin index moves past it.
 
         Returns
         -------
@@ -81,26 +91,35 @@ class LoadBalancer:
         ------
         ValueError
             If no endpoints are configured.
+        NoAllowedTarget
+            If `allowed` refuses every endpoint.
         """
         if not self.config.endpoints:
             raise ValueError("No endpoints configured for load balancer")
 
+        pool = self.config.endpoints
+        if allowed is not None:
+            pool = [e for e in pool if allowed(e.model)]
+            if not pool:
+                raise NoAllowedTarget("no load balancer target is allowed")
+
         if self.config.strategy == "weighted":
-            total_weight = sum(e.weight for e in self.config.endpoints)
+            total_weight = sum(e.weight for e in pool)
             r = random.uniform(0, total_weight)
             upto = 0
-            for e in self.config.endpoints:
+            for e in pool:
                 if upto + e.weight >= r:
                     return e
                 upto += e.weight
         elif self.config.strategy == "round-robin":
-            print(f"[LB] select round-robin current_index={self._current_index}")
-            e = self.config.endpoints[self._current_index]
-            self._current_index = (self._current_index + 1) % len(self.config.endpoints)
-            print(f"[LB] select result={e.model} next_index={self._current_index}")
-            return e
+            size = len(self.config.endpoints)
+            for _ in range(size):
+                e = self.config.endpoints[self._current_index]
+                self._current_index = (self._current_index + 1) % size
+                if e in pool:
+                    return e
 
-        return self.config.endpoints[0]
+        return pool[0]
 
 
 class TrafficRule(BaseModel):
@@ -145,9 +164,12 @@ class TrafficManager:
 
         return None
 
-    def balance(self, model_name: str) -> tuple[str, str | None, str | None]:
-        """Return (model, api_key, api_base) if a load balancer exists for this model."""
+    def balance(self, model_name: str, allowed=None) -> tuple[str, str | None, str | None]:
+        """Return (model, api_key, api_base) if a load balancer exists for this model.
+
+        `allowed` is passed to `LoadBalancer.select`.
+        """
         if model_name in self.load_balancers:
-            endpoint = self.load_balancers[model_name].select()
+            endpoint = self.load_balancers[model_name].select(allowed)
             return endpoint.model, endpoint.api_key, endpoint.api_base
         return model_name, None, None

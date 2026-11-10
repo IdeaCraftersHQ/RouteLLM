@@ -1011,7 +1011,7 @@ async def create_comparison(request: CompareRequest, http_request: Request):
         )
 
     try:
-        _declare(request, http_request)
+        declared = _declare(request, http_request)
     except RequestClassRefusal as e:
         return _class_refusal(e)
 
@@ -1021,12 +1021,20 @@ async def create_comparison(request: CompareRequest, http_request: Request):
 
     request_id = shortuuid.uuid()
     try:
+        # The class every target is held to: the decision step's when one
+        # is configured, else the declared one.
+        data_class = await CONTROLLER.effective_class(forwarded, declared.data_class)
         body = await manager.compare(
             request.models,
             forwarded,
             tier=request.tier,
             measure_ttft=request.measure_ttft,
+            data_class=data_class,
         )
+    except PolicyDenied as e:
+        return JSONResponse(ErrorResponse(message=str(e)).model_dump(), status_code=e.status)
+    except RoutingError as e:
+        return JSONResponse(ErrorResponse(message=str(e)).model_dump(), status_code=400)
     except ValueError as e:
         return JSONResponse(ErrorResponse(message=str(e)).model_dump(), status_code=400)
     except Exception as e:

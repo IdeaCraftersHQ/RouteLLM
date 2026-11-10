@@ -358,6 +358,11 @@ principals:
 
 `routellm.class_tiers` holds both (`check_entry_tier`, `check_class_tiers`); `PolicyDenied` (status 403) is what the request path raises.
 
+**Every candidate, every path.** Under a policy the same reach and `jur` rule is applied again to each endpoint a request could be sent to, at request time (`Controller._can_serve`, through `routellm.class_tiers.class_denial`): tier sides (a tier-valued side passes only if every leaf under it does), a side forced by capabilities or by the class, the fallback sibling, candidate-pool members, load-balancer targets, the canary model, traffic-rule and middleware pairs, and every comparison target. A denied candidate is never called and is never replaced by another class or tier: when none is left the request fails `403` with the reason `policy:<class>:<reach|jur>`. A sibling dropped for its class after the primary failed upstream ends the same way, with `403` rather than the upstream error. Nothing changes without a policy, or for a class that may reach the endpoint.
+
+- **Comparison**: a shadow target the request's class may not use is dropped before anything is called and listed in the primary's path entry as `comparison_denied` (`endpoint`, `reason`). `POST /v1/compare` refuses with `403` when the class may not enter the named `tier` or may not use any listed model, and calls nothing. The class is the decision classifier's when one is configured, else the declared one; under a policy a client request without one is refused. The operator's replay run, which declares no class, is not class-gated.
+- **Intent tier switch**: a tier an intent maps to that is not in the class's `tiers` is ignored, with no error: the request stays in the tier it entered, and the path entry records `intent_ignored` with the tier named. Intent tiers a class may enter are walked at startup like any other allowed tier.
+
 #### Request data class and operation
 
 A caller declares what it sends, in either of:
