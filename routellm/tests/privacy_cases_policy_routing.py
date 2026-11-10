@@ -221,3 +221,22 @@ def aux_detector_control(w):
     for middleware in w.server.CONTROLLER.middleware:
         middleware.intent_cache.clear()
     return _status(w.post(ENTRY, data_class="general", headers=_project(OPEN_PROJECT)))
+
+
+@case(
+    "route_a_floor_raised_request_is_never_served_from_the_declared_class_cache",
+    200,
+    {"local_main": 2},
+    route=True,
+)
+def floor_raised_cache(w):
+    # Declared general (cache: exact) under the default policy, whose floor
+    # is private (block): the effective class decides the cache, so the
+    # second identical request is not served from an entry the first stored.
+    cache = w.server.CONTROLLER.cache.config
+    cache.enabled = True
+    try:
+        statuses = [w.post(ENTRY, data_class="general").status_code for _ in range(2)]
+    finally:
+        cache.enabled = False
+    return {"status": max(statuses)}

@@ -303,6 +303,7 @@ def class_policy_files(tmp_path: Path, route: bool = False) -> dict:
         policy["classes"] = {
             "general": {
                 "treatment": "raw",
+                "cache": "exact",
                 "reach": ["local", "cloud"],
                 "tiers": ["general", "general_local"],
             },
