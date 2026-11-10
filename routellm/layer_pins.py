@@ -13,8 +13,9 @@ The rules, applied to every non-system layer as it is merged:
 * When the system layer sets a `policy:`, these are pinned too: the keys
   in `PINNED_KEYS`, and the governance tags of every endpoint, meaning
   the reach labels (`local`, `vpn`, `cloud`) and every namespaced tag
-  (`jur:ca`, `team:x`). A higher layer may not add, remove or change
-  them on any endpoint, including one it defines itself. Plain tags,
+  (`jur:ca`, `team:x`), and each endpoint's `allow_public_base`. A
+  higher layer may not add, remove or change them on any endpoint,
+  including one it defines itself. Plain tags,
   every other endpoint key and deleting an endpoint outright stay
   mergeable. An endpoint a higher layer adds with no governance tag is
   allowed; carrying none, no policy class can reach it.
@@ -43,15 +44,19 @@ PINNED_KEYS: tuple[str, ...] = (
     "strict_registry",
     "tag_namespaces",
     "egress_gates",
+    "auth",
+    "decision",
 )
 
 #: Display name of the endpoint-tag pin, listed beside `PINNED_KEYS`.
 TAGS_PIN = "endpoints.*.tags"
+PUBLIC_BASE_KEY = "allow_public_base"
+PUBLIC_BASE_PIN = f"endpoints.*.{PUBLIC_BASE_KEY}"
 
 
 def pinned_labels() -> tuple[str, ...]:
     """Every pin, as `config show` lists them."""
-    return (*PINNED_KEYS, TAGS_PIN)
+    return (*PINNED_KEYS, TAGS_PIN, PUBLIC_BASE_PIN)
 
 
 def is_pinning(system_layer: Mapping[str, Any]) -> bool:
@@ -72,6 +77,17 @@ def governance_tags(endpoints: Any) -> dict[str, frozenset[str]]:
             if isinstance(t, str) and (t in REACH_TAGS or split_tag(t) is not None)
         )
     return found
+
+
+def public_base_flags(endpoints: Any) -> dict[str, Any]:
+    """`allow_public_base` per endpoint that sets it."""
+    if not isinstance(endpoints, Mapping):
+        return {}
+    return {
+        str(name): spec[PUBLIC_BASE_KEY]
+        for name, spec in endpoints.items()
+        if isinstance(spec, Mapping) and PUBLIC_BASE_KEY in spec
+    }
 
 
 def check_layer(
@@ -132,3 +148,14 @@ def check_layer(
             f"{where} {' and '.join(parts)} (governance tags) on endpoint {name!r}: "
             f"pinned to the system layer ({system_path}) while a `policy:` is loaded"
         )
+    flags_before = public_base_flags(merged_before.get("endpoints"))
+    flags_after = public_base_flags(merged_after.get("endpoints"))
+    missing = object()
+    for name in sorted(set(flags_before) | set(flags_after)):
+        old = flags_before.get(name, missing)
+        new = flags_after.get(name, missing)
+        if old != new or (old is missing) != (new is missing):
+            raise ConfigError(
+                f"{where} set or change `{PUBLIC_BASE_KEY}` on endpoint {name!r}: "
+                f"pinned to the system layer ({system_path}) while a `policy:` is loaded"
+            )

@@ -170,6 +170,8 @@ def test_deleting_then_readding_with_tags_stops_startup(layers, _env_layer):
         ("strict_registry", False),
         ("tag_namespaces", ["team"]),
         ("egress_gates", {"gated": {"allow": ["x"]}}),
+        ("auth", {"keys_file": "k.yaml"}),
+        ("decision", {"endpoint": "local_a"}),
     ],
 )
 def test_pinned_key_in_a_higher_layer_stops_startup(layers, _env_layer, source, key, value):
@@ -361,3 +363,56 @@ def test_layer_summary_still_logs_paths_only(layers, caplog):
     caplog.set_level(logging.INFO)
     text = cfg.layer_summary(_load(layers))
     assert "system=" in text
+
+
+# --- allow_public_base ---------------------------------------------------------
+
+
+@pytest.mark.parametrize("source", SOURCES)
+def test_setting_allow_public_base_on_an_endpoint_stops_startup(layers, _env_layer, source):
+    path = _higher(layers, source, {"endpoints": {"local_a": {"allow_public_base": True}}})
+    with pytest.raises(cfg.ConfigError) as exc:
+        _go(layers, _env_layer)
+    text = str(exc.value)
+    assert str(path) in text and "allow_public_base" in text and "local_a" in text
+
+
+def test_allow_public_base_on_a_new_endpoint_stops_startup(layers, _env_layer):
+    _higher(layers, "project", {"endpoints": {"extra": {"allow_public_base": False}}})
+    with pytest.raises(cfg.ConfigError, match="extra"):
+        _go(layers, _env_layer)
+
+
+def test_changing_or_nulling_allow_public_base_stops_startup(layers, _env_layer):
+    layers.write(
+        layers.system,
+        {
+            "policy": "p.yaml",
+            "endpoints": {"a": {"tags": ["local"], "allow_public_base": True}},
+        },
+    )
+    _higher(layers, "user", {"endpoints": {"a": {"allow_public_base": None}}})
+    with pytest.raises(cfg.ConfigError, match="allow_public_base"):
+        _go(layers, _env_layer)
+
+
+def test_system_layer_may_set_allow_public_base(layers, _env_layer):
+    layers.write(
+        layers.system,
+        {"policy": "p.yaml", "endpoints": {"a": {"allow_public_base": True}}},
+    )
+    assert _go(layers, _env_layer).data["endpoints"]["a"]["allow_public_base"] is True
+
+
+def test_allow_public_base_merges_freely_without_a_system_policy(layers, _env_layer):
+    layers.write(layers.system, {"endpoints": SYSTEM_ENDPOINTS})
+    _higher(layers, "project", {"endpoints": {"local_a": {"allow_public_base": True}}})
+    assert _go(layers, _env_layer).data["endpoints"]["local_a"]["allow_public_base"] is True
+
+
+def test_show_lists_the_new_pins(layers, capsys):
+    assert cfg.main(["show"]) == 0
+    out = capsys.readouterr().out
+    assert "auth" in out.split("pinned to the system layer", 1)[1]
+    assert "decision" in out.split("pinned to the system layer", 1)[1]
+    assert "endpoints.*.allow_public_base" in out

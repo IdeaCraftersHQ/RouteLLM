@@ -1225,10 +1225,11 @@ Layers merge by key, so a project file could otherwise add `local` to a cloud en
 | Pinned | When |
 |---|---|
 | `policy:` | always system-only, whether or not the system layer sets one |
-| `governance`, `strict_registry`, `tag_namespaces`, `egress_gates` | while the system layer sets a `policy:` |
+| `governance`, `strict_registry`, `tag_namespaces`, `egress_gates`, `auth`, `decision` (whole sections) | while the system layer sets a `policy:` |
 | governance tags of every endpoint: reach labels (`local`, `vpn`, `cloud`) and namespaced tags (`jur:ca`, `team:x`) | while the system layer sets a `policy:` |
+| every endpoint's `allow_public_base`, including on endpoints a higher layer adds | while the system layer sets a `policy:` |
 
-A higher layer may not add, remove or change a governance tag on any endpoint, including one it defines itself; an endpoint it adds with none stays out of reach of every policy class. Plain tags, every other endpoint key, and `null`-deleting an endpoint remain mergeable. With no system `policy:`, the merge is unchanged.
+A higher layer may not add, remove or change a governance tag on any endpoint, including one it defines itself; an endpoint it adds with none stays out of reach of every policy class. Plain tags, every other endpoint key (`api_base` and `model` included; a `local` endpoint on a public host is still refused at load), and `null`-deleting an endpoint remain mergeable. With no system `policy:`, the merge is unchanged.
 
 `paths` marks the system layer `[pins governance]` (`"pins_governance": true` in JSON); `show` marks pinned keys `[pinned]` beside their origin and lists the pins in a closing comment.
 
