@@ -2,8 +2,8 @@
 
 Top-level sections configure what the server builds around the
 router: `cache:` (the response cache), `resilience:` (retries,
-timeouts, circuit breaker) and `embeddings:` (which registry endpoint
-embeds prompts). All are optional. An absent `cache:` means
+timeouts, circuit breaker), `embeddings:` (which registry endpoint
+embeds prompts) and `transforms:` (request transforms). All are optional. An absent `cache:` means
 no cache at all; an absent `resilience:` keeps the `ResilienceConfig`
 defaults.
 
@@ -23,8 +23,17 @@ from routellm.comparison import ComparisonConfig
 from routellm.config import ConfigError
 from routellm.quality import FineTuneConfig, QualityManager
 from routellm.resilience import ResilienceConfig
+from routellm.transform import load_transforms
 
-SERVER_SECTIONS = ("cache", "resilience", "comparison", "traces", "auth", "embeddings")
+SERVER_SECTIONS = (
+    "cache",
+    "resilience",
+    "comparison",
+    "traces",
+    "auth",
+    "embeddings",
+    "transforms",
+)
 
 
 class _StrictCache(CacheConfig):
@@ -90,6 +99,16 @@ def build_embedding_endpoint(file_config: dict | None) -> str | None:
     if name is not None and (not isinstance(name, str) or not name):
         raise ConfigError("`embeddings.endpoint` must name a registry endpoint")
     return name
+
+
+def build_transforms(file_config: dict | None) -> list:
+    """Return the request transforms the `transforms:` list names, in order.
+
+    Each entry is `module:attr`, an entry point name in the
+    `routellm.transforms` group, or a mapping with `use:` and `options:`.
+    Absent: none, and the request path is untouched.
+    """
+    return load_transforms((file_config or {}).get("transforms"))
 
 
 def build_resilience_config(file_config: dict | None) -> ResilienceConfig:

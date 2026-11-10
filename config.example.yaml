@@ -533,3 +533,13 @@ tiers:
 #   models:
 #     fr: fr_core_news_lg
 #     en: en_core_web_lg
+
+# Request transforms. Off unless this list exists. Each entry rewrites the
+# messages of every upstream call (primary, fallback, pool member, retry,
+# shadow, compare) and restores the reply; see "Request transforms" in the
+# README. `use` is `module:attr` or an entry point name in the
+# `routellm.transforms` group; `options` become keyword arguments.
+#
+# transforms:
+#   - use: mypkg.transforms:Tokenize
+#     options: {salt: abc}

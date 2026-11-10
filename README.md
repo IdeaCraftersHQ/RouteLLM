@@ -1035,6 +1035,37 @@ policy_routing:
 
 **Path.** `path[0]["policy_routing"]` records the attributes, the policy and where it came from, each class source (`policy`, `declared`, `decision`), the effective class, the intent, the addressed tier, the tier chosen, the matched rule (index, or `else`) and, when the fallback replaced a refused target, `refused: {<target>: <fallback>}`.
 
+### Request transforms
+
+A transform rewrites the messages of an upstream call and restores the reply. The server applies a `transforms:` list in order; each entry is a `module:attr` path or an entry point name in the `routellm.transforms` group, optionally with `options:` passed as keyword arguments. Absent: nothing runs.
+
+```yaml
+transforms:
+  - use: mypkg.transforms:Tokenize
+    options: {salt: abc}
+```
+
+```python
+class Tokenize:                                   # routellm.transform.RequestTransform
+    def forward(self, messages, ctx):             # -> (messages, state)
+        ...                                       # state None: left this call raw, skip inverse
+    def inverse(self, text, state): ...           # one complete piece of reply text
+    def selects(self, ctx): ...                   # optional; request-level, ctx.endpoint is None
+    def restorer(self, state): ...                # optional; per streamed field: feed(text), finish()
+```
+
+`ctx` (`TransformContext`) carries the candidate's endpoint, model and reach labels, the request's effective data class and that class's policy treatment, the request id, and `shadow`. `map_text(messages, fn)` copies the messages and applies `fn` to string content, multimodal text parts, tool calls' and legacy function calls' arguments. `HoldbackRestorer(inverse, holdback)` buffers only a trailing stretch that may still become a token, so a token split across stream chunks restores; the default restorer restores each piece alone, which suits tokens that cannot split. `IdentityTransform` is the no-op default.
+
+Where it runs: at the one point every upstream call passes through, after the candidate is chosen and before the call. That is every attempt: primary, sibling fallback, pool member, retry (`completion` and `acompletion`), and the shadow and `/v1/compare` calls. A transform that raises, or returns no message list, refuses the request: no call, no fallback, a 500 `transform_failed` that names the transform, never the cause. Chain order is forward in list order, inverse in reverse.
+
+The reply is restored after it has been cached or traced, never before:
+
+```
+forward -> upstream call -> trace (transformed prompt + reply) -> inverse -> client
+```
+
+Traces hold the transformed prompt and the reply as the upstream returned it; streamed traces are built from the chunks as sent, before restore. A request that any transform `selects` is neither served from the cache nor stored in it, since a cached reply cannot be restored without the request's own state. Streams restore per choice and per field (content, reasoning, each tool call's arguments); text a restorer holds back is released on a chunk placed before the `finish_reason`, or at the end of a stream that has none. A shadow call is transformed as the primary is, and its judge and trace see the transformed form; a `/v1/compare` candidate's `output` is restored for the caller. Not covered: the router, decision and judge calls, which make their own egress decisions.
+
 ### Threshold Calibration
 
 The threshold used for routing controls the cost-quality tradeoff. The range of meaningful thresholds varies depending on the type of router and the queries you receive. Therefore, we recommend calibrating thresholds using a sample of your incoming queries, as well as the % of queries you'd like to route to the stronger model.

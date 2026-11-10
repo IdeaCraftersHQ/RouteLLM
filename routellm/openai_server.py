@@ -50,8 +50,10 @@ from routellm.server_config import (
     build_embedding_endpoint,
     build_quality_manager,
     build_resilience_config,
+    build_transforms,
 )
 from routellm.transcription import TranscriptionError
+from routellm.transform import TransformError
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 CONTROLLER = None
@@ -611,6 +613,7 @@ async def lifespan(app):
         policy_routing=build_policy_routing(file_config, POLICY),
         embedding_endpoint=build_embedding_endpoint(file_config),
         allow_remote_embeddings=args.allow_remote_embeddings,
+        transforms=build_transforms(file_config),
     )
     yield
     CONTROLLER = None
@@ -977,6 +980,22 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
         return _transcription_failure(e, request_id)
     except EndpointsCooling as e:
         return _cooling_response(e, request_id)
+    except TransformError as e:
+        # Nothing was sent upstream. The reason is ours, not an
+        # upstream's, so the client may read it; the cause stays here.
+        logging.getLogger(__name__).error(
+            f"Request refused (request id {request_id}): {e!s}", exc_info=e.__cause__
+        )
+        return JSONResponse(
+            {
+                "object": "error",
+                "message": f"Request refused: {e.reason} (request id {request_id})",
+                "type": "server_error",
+                "code": "transform_failed",
+                "request_id": request_id,
+            },
+            status_code=500,
+        )
     except Exception as e:
         # Whatever an upstream raised can name it and echo its text: the
         # client gets a generic message and an id; the detail stays here.
