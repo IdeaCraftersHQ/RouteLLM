@@ -177,3 +177,20 @@ def test_str_is_jev(router):
             registry.ROUTER_CLS.pop("jev", None)
         else:
             registry.ROUTER_CLS["jev"] = saved
+
+
+def test_base_url_directs_requests():
+    seen = {}
+
+    def handler(request):
+        seen["url"] = str(request.url)
+        return httpx2.Response(200, json=RESPONSE_BODY)
+
+    router = JevRouter(
+        base_url="https://upstream.example.test",
+        transport=httpx2.MockTransport(handler),
+    )
+    router.calculate_strong_win_rate("hello world")
+    router.close()
+
+    assert seen["url"].startswith("https://upstream.example.test/")

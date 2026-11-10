@@ -149,3 +149,22 @@ def test_get_intent_confidence_fills_missing_intent_with_zero():
     probabilities = detector.get_intent_confidence("what's the weather")
 
     assert probabilities == {"coding": 0.0, "general": 0.6}
+
+
+def test_base_url_directs_requests():
+    seen = {}
+    body = _choice_response("coding", 0.91, {"coding": 0.91, "general": 0.09})
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen["url"] = str(request.url)
+        return httpx2.Response(200, json=body)
+
+    detector = JevIntentDetector(
+        [CODING_MAPPING],
+        base_url="https://upstream.example.test",
+        transport=httpx2.MockTransport(handler),
+    )
+    detector.detect_intent("write a for loop")
+    detector.close()
+
+    assert seen["url"].startswith("https://upstream.example.test/")
