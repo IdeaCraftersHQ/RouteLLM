@@ -268,7 +268,15 @@ with TestClient(server.app, raise_server_exceptions=False) as client:
 
 
 def _run(
-    tmp_path, body, *, policy=True, auth=True, keys_extra="", policy_extra=None, expect_ok=True
+    tmp_path,
+    body,
+    *,
+    policy=True,
+    auth=True,
+    keys_extra="",
+    policy_extra=None,
+    config_extra=None,
+    expect_ok=True,
 ):
     extra = {}
     if auth:
@@ -301,6 +309,7 @@ keys:
         pfile = tmp_path / "policy.json"
         pfile.write_text(json.dumps(pol))
         extra["policy"] = str(pfile)
+    extra.update(config_extra or {})
     preamble = _PREAMBLE.format(config=str(tmp_path / "config.json"), extra=extra)
     indented = "\n".join("    " + line for line in body.strip("\n").splitlines())
     result = subprocess.run(

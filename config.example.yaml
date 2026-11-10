@@ -154,6 +154,12 @@ audio_tokens_per_second: 32
 #   principals:
 #     analyst: {classes: [public, internal]}
 #
+# `tiers:` is the class's allowed entry tiers. A request addressing another
+# tier is a 403 naming class and tier. At startup every leaf reachable from
+# those tiers (both sides, nested tiers, fallback sibling, pool members,
+# traffic rules, canary, load balancer targets) must fit the class's `reach`
+# and `jur`, or the server refuses to start and lists class, tier, leaf, tag.
+#
 # Callers declare `X-Data-Class` / `X-Operation` headers or body
 # `metadata: {data_class, operation}` (never forwarded; see README,
 # "Request data class and operation"). With a policy, every principal it

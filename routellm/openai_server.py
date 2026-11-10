@@ -32,7 +32,7 @@ from routellm.middleware.intent_model_selector import (
     IntentModelMapping,
     IntentModelSelector,
 )
-from routellm.policy import build_policy, check_decision_classes
+from routellm.policy import PolicyDenied, build_policy, check_decision_classes
 from routellm.request_class import (
     RequestClassRefusal,
     check_policy_principals,
@@ -601,6 +601,7 @@ async def lifespan(app):
         comparison_config=build_comparison_config(file_config),
         quality_manager=build_quality_manager(file_config, config_origin),
         strict_registry=endpoints.strict_registry,
+        policy=POLICY,
     )
     yield
     CONTROLLER = None
@@ -933,6 +934,8 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
             compare=http_request.headers.get(COMPARE_HEADER),
             **forwarded,
         )
+    except PolicyDenied as e:
+        return JSONResponse(ErrorResponse(message=str(e)).model_dump(), status_code=e.status)
     except RoutingError as e:
         return JSONResponse(
             ErrorResponse(message=str(e)).model_dump(),
