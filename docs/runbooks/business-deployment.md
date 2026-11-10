@@ -278,8 +278,8 @@ fields). Spend reporting impossible without US-0101.
 ### 8. (Optional) Class-aware cache — US-0102 (paper)
 
 Once shipped: install `extensions/policy_routing/`, point
-`cache_policy` hook at the c12n classifier. Per scenario 3 spec
-table: PII bypass, code exact-match, math global, etc. Default
+`cache_policy` hook at the c12n classifier. Per the
+policy table: PII bypass, code exact-match, math global, etc. Default
 config (no hook) = today's behavior — safe to deploy without it.
 
 ### 9. VPN ingress
@@ -335,7 +335,7 @@ Two forwards, both landing on loopback so the endpoint config can name
 # Ollama -> 127.0.0.1:11500, from the model host's 127.0.0.1:11434
 ssh -f -N -L 11500:localhost:11434 <user>@<gpu-host>
 
-# colibri -> 127.0.0.1:11800, from its own 127.0.0.1:8000
+# second local OpenAI-compatible server -> 127.0.0.1:11800, from its own 127.0.0.1:8000
 ssh -f -N -L 11800:localhost:8000 <user>@<gpu-host>
 ```
 
@@ -347,19 +347,19 @@ curl -sS http://127.0.0.1:11500/api/tags
 curl -sS http://127.0.0.1:11800/v1/models
 ```
 
-colibri binds `127.0.0.1:8000` on the remote host, serves `/v1/models`
-and `/v1/chat/completions`, streams over SSE, and takes its key from
-`COLI_API_KEY`. The model id it reports under `/v1/models` is what
-`coli serve --model-id` was given, and it is what the endpoint's
-`model:` must carry after the `openai/` prefix — a mismatch is rejected
-by colibri, not by routellm. **These colibri facts are verified in the
-smoke task**; treat them as provisional until it runs.
+The second server binds `127.0.0.1:8000` on the remote host, serves
+`/v1/models` and `/v1/chat/completions`, streams over SSE, and takes its
+key from `LOCAL_GLM_API_KEY`. The model id it reports under `/v1/models`
+is what the endpoint's `model:` must carry after the `openai/` prefix —
+a mismatch is rejected by the server, not by routellm. **Verify these
+facts against your server with a smoke request**; treat them as
+provisional until it passes.
 
 ### Environment
 
 ```
 export OPENAI_API_KEY=sk-...       # cloud_strong, and prompt embedding
-export COLI_API_KEY=...            # colibri_glm
+export LOCAL_GLM_API_KEY=...       # local_glm
 export TYPESAFE_API_KEY=...        # the jev router
 ```
 
@@ -556,6 +556,3 @@ firing weak-class prompts; expect zero packets.
   (paper; deploy blocker for spend reports)
 - [US-0102](../stories/US-0102-cache-policy-hooks.md) —
   class-aware cache hooks (paper; non-blocking)
-
-Showcase context:
-`~/.ops/.tlc/tracks/tools-showcase-scenarios/scenarios/3-class-aware-llm-gateway.md`

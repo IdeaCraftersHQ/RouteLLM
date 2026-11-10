@@ -364,8 +364,8 @@ def test_config_example_loads_into_the_registry():
 
     assert registry.names() == [
         "cloud_strong",
-        "colibri_glm",
         "embedding",
+        "local_glm",
         "ollama_qwen",
     ]
     assert registry.tier_names() == ["default", "premium"]
@@ -378,11 +378,11 @@ def test_config_example_loads_into_the_registry():
     assert (default.strong, default.weak) == ("premium", "ollama_qwen")
     assert (default.router, default.threshold) == ("mf", 0.12)
 
-    colibri = registry.get("colibri_glm")
-    assert colibri.api_base == "http://127.0.0.1:11800/v1"
-    assert colibri.api_key_env == "COLI_API_KEY"
-    assert colibri.tags == ["local", "tools"]
-    assert colibri.quality == 85
+    glm = registry.get("local_glm")
+    assert glm.api_base == "http://127.0.0.1:11800/v1"
+    assert glm.api_key_env == "LOCAL_GLM_API_KEY"
+    assert glm.tags == ["local", "tools"]
+    assert glm.quality == 85
 
 
 def test_config_example_builds_a_controller_on_a_stock_install(monkeypatch):

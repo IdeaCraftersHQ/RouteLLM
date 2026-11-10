@@ -271,7 +271,7 @@ tiers:
     router: mf
     threshold: 0.33
     strong: cloud_strong
-    weak: colibri_glm
+    weak: local_glm
   default:
     router: mf
     threshold: 0.12
@@ -372,7 +372,7 @@ python -m routellm.pairing --config config.example.yaml
 ```
 
 ```
--> colibri_glm(model=openai/glm-5.2-colibri, quality=85, cost=-, context=-)
+-> local_glm(model=openai/glm-5.2, quality=85, cost=-, context=-)
    ollama_qwen(model=ollama_chat/qwen3:8b, quality=None, cost=-, context=-)
 ```
 

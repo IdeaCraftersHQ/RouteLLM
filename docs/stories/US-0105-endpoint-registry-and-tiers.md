@@ -83,7 +83,7 @@ response.
   `GET /v1/models`, `--default-threshold`, the `routellm` key on the
   response
 - `config.example.yaml` — worked `endpoints:`/`tiers:` pair spanning a
-  cloud model, Ollama, and colibri
+  cloud model, Ollama, and a second local OpenAI-compatible server
 
 ## E2E tests
 
