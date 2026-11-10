@@ -22,13 +22,13 @@ test: ## Run the test suite
 
 lint: ## Report lint findings without changing anything
 	@command -v uv >/dev/null 2>&1 || { echo "uv not installed. Run: brew install uv"; exit 1; }
-	uvx ruff check routellm
-	uvx ruff format --check routellm
+	uvx ruff@0.17.3 check routellm
+	uvx ruff@0.17.3 format --check routellm
 
 fmt: ## Format and apply ruff's safe fixes
 	@command -v uv >/dev/null 2>&1 || { echo "uv not installed. Run: brew install uv"; exit 1; }
-	uvx ruff format routellm
-	uvx ruff check --fix routellm
+	uvx ruff@0.17.3 format routellm
+	uvx ruff@0.17.3 check --fix routellm
 
 check: lint test ## Run lint then the test suite
 
