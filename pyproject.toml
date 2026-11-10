@@ -90,6 +90,8 @@ markers = [
 	"slow: imports the heavy ML stack or spawns a subprocess",
 	"pairing: needs the optional `pairing` extra; skipped when it is not installed",
 	"redact: needs the optional `redact` extra and its spaCy models; skipped when absent",
+	"network: deliberately live; skipped unless ROUTELLM_TEST_NETWORK=1, which also lifts the socket blocker for it",
+	"blocker_probe: attempts a blocked connection on purpose to test the socket blocker; exempt from the zero-attempt check",
 ]
 
 [tool.hatch.metadata]

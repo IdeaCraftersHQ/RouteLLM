@@ -1350,6 +1350,14 @@ python -m pytest routellm/tests -q -rs
 Tests that need an optional extra (`pairing`) skip with a reason naming the
 extra when it is absent. To run them, install it: `pip install -e ".[dev,serve,pairing]"`.
 
+The suite is hermetic: outbound network is blocked for the whole session,
+including subprocesses the tests spawn. Loopback (`127.0.0.0/8`, `::1`,
+`localhost`) and Unix sockets work; anything else raises an error naming the
+host, and a test that attempted it fails even if the code under test swallowed
+the error. A deliberately live test is marked `@pytest.mark.network` and runs
+only with `ROUTELLM_TEST_NETWORK=1`. `ROUTELLM_TEST_NO_NETWORK=0` turns the
+blocker off. xrr cassettes replay by default; `XRR_MODE=record` re-records.
+
 ### Adding a new router
 
 There is only a single method to implement: `calculate_strong_win_rate`, which takes in the user prompt and returns the win rate for the strong model conditioned on that given prompt - if this win rate is great than user-specified cost threshold, then the request is routed to the strong model. Otherwise, it is routed to the weak model.
