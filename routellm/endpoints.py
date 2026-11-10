@@ -92,6 +92,7 @@ from pydantic import (
 )
 
 from routellm.capabilities import Capabilities
+from routellm.requirements import DEFAULT_AUDIO_TOKENS_PER_SECOND
 from routellm.transcription import LOCAL_TAG, TranscriberConfig
 
 logger = logging.getLogger(__name__)
@@ -435,6 +436,7 @@ class EndpointRegistry:
         tiers: dict[str, Tier] | None = None,
         transcriber: dict[str, Any] | None = None,
         intent_targets: list[str] | None = None,
+        audio_tokens_per_second: float = DEFAULT_AUDIO_TOKENS_PER_SECOND,
     ):
         """Initialize the registry.
 
@@ -473,6 +475,10 @@ class EndpointRegistry:
         self._transcriber_raw: dict[str, Any] | None = transcriber
         self._transcribers: dict[str | None, TranscriberConfig] = {}
         self.intent_targets: list[str] = list(intent_targets or [])
+
+        # Advisory tokens charged per second of audio in the context
+        # estimate; see `routellm.requirements`.
+        self.audio_tokens_per_second: float = audio_tokens_per_second
 
         self._validate_tiers()
         self._validate_transcribers()
@@ -537,7 +543,19 @@ class EndpointRegistry:
 
         intents = config.get("intents")
         targets = (intents.get("tiers") or {}).values() if isinstance(intents, dict) else []
-        registry = cls(endpoints, tiers, raw_transcriber, [str(t) for t in targets])
+        rate = config.get("audio_tokens_per_second")
+        if rate is None:
+            rate = DEFAULT_AUDIO_TOKENS_PER_SECOND
+        if isinstance(rate, bool) or not isinstance(rate, (int, float)) or rate <= 0:
+            raise ValueError("`audio_tokens_per_second` must be a positive number")
+
+        registry = cls(
+            endpoints,
+            tiers,
+            raw_transcriber,
+            [str(t) for t in targets],
+            audio_tokens_per_second=rate,
+        )
 
         # The sidecar merges HERE, on the built registry, so every
         # consumer that goes through from_config -- the server and both
