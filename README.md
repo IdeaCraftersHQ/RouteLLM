@@ -1218,6 +1218,20 @@ config layers loaded: project=/srv/app/.routellm.yaml, flag=/etc/app.yaml; skipp
 
 - **Relative paths resolve against their own file.** A user-layer `prompt_file: prompts/router.yaml` means `~/.config/routellm/prompts/router.yaml` wherever the server is run from, not a path relative to the CWD.
 
+### Governance pinned to the system layer
+
+Layers merge by key, so a project file could otherwise add `local` to a cloud endpoint, or point `policy:` at a file of its own. Governance is honoured only from the system layer (`/etc/routellm/config.yaml`; `ROUTELLM_SYSTEM_CONFIG=<path>` points the layer elsewhere, for containers and tests). Any other layer (user, project, env, flag) that breaks a pin stops startup with an error naming the layer, its file, the key or endpoint, and the system file.
+
+| Pinned | When |
+|---|---|
+| `policy:` | always system-only, whether or not the system layer sets one |
+| `governance`, `strict_registry`, `tag_namespaces`, `egress_gates` | while the system layer sets a `policy:` |
+| governance tags of every endpoint: reach labels (`local`, `vpn`, `cloud`) and namespaced tags (`jur:ca`, `team:x`) | while the system layer sets a `policy:` |
+
+A higher layer may not add, remove or change a governance tag on any endpoint, including one it defines itself; an endpoint it adds with none stays out of reach of every policy class. Plain tags, every other endpoint key, and `null`-deleting an endpoint remain mergeable. With no system `policy:`, the merge is unchanged.
+
+`paths` marks the system layer `[pins governance]` (`"pins_governance": true` in JSON); `show` marks pinned keys `[pinned]` beside their origin and lists the pins in a closing comment.
+
 ### Inspecting the chain
 
 Three commands answer "where does this value come from":

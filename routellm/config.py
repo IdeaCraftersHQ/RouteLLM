@@ -12,6 +12,11 @@ precedence first, later layers overriding earlier ones::
     5. env                     ROUTELLM_CONFIG=<path>
     6. flag                    --config <path>
 
+Governance is pinned to layer 2 (`policy:` always; endpoint governance
+tags and a few keys while a system `policy:` is loaded): another layer
+that sets them stops startup. See `routellm.layer_pins`. The system path
+can be moved with `ROUTELLM_SYSTEM_CONFIG`.
+
 Layer 3 can be left out with `--no-user-config` or
 `ROUTELLM_NO_USER_CONFIG=1`, so an unrelated per-user file never reaches
 a pinned deployment; every other layer still applies.
@@ -57,7 +62,10 @@ import yaml
 
 TOOL = "routellm"
 PROJECT_MARKERS = [".routellm.yaml", "routellm.yaml"]
-SYSTEM_PATH = "/etc/routellm/config.yaml"
+DEFAULT_SYSTEM_PATH = "/etc/routellm/config.yaml"
+#: The system layer file; a module constant so tests can point it at a temp file.
+SYSTEM_PATH = DEFAULT_SYSTEM_PATH
+SYSTEM_ENV_VAR = "ROUTELLM_SYSTEM_CONFIG"
 ENV_VAR = "ROUTELLM_CONFIG"
 FLAG = "--config"
 NO_USER_ENV_VAR = "ROUTELLM_NO_USER_CONFIG"
@@ -120,6 +128,12 @@ class LoadedConfig:
     variables : dict[str, list[str]]
         Dotted key mapped to the environment variables its (merged,
         unexpanded) value reads. Only keys that read any appear.
+    pinned_by : Path or None
+        The system layer file when it loads a `policy:`, which pins
+        governance to it (see `routellm.layer_pins`); None otherwise.
+    pinned_keys : tuple[str, ...]
+        What is pinned: top-level keys and ``endpoints.*.tags``. Empty
+        when `pinned_by` is None.
     """
 
     data: dict[str, Any] = field(default_factory=dict)
@@ -127,6 +141,8 @@ class LoadedConfig:
     origins: dict[str, Path] = field(default_factory=dict)
     chain: list[ResolvedPath] = field(default_factory=list)
     variables: dict[str, list[str]] = field(default_factory=dict)
+    pinned_by: Path | None = None
+    pinned_keys: tuple[str, ...] = ()
 
     def resolve_path(self, key: str, value: Any) -> Path:
         """Resolve a path-valued config entry against the file that set it.
@@ -152,6 +168,16 @@ class LoadedConfig:
         if origin is None:
             return path
         return origin.parent / path
+
+
+def system_path() -> Path:
+    """The system layer file: `ROUTELLM_SYSTEM_CONFIG` when set, else `SYSTEM_PATH`.
+
+    The override exists for tests and containers that cannot write
+    `/etc`; like the rest of the process environment it belongs to
+    whoever starts the server, not to a config file.
+    """
+    return Path(os.environ.get(SYSTEM_ENV_VAR) or SYSTEM_PATH)
 
 
 def _user_config_dir() -> Path:
@@ -226,7 +252,7 @@ def config_paths(
 
     user_path = _user_config_dir() / TOOL / "config.yaml"
     chain = [
-        _entry(Path(SYSTEM_PATH), "system"),
+        _entry(system_path(), "system"),
         ResolvedPath(user_path, "user", False, skipped=True)
         if skip_user
         else _entry(user_path, "user"),
@@ -398,6 +424,9 @@ def load_config(
     data = _defaults()
     origins: dict[str, Path] = {}
     layers: list[ResolvedPath] = []
+    pinned_by: Path | None = None
+
+    from routellm import layer_pins
 
     for entry in chain:
         if not entry.exists:
@@ -407,7 +436,15 @@ def load_config(
                 raise FileNotFoundError(f"{FLAG} {entry.path}: no such config file")
             continue
         parsed = _read(entry)
-        data = deep_merge(data, parsed)
+        merged = deep_merge(data, parsed)
+        if entry.source == "system":
+            if layer_pins.is_pinning(parsed):
+                pinned_by = entry.path
+        else:
+            layer_pins.check_layer(
+                entry, parsed, data, merged, pinned_by is not None, system_path()
+            )
+        data = merged
         _record_origins(origins, parsed, entry.path)
         layers.append(entry)
 
@@ -417,7 +454,15 @@ def load_config(
 
         data = interpolate_tree(data, origin_of=lambda key: _origin_of(origins, key))
 
-    return LoadedConfig(data=data, layers=layers, origins=origins, chain=chain, variables=variables)
+    return LoadedConfig(
+        data=data,
+        layers=layers,
+        origins=origins,
+        chain=chain,
+        variables=variables,
+        pinned_by=pinned_by,
+        pinned_keys=layer_pins.pinned_labels() if pinned_by else (),
+    )
 
 
 def layer_summary(loaded: LoadedConfig) -> str:
@@ -467,7 +512,15 @@ def explain(loaded: LoadedConfig) -> str:
     dumped = yaml.safe_dump(loaded.data, sort_keys=False)
     for line in dumped.splitlines():
         origin = _top_level_origin(loaded, line)
-        lines.append(f"{line}  # from {origin}" if origin else line)
+        pin = " [pinned]" if origin and line.split(":", 1)[0] in loaded.pinned_keys else ""
+        lines.append(f"{line}  # from {origin}{pin}" if origin else line)
+
+    if loaded.pinned_by is not None:
+        lines.append("")
+        lines.append(
+            f"# pinned to the system layer ({loaded.pinned_by}): "
+            f"{', '.join(loaded.pinned_keys)}; other layers may not set them"
+        )
 
     if loaded.variables:
         lines.append("")
@@ -528,6 +581,19 @@ def winning_path(chain: list[ResolvedPath]) -> ResolvedPath | None:
 NO_PROJECT_LINE = "[absent] project (no .routellm.yaml or routellm.yaml found)"
 
 
+def pins_governance(chain: list[ResolvedPath]) -> bool:
+    """True when the chain's system layer exists and loads a `policy:`."""
+    from routellm import layer_pins
+
+    for entry in chain:
+        if entry.source == "system" and entry.exists:
+            try:
+                return layer_pins.is_pinning(_read(entry))
+            except ConfigError:
+                return False
+    return False
+
+
 def _chain_lines(chain: list[ResolvedPath]) -> list[str]:
     """Render one `[used]`/`[absent]` line per searched location.
 
@@ -535,9 +601,11 @@ def _chain_lines(chain: list[ResolvedPath]) -> list[str]:
     place, so every surface that prints the chain reports the same six
     layers whether or not a marker was found.
     """
+    pinning = pins_governance(chain)
     lines = [
         f"{'[skipped]' if entry.skipped else '[used]  ' if entry.exists else '[absent]'}"
         f" {entry.source:<7} {entry.path}"
+        f"{'  [pins governance]' if entry.source == 'system' and pinning else ''}"
         for entry in chain
     ]
     if not any(entry.source == "project" for entry in chain):
@@ -632,6 +700,8 @@ def main(argv: list[str] | None = None) -> int:
                                 "path": str(entry.path),
                                 "exists": entry.exists,
                                 "skipped": entry.skipped,
+                                "pins_governance": entry.source == "system"
+                                and pins_governance(chain),
                             }
                             for entry in chain
                         ],

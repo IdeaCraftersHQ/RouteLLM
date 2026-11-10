@@ -220,7 +220,10 @@ def sha(key):
 _PREAMBLE = """
 import json, logging, sys
 from routellm.tests.fake_upstream import FakeUpstream
-sys.argv = ["x", "--config", {config!r}, "--routers", "random"]
+import os
+# governance (the policy) is honoured from the system layer only
+os.environ["ROUTELLM_SYSTEM_CONFIG"] = {config!r}
+sys.argv = ["x", "--routers", "random"]
 
 A, B = FakeUpstream("A"), FakeUpstream("B")
 def ep(name, up):
