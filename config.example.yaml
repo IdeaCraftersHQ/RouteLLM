@@ -51,6 +51,14 @@ resilience:
   cb_rate_interval_ms: 60000
   cb_rate_minimum: 10
 
+# Advisory context cost of audio, in tokens per second of audio. The
+# token counter cannot count audio, so without this a long clip would add
+# nothing to the context estimate and could not be refused for size. A WAV
+# is measured from its header; other formats are estimated from byte length
+# at conservative bitrates. Default 32 (the high end of published figures).
+# With a transcriber in `mode: transcribe` only the transcript is counted.
+audio_tokens_per_second: 32
+
 # Transcribe-then-route: turn audio parts into text before routing, so a
 # text-only tier can answer a request that carries audio. Point it at any
 # OpenAI `/v1/audio/transcriptions`-compatible service. Omit this section

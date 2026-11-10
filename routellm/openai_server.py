@@ -157,7 +157,13 @@ def build_registry(file_config: dict | None, config_path: str | None = None) -> 
         args.default_threshold,
         args.routers[0] if args.routers else "<none>",
     )
-    return EndpointRegistry(endpoints, tiers, registry.transcriber_raw, registry.intent_targets)
+    return EndpointRegistry(
+        endpoints,
+        tiers,
+        registry.transcriber_raw,
+        registry.intent_targets,
+        audio_tokens_per_second=registry.audio_tokens_per_second,
+    )
 
 
 #: Detector backends the `intents:` section may ask for.

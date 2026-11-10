@@ -461,7 +461,15 @@ endpoints:
 
 Audio is **fail-closed**, unlike the other requirements: an endpoint that says nothing about audio does not serve it, `strict` or not, because a text-only model would answer without ever hearing the clip. A tier takes a side only if it (or a leaf reachable from it) declares audio; with none, the request is refused with a 400 naming `audio` before any upstream call, and the audio is never dropped or sent to a model outside the tier. The path entry shows `capability_requirement: "audio"` when audio forced the side. A request with an image and audio needs a side declaring both. Selectors accept `audio:true`.
 
-Transport matters. litellm's native `ollama_chat/` and `ollama/` providers drop audio parts (and `ollama_chat/` fails while counting tokens over them), so routellm treats those endpoints as not audio capable and logs a warning if you declared otherwise. Reach an audio-capable Ollama model through its OpenAI-compatible route: `openai/<model>` with `api_base: http://host:11434/v1`. The audio payload is skipped when estimating prompt tokens.
+Transport matters. litellm's native `ollama_chat/` and `ollama/` providers drop audio parts (and `ollama_chat/` fails while counting tokens over them), so routellm treats those endpoints as not audio capable and logs a warning if you declared otherwise. Reach an audio-capable Ollama model through its OpenAI-compatible route: `openai/<model>` with `api_base: http://host:11434/v1`.
+
+**Audio in the context estimate.** `litellm.token_counter` cannot count audio, so each `input_audio` part adds an advisory flat cost per second of audio on top of the text count, and a long clip can therefore exceed a leaf's `context` and be refused (400) like any oversized prompt. The duration of a WAV is read from its header; any other format is guessed from the byte length at a deliberately low bitrate for that format (mp3 and aac 32 kbit/s, ogg, opus and webm 24 kbit/s, flac 64 kbit/s, anything else 32 kbit/s), so the guess errs long. An `audio_url` part carries no payload here and adds nothing. The rate is a top-level key, default 32 tokens per second, the high end of what providers publish:
+
+```yaml
+audio_tokens_per_second: 32      # positive number; lower it for a provider that bills audio more cheaply
+```
+
+It matters when audio reaches a model (`mode: passthrough`, or no transcriber) and for judging clip size before a transcriber runs. With `mode: transcribe` the audio is replaced by its transcript before routing, so only the transcript is counted and the audio is never counted twice. A leaf that declares no `context` is never refused on size.
 
 #### Transcribe-then-route
 

@@ -17,7 +17,10 @@ Five facts are read and nothing else::
 requirements, which is asserted by a test rather than only stated here.
 """
 
+import base64
+import binascii
 import logging
+import struct
 from dataclasses import dataclass
 from typing import Any
 
@@ -25,7 +28,7 @@ import litellm
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Requirements", "derive"]
+__all__ = ["DEFAULT_AUDIO_TOKENS_PER_SECOND", "Requirements", "audio_seconds", "derive"]
 
 #: Content part types that mean the request carries an image.
 _IMAGE_PART_TYPES = frozenset({"image_url", "input_image"})
@@ -39,6 +42,34 @@ _STRUCTURED_TYPES = frozenset({"json_schema", "json_object"})
 #: Characters per token in the fallback count. Crude on purpose: it
 #: only has to be good enough to compare against a context window.
 _CHARS_PER_TOKEN = 4
+
+#: Advisory tokens charged per second of audio when the config does not
+#: set `audio_tokens_per_second`. Providers differ (published figures run
+#: from about 10 to 32 per second), so this sits at the high end: the
+#: estimate exists to keep a long clip from slipping past a context
+#: window, and over-counting is the safe error.
+DEFAULT_AUDIO_TOKENS_PER_SECOND = 32.0
+
+#: Bytes per second assumed for audio that is not a readable WAV, keyed
+#: by `input_audio.format`. Deliberately LOW bitrates: a lower rate means
+#: more seconds from the same bytes, so the estimate errs long. Anything
+#: not listed gets `_DEFAULT_BYTES_PER_SECOND`.
+_BYTES_PER_SECOND = {
+    "mp3": 4000,  # 32 kbit/s
+    "aac": 4000,
+    "m4a": 4000,
+    "ogg": 3000,  # 24 kbit/s
+    "opus": 3000,
+    "webm": 3000,
+    "flac": 8000,  # lossless, roughly 64 kbit/s at the quietest
+    "wav": 16000,  # headerless/broken WAV: 8 kHz 16-bit mono PCM
+    "pcm": 16000,
+}
+_DEFAULT_BYTES_PER_SECOND = 4000
+
+#: How much of a clip is decoded to read a WAV header. Headers sit in
+#: the first few dozen bytes; the rest is sized from the base64 length.
+_WAV_HEAD_CHARS = 4096
 
 #: Whether the token-counter fallback has already been logged. One
 #: DEBUG line per process is plenty; the fallback is not an error.
@@ -92,7 +123,12 @@ class Requirements:
         )
 
 
-def derive(messages: Any, kwargs: dict[str, Any], model: str | None) -> Requirements:
+def derive(
+    messages: Any,
+    kwargs: dict[str, Any],
+    model: str | None,
+    audio_tokens_per_second: float = DEFAULT_AUDIO_TOKENS_PER_SECOND,
+) -> Requirements:
     """Read a request's requirements off its messages and kwargs.
 
     Never raises: a hand-rolled client may send message content in
@@ -119,6 +155,10 @@ def derive(messages: Any, kwargs: dict[str, Any], model: str | None) -> Requirem
         provider model. `litellm.token_counter` tolerates one it does
         not know, and the count only has to be good enough to compare
         against a context window.
+    audio_tokens_per_second : float, optional
+        Advisory cost charged per second of `input_audio`, which
+        `litellm.token_counter` cannot count. Defaults to
+        `DEFAULT_AUDIO_TOKENS_PER_SECOND`.
 
     Returns
     -------
@@ -130,7 +170,7 @@ def derive(messages: Any, kwargs: dict[str, Any], model: str | None) -> Requirem
         audio=_has_part(messages, _AUDIO_PART_TYPES),
         tools=bool(kwargs.get("tools")) or bool(kwargs.get("functions")),
         structured_output=_wants_schema(kwargs.get("response_format")),
-        context_needed=_context_needed(messages, kwargs, model),
+        context_needed=_context_needed(messages, kwargs, model, audio_tokens_per_second),
     )
 
 
@@ -168,7 +208,12 @@ def _wants_schema(response_format: Any) -> bool:
     return response_format.get("type") in _STRUCTURED_TYPES
 
 
-def _context_needed(messages: Any, kwargs: dict[str, Any], model: str | None) -> int | None:
+def _context_needed(
+    messages: Any,
+    kwargs: dict[str, Any],
+    model: str | None,
+    audio_tokens_per_second: float,
+) -> int | None:
     """Return the estimated tokens this request occupies.
 
     The prompt's count plus whatever `max_tokens` reserves for the
@@ -180,7 +225,8 @@ def _context_needed(messages: Any, kwargs: dict[str, Any], model: str | None) ->
     except (TypeError, ValueError):
         reserved = 0
 
-    return _count_tokens(messages, model) + reserved
+    audio = round(_audio_total_seconds(messages) * audio_tokens_per_second)
+    return _count_tokens(messages, model) + audio + reserved
 
 
 def _count_tokens(messages: Any, model: str | None) -> int:
@@ -199,6 +245,92 @@ def _count_tokens(messages: Any, model: str | None) -> int:
                 _CHARS_PER_TOKEN,
             )
         return _rough_tokens(messages)
+
+
+def _audio_total_seconds(messages: Any) -> float:
+    """Return the summed estimated duration of every audio part."""
+    if not isinstance(messages, list):
+        return 0.0
+
+    total = 0.0
+    for message in messages:
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if isinstance(part, dict) and part.get("type") in _AUDIO_PART_TYPES:
+                total += audio_seconds(part)
+    return total
+
+
+def audio_seconds(part: dict[str, Any]) -> float:
+    """Return the estimated duration of one audio part, in seconds.
+
+    A WAV is read off its header (`byte rate` and the `data` chunk
+    size). Any other format, or a WAV whose header cannot be read, is
+    sized from the byte length at a conservative bitrate for the
+    format. A part with no payload (an `audio_url`, which is not
+    fetched here, or an empty `input_audio`) is 0: the estimate is
+    advisory and cannot guess what it was not given.
+
+    Parameters
+    ----------
+    part : dict
+        An `input_audio` content part.
+
+    Returns
+    -------
+    float
+        Estimated seconds, never negative.
+    """
+    body = part.get("input_audio")
+    data = body.get("data") if isinstance(body, dict) else None
+    if not isinstance(data, str) or not data:
+        return 0.0
+
+    fmt = body.get("format")
+    fmt = fmt.lower() if isinstance(fmt, str) else ""
+
+    size = max(len(data) * 3 // 4 - data[-2:].count("="), 0)
+    if fmt in ("wav", "wave", "x-wav"):
+        seconds = _wav_seconds(data, size)
+        if seconds is not None:
+            return seconds
+
+    per_second = _BYTES_PER_SECOND.get(fmt, _DEFAULT_BYTES_PER_SECOND)
+    return size / per_second
+
+
+def _wav_seconds(data: str, size: int) -> float | None:
+    """Return a WAV's duration from its header, or None when unreadable."""
+    head_chars = min(len(data), _WAV_HEAD_CHARS) // 4 * 4
+    try:
+        head = base64.b64decode(data[:head_chars])
+    except (binascii.Error, ValueError):
+        return None
+
+    if len(head) < 12 or head[:4] != b"RIFF" or head[8:12] != b"WAVE":
+        return None
+
+    byte_rate = None
+    pos = 12
+    while pos + 8 <= len(head):
+        chunk = head[pos : pos + 4]
+        (length,) = struct.unpack_from("<I", head, pos + 4)
+        body = pos + 8
+        if chunk == b"fmt " and body + 12 <= len(head):
+            (byte_rate,) = struct.unpack_from("<I", head, body + 8)
+        elif chunk == b"data":
+            if not byte_rate:
+                return None
+            # A streamed WAV leaves the size at 0 or 0xFFFFFFFF; trust
+            # the bytes that follow, and never more than were sent.
+            available = max(size - body, 0)
+            if length in (0, 0xFFFFFFFF) or length > available:
+                length = available
+            return length / byte_rate
+        pos = body + length + (length & 1)
+    return None
 
 
 def _without_audio(messages: Any) -> Any:

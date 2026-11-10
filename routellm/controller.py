@@ -1193,7 +1193,12 @@ class Controller:
 
         # A vision request's content is a list; routers want a string.
         prompt = requirements_module._prompt_text(kwargs["messages"])
-        reqs = requirements_module.derive(kwargs["messages"], kwargs, request_name)
+        reqs = requirements_module.derive(
+            kwargs["messages"],
+            kwargs,
+            request_name,
+            self.endpoints.audio_tokens_per_second,
+        )
         session_id = kwargs.get("user") or str(uuid.uuid4())
 
         # 1. Route: traffic rules and middleware bypass the tree, a tier
@@ -1402,7 +1407,12 @@ class Controller:
 
         # A vision request's content is a list; routers want a string.
         prompt = requirements_module._prompt_text(kwargs["messages"])
-        reqs = requirements_module.derive(kwargs["messages"], kwargs, request_name)
+        reqs = requirements_module.derive(
+            kwargs["messages"],
+            kwargs,
+            request_name,
+            self.endpoints.audio_tokens_per_second,
+        )
         session_id = kwargs.get("user") or str(uuid.uuid4())
 
         # 1. Route: traffic rules and middleware bypass the tree, a tier
