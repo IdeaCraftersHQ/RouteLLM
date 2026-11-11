@@ -33,9 +33,11 @@ from routellm.class_tiers import (
     check_class_tiers,
     check_decision_endpoint,
     check_entry_tier,
+    check_transcriber,
     class_denial,
     redact_aux_denial,
     route_error,
+    transcriber_denial,
 )
 from routellm.comparison import ComparisonConfig, ComparisonManager
 from routellm.config import ConfigError
@@ -404,6 +406,8 @@ class Controller:
         # so its endpoint must pass every class that can result.
         if policy is not None and decision is not None:
             check_decision_endpoint(policy, self.endpoints, decision.config.endpoint)
+        if policy is not None:
+            check_transcriber(policy, self.endpoints)
 
         if config is None:
             config = GPT_4_AUGMENTED_CONFIG
@@ -994,7 +998,9 @@ class Controller:
 
         return scored(prompt, threshold, pair)
 
-    def _transcriber_for(self, kwargs: dict[str, Any], tier: str | None):
+    def _transcriber_for(
+        self, kwargs: dict[str, Any], tier: str | None, declared_class: str | None = None
+    ):
         """Return the transcriber to run on this request, or None.
 
         The transcriber is the one the ADDRESSED tier names (the global
@@ -1002,12 +1008,25 @@ class Controller:
         decision to send audio anywhere is made by the tier the client
         chose. None when the request carries no audio, nothing is
         configured, or the mode is `passthrough`.
+
+        Raises
+        ------
+        PolicyDenied
+            The request's class is redact or block and the transcriber
+            is not local; checked before any audio is sent (startup
+            refuses such a pairing, this holds a request that slipped by).
         """
         if not transcription.has_audio(kwargs.get("messages")):
             return None
         config = self.endpoints.transcriber_for(tier)
         if config is None or not config.active:
             return None
+        if self.policy is not None:
+            denied = transcriber_denial(self.policy, config, declared_class)
+            if denied is not None:
+                raise PolicyDenied(
+                    f"{denied}: the class may not use a transcriber that is not local"
+                )
         return config
 
     def _policy_reason(self, name: str, reqs) -> str | None:
@@ -1963,7 +1982,7 @@ class Controller:
 
         # Audio becomes text before anything reads the messages, so the
         # router, the requirements and the cache key all see the transcript.
-        transcriber = self._transcriber_for(kwargs, tier)
+        transcriber = self._transcriber_for(kwargs, tier, declared_class)
         if transcriber is not None:
             kwargs = {
                 **kwargs,
@@ -2260,7 +2279,7 @@ class Controller:
         # Audio becomes text before anything reads the messages, so the
         # router, the requirements and the cache key all see the
         # transcript. Streaming is unaffected: this finishes before routing.
-        transcriber = self._transcriber_for(kwargs, tier)
+        transcriber = self._transcriber_for(kwargs, tier, declared_class)
         if transcriber is not None:
             kwargs = {
                 **kwargs,

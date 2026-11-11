@@ -103,12 +103,24 @@ def endpoints(bases: dict[str, str]) -> dict:
         "local_main": leaf(
             "local_main",
             ["local", "tools"],
-            {"vision": True, "tools": True, "context": 65536, "modalities_in": ["text", "image"]},
+            {
+                "vision": True,
+                "tools": True,
+                "structured_output": True,
+                "context": 65536,
+                "modalities_in": ["text", "image"],
+            },
         ),
         "local_small": leaf(
             "local_small",
             ["local", "tools"],
-            {"vision": False, "tools": True, "context": 8192, "modalities_in": ["text"]},
+            {
+                "vision": False,
+                "tools": True,
+                "structured_output": True,
+                "context": 8192,
+                "modalities_in": ["text"],
+            },
         ),
         "local_audio": leaf(
             "local_audio",
@@ -118,12 +130,24 @@ def endpoints(bases: dict[str, str]) -> dict:
         "cloud_main": leaf(
             "cloud_main",
             ["cloud", "tools"],
-            {"vision": True, "tools": True, "context": 200000, "modalities_in": ["text", "image"]},
+            {
+                "vision": True,
+                "tools": True,
+                "structured_output": True,
+                "context": 200000,
+                "modalities_in": ["text", "image"],
+            },
         ),
         "gated_main": leaf(
             "gated_main",
             ["cloud", "gated", "tools"],
-            {"vision": True, "tools": True, "context": 200000, "modalities_in": ["text", "image"]},
+            {
+                "vision": True,
+                "tools": True,
+                "structured_output": True,
+                "context": 200000,
+                "modalities_in": ["text", "image"],
+            },
         ),
     }
 

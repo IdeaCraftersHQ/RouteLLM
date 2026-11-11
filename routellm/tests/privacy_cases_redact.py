@@ -11,6 +11,7 @@ and the client still reads the original text.
 
 import json
 
+from routellm.tests.privacy_fixture import AUDIO as AUDIO_MESSAGES
 from routellm.tests.privacy_fixture import CANARIES, case
 
 FR = "Bonjour, Jean Tremblay (jean.tremblay@example.com), NAS 046 454 286, dossier ACME-12345."
@@ -197,3 +198,131 @@ def aux_semantic(w):
     _echo(w, "local_main")
     r = w.post("red_local", HISTORY, data_class="pii")
     return {"status": r.status_code, "leaks": _leaks(w), "off_host_hits": _off_host_hits(w)}
+
+
+# -- fields outside `messages` ------------------------------------------------------------
+
+CANARY_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup",
+            "description": "Find the file of Jean Tremblay",
+            "parameters": {
+                "type": "object",
+                "description": "Contact Marie Gagnon",
+                "properties": {
+                    "client": {
+                        "type": "string",
+                        "description": "e.g. Alice Smith",
+                        "enum": ["ACME-12345", "other"],
+                        "default": "jean.tremblay@example.com",
+                        "examples": ["046 454 286"],
+                    }
+                },
+                "required": ["client"],
+            },
+        },
+    }
+]
+CANARY_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "answer",
+        "description": "Answer about Jean Tremblay",
+        "schema": {
+            "type": "object",
+            "properties": {"who": {"type": "string", "enum": ["Alice Smith", "x"]}},
+        },
+    },
+}
+NAMED = [
+    {"role": "user", "name": "Marie_Gagnon", "content": "bonjour"},
+    {"role": "user", "name": "ACME-12345", "content": EN},
+]
+
+
+def _call_direct(w, **kw):
+    """One call through the controller, as a library caller: fields the HTTP body drops."""
+    controller = w.server.CONTROLLER
+    try:
+        controller.completion(
+            model="red_cloud",
+            messages=[{"role": "user", "content": "hello"}],
+            declared_class="pii",
+            **kw,
+        )
+        return 200, None
+    except Exception as exc:
+        return 500 if type(exc).__name__ == "TransformError" else 502, type(exc).__name__
+
+
+@case("redact_request_fields_carry_no_canary", 200, reaches_off_host=True, redact=True)
+def fields_http(w):
+    _echo(w, "cloud_main")
+    r = w.post(
+        "red_cloud",
+        [*NAMED, {"role": "user", "content": "ok"}],
+        data_class="pii",
+        user="jean.tremblay@example.com",
+        tools=CANARY_TOOLS,
+        tool_choice={"type": "function", "function": {"name": "lookup"}},
+        response_format=CANARY_FORMAT,
+        stop=["END"],
+        temperature=0.2,
+    )
+    sent = _sent_off_host(w)
+    return {
+        "status": r.status_code,
+        "leaks": _leaks(w),
+        "off_host_hits": _off_host_hits(w),
+        "body": r.text[:300],
+        "allowlisted_kept": '"temperature": 0.2' in sent and '"lookup"' in sent,
+        "placeholders_sent": "[[" in sent,
+    }
+
+
+@case("redact_direct_fields_carry_no_canary", 200, reaches_off_host=True, redact=True)
+def fields_direct(w):
+    _echo(w, "cloud_main")
+    status, kind = _call_direct(
+        w,
+        prediction={"type": "content", "content": "Jean Tremblay"},
+        metadata={"owner": "Alice Smith"},
+        functions=[{"name": "f", "description": "Marie Gagnon", "parameters": {"type": "object"}}],
+        user="046 454 286",
+    )
+    return {
+        "status": status,
+        "kind": kind,
+        "leaks": _leaks(w),
+        "off_host_hits": _off_host_hits(w),
+    }
+
+
+@case("redact_unknown_field_is_refused_with_zero_calls", 500, redact=True)
+def unknown_field(w):
+    status, kind = _call_direct(w, frobnicate="Jean Tremblay")
+    return {"status": status, "kind": kind, "off_host_hits": _off_host_hits(w)}
+
+
+@case("redact_unredactable_name_is_refused_with_zero_calls", 500, redact=True)
+def pii_in_a_name(w):
+    tools = [{"type": "function", "function": {"name": "jean.tremblay@example.com"}}]
+    status, kind = _call_direct(w, tools=tools)
+    return {"status": status, "kind": kind, "off_host_hits": _off_host_hits(w)}
+
+
+@case("redact_non_local_transcriber_is_refused_before_transcription", None, redact=True)
+def transcriber_per_request(w):
+    from routellm.transcription import TranscriberConfig
+
+    endpoints = w.server.CONTROLLER.endpoints
+    cloud = endpoints.resolve("cloud_main")
+    config = TranscriberConfig(mode="transcribe", api_base=cloud.api_base, model="stt")
+    endpoints._transcribers["red_cloud"] = config
+    try:
+        audio = w.post("red_cloud", AUDIO_MESSAGES, data_class="pii")
+    finally:
+        endpoints._transcribers.pop("red_cloud")
+    return {"status": audio.status_code, "off_host_hits": _off_host_hits(w)}

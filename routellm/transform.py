@@ -408,6 +408,40 @@ class TransformRunner:
                 applied.steps.append((transform, state))
         return current, applied
 
+    def forward_kwargs(self, kwargs: dict, ctx: TransformContext) -> tuple[dict, Applied]:
+        """Run the chain over a whole call, not only its messages.
+
+        A transform that defines `forward_kwargs(kwargs, ctx)` sees every
+        field of the call (a redactor must: `user`, tool definitions and
+        a prefill carry text too); one that does not sees the messages
+        through `forward`. Same refusal rules as `forward`.
+        """
+        if not self.transforms:
+            return kwargs, NOT_APPLIED
+        applied = Applied()
+        current = kwargs
+        for transform in self.transforms:
+            name = type(transform).__name__
+            whole = getattr(transform, "forward_kwargs", None)
+            try:
+                if whole is not None:
+                    current, state = whole(current, ctx)
+                else:
+                    messages, state = transform.forward(current["messages"], ctx)
+                    if not isinstance(messages, list):
+                        raise TransformError(f"{name} returned no message list", transform=name)
+                    if messages is not current["messages"]:
+                        current = {**current, "messages": messages}
+            except TransformError:
+                raise
+            except Exception as exc:
+                raise TransformError(f"{name} failed", transform=name) from exc
+            if not isinstance(current, dict) or not isinstance(current.get("messages"), list):
+                raise TransformError(f"{name} returned no message list", transform=name)
+            if state is not None:
+                applied.steps.append((transform, state))
+        return current, applied
+
     def __iter__(self) -> Iterator[Any]:
         return iter(self.transforms)
 
@@ -437,8 +471,8 @@ def context_for(
 def forward_call(host, kwargs: dict, endpoint: str, reqs, request_id=None, shadow=False):
     """Apply the host's transforms to one call's kwargs.
 
-    Returns `(kwargs, applied)`; `kwargs` is a shallow copy with the
-    transformed messages when a transform ran, else the input itself.
+    Returns `(kwargs, applied)`; `kwargs` is a copy with the transformed
+    messages and fields when a transform ran, else the input itself.
     """
     runner = getattr(host, "transforms", None)
     ctx = context_for(host, reqs, endpoint, request_id, shadow)
@@ -449,10 +483,8 @@ def forward_call(host, kwargs: dict, endpoint: str, reqs, request_id=None, shado
             raise TransformError("class needs redaction but no redactor is loaded")
     if runner is None or not runner.active:
         return kwargs, NOT_APPLIED
-    messages, applied = runner.forward(kwargs["messages"], ctx)
-    if not applied.active and messages is kwargs["messages"]:
-        return kwargs, applied
-    return {**kwargs, "messages": messages}, applied
+    out, applied = runner.forward_kwargs(kwargs, ctx)
+    return out, applied
 
 
 def load_transforms(spec: Any) -> list[Any]:

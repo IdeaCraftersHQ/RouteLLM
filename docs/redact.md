@@ -225,11 +225,50 @@ startup fails. A redact class takes no part in the semantic cache.
 - Mapping ids appear in no cache key, trace or log line.
 - The values live in the token store and nowhere else, protected as above.
 
-**Limits.** The transform sees `messages`. Other request fields
-(`user`, `metadata`, tool and schema descriptions, a message's `name`)
-go upstream as sent. A transcriber runs before the class is known; keep
-it local with a redact class. Recall is the analyzers': measure it
-(the leak and recall harness gates the treatment for production).
+### Request fields beyond `messages`
+
+Every field of a call is in one list. A field in none is refused, so a
+field added upstream never leaves the host unseen; an unset one (`null`,
+`[]`, `{}`) carries nothing and passes.
+
+| Field | Treatment |
+|-------|-----------|
+| `messages[].content`, text parts, tool-call and `function_call` arguments | redacted, restored in the reply |
+| `messages[].name`, `refusal`, `reasoning_content` | redacted |
+| `messages[].tool_calls[].id`, `tool_call_id`, function names | kept; refused if the redactor would change one (an identifier cannot be swapped) |
+| `user`, `metadata` (values) | redacted (`metadata` is not forwarded over HTTP: the server reads the class from it, then drops it) |
+| `tools`, `functions`: descriptions, parameter `description`/`title`, `enum`, `default`, `examples`, `const` | redacted |
+| `tools`, `functions`: names, property names, `required`, `type`, `format`, `$ref`, `pattern` | kept; refused if the redactor would change one |
+| `response_format` `json_schema`: `description` and the schema, as for tools | redacted |
+| `prediction` (prefill) | redacted |
+| `tool_choice`, `function_call` | kept (a keyword, or a function name checked as above) |
+| `stream_options` | kept (`include_usage` only) |
+| `model`, `stream`, `temperature`, `top_p`, `n`, `max_tokens`, `max_completion_tokens`, `seed`, `stop`, `presence_penalty`, `frequency_penalty`, `logit_bias`, `logprobs`, `top_logprobs`, `parallel_tool_calls`, `reasoning_effort`, `extra_headers`, `timeout` | allowed as sent |
+| `audio`, `web_search_options`, a tool that is not a function, a `response_format` that is not text, `json_object` or `json_schema` | refused |
+| any other field | refused |
+
+Redacted definitions and prefills are inputs: nothing in them comes back
+in a reply, so only message text and tool-call arguments are restored. A
+refusal is `500 transform_failed` with no provider call. A local leaf
+gets every field as sent. Over HTTP, a body field the server does not
+declare is dropped before routing (see `ChatCompletionRequest`), so it
+never goes upstream for any class; a library call that passes one is
+refused for a redact class. A message `name` is redacted like text, and a
+provider that restricts its charset may then reject it.
+
+### Transcriber
+
+`transcriber:` runs before a request's class is known, so its audio
+cannot be redacted. When any class has treatment `redact` or `block`,
+every transcriber that can run (the global one and each tier's) must be
+tagged `local`, else startup fails naming the transcriber and the
+classes (`PolicyError`). A transcriber in `mode: passthrough` is
+unaffected. Per request, a redact or block class declared with a
+transcriber that is not local is refused (403, `transcriber:<class>:not_local`)
+before any audio is sent.
+
+**Limits.** Recall is the analyzers': measure it (the leak and recall
+harness gates the treatment for production).
 
 ## Licences
 
