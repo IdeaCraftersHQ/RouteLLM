@@ -137,6 +137,32 @@ audio_tokens_per_second: 32
 #   allow_private_url_hosts: false   # DANGEROUS: allows non-public addresses (SSRF)
 #   tags: [local]
 
+# Video: preprocess-then-route. Video parts (`video_url`, or `file` with a
+# video/* data URL) are sent to a separate local preprocessing service and
+# replaced by sampled frames plus a transcript, then routed as a vision
+# request. Without this section a video part is a 400. A tier may override
+# any key under its own `video:`. Under a policy with a `redact` or `block`
+# class the service must be tagged `local`. Remote URLs are refused.
+# Commented out: the sample should send video nowhere by default.
+#
+# video:
+#   mode: preprocess                 # preprocess | passthrough | refuse
+#   api_base: http://127.0.0.1:9100
+#   api_key_env: VIDEO_PREPROCESSOR_KEY
+#   timeout_ms: 600000
+#   max_video_bytes: 209715200
+#   allow_urls: false
+#   tags: [local]
+#   max_frames: 12
+#   layout: frames                   # frames | contact_sheet
+#   max_side: 768
+#   transcribe: true
+#   language: null                   # per request: X-RouteLLM-Transcribe-Language header
+#   ocr: false
+#   scene_detection: true
+#   require_transcript: false
+#   max_transcript_chars: 20000
+
 # Governance tags (optional). Tags are free-form, but `<ns>:<value>`
 # tags need a known namespace: `jur` is built in (at most one per
 # endpoint, lowercase ISO 3166-1 alpha-2, e.g. `jur:ca`); add more here.

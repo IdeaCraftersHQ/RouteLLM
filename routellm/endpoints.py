@@ -105,6 +105,7 @@ from routellm.governance import (
 )
 from routellm.requirements import DEFAULT_AUDIO_TOKENS_PER_SECOND
 from routellm.transcription import LOCAL_TAG, TranscriberConfig
+from routellm.video import VideoConfig
 
 logger = logging.getLogger(__name__)
 
@@ -530,6 +531,9 @@ class Tier(BaseModel):
         Keys of the top-level `transcriber:` section this tier
         overrides, key by key. Validated, merged with the global
         section, when the registry is built.
+    video : dict, optional
+        Keys of the top-level `video:` section this tier overrides, key
+        by key, validated like `transcriber`.
     """
 
     name: str
@@ -539,6 +543,7 @@ class Tier(BaseModel):
     strong: str | Selector
     weak: str | Selector
     transcriber: dict[str, Any] | None = None
+    video: dict[str, Any] | None = None
 
     def accepts_intent_routing(self) -> bool:
         """Return whether an intent may choose a tier in place of this one.
@@ -631,6 +636,7 @@ class EndpointRegistry:
         governance: bool = False,
         tag_namespaces: list[str] | None = None,
         strict_registry: bool = False,
+        video: dict[str, Any] | None = None,
     ):
         """Initialize the registry.
 
@@ -673,6 +679,8 @@ class EndpointRegistry:
 
         self._transcriber_raw: dict[str, Any] | None = transcriber
         self._transcribers: dict[str | None, TranscriberConfig] = {}
+        self._video_raw: dict[str, Any] | None = video
+        self._videos: dict[str | None, VideoConfig] = {}
         self.intent_targets: list[str] = list(intent_targets or [])
 
         # Advisory tokens charged per second of audio in the context
@@ -692,6 +700,7 @@ class EndpointRegistry:
         self._validate_governance_tags()
         self._validate_tiers()
         self._validate_transcribers()
+        self._validate_videos()
 
     @classmethod
     def from_config(
@@ -751,6 +760,10 @@ class EndpointRegistry:
         if raw_transcriber is not None and not isinstance(raw_transcriber, dict):
             raise ValueError("`transcriber:` must be a mapping")
 
+        raw_video = config.get("video")
+        if raw_video is not None and not isinstance(raw_video, dict):
+            raise ValueError("`video:` must be a mapping")
+
         intents = config.get("intents")
         targets = (intents.get("tiers") or {}).values() if isinstance(intents, dict) else []
         rate = config.get("audio_tokens_per_second")
@@ -768,6 +781,7 @@ class EndpointRegistry:
             governance=config.get("governance", False),
             tag_namespaces=config.get("tag_namespaces"),
             strict_registry=config.get("strict_registry", False),
+            video=raw_video,
         )
 
         # The sidecar merges HERE, on the built registry, so every
@@ -864,6 +878,7 @@ class EndpointRegistry:
         """
         self._validate_tiers()
         self._validate_transcribers()
+        self._validate_videos()
 
     def _validate_governance_tags(self) -> None:
         """Hold every endpoint's tags to the governance grammar.
@@ -1060,6 +1075,99 @@ class EndpointRegistry:
                     )
 
         self._transcribers = built
+
+    @property
+    def video_raw(self) -> dict[str, Any] | None:
+        """Return the raw `video:` section the registry was built with."""
+        return self._video_raw
+
+    def video_for(self, tier: str | None) -> VideoConfig | None:
+        """Return the video settings a request to `tier` runs under.
+
+        The tier's own `video:` keys are laid over the global section.
+        None when neither names a video section; a config in mode
+        `passthrough` or `refuse` is returned as is (`active` is False).
+        """
+        return self._videos.get(tier)
+
+    def videos(self) -> dict[str | None, VideoConfig]:
+        """Return every built video config, keyed by tier (None: the global section)."""
+        return dict(self._videos)
+
+    def _validate_videos(self) -> None:
+        """Build every tier's video config and apply the local rules.
+
+        A `local`-tagged preprocessor must name a non-public `api_base`
+        (judged as written, no DNS) unless `allow_public_base` is set. A
+        local-only tier, or one intent routing may send to a local-only
+        tier, may not preprocess through a service not tagged `local`.
+
+        Raises
+        ------
+        ValueError
+            On an invalid video section or a violated local rule.
+        """
+        built: dict[str | None, VideoConfig] = {}
+        base = self._video_raw or {}
+
+        def build(label: str, spec: dict[str, Any]) -> VideoConfig:
+            try:
+                config = VideoConfig(**spec)
+            except ValidationError as exc:
+                problems = "; ".join(
+                    f"{'.'.join(str(p) for p in err['loc']) or '<section>'}: {err['msg']}"
+                    for err in exc.errors()
+                )
+                raise ValueError(f"invalid {label}: {problems}") from exc
+            if (
+                config.active
+                and config.is_local
+                and not config.allow_public_base
+                and not is_non_public_base(config.api_base or "")
+            ):
+                raise ValueError(
+                    f"invalid {label}: tagged `local` but its `api_base` "
+                    f"{config.api_base!r} is not a loopback, private, link-local, .local, "
+                    ".internal, .lan or single-label host, so videos would leave the "
+                    "machine or network. Point `api_base` at a local host, drop the "
+                    "`local` tag, or set `allow_public_base: true` (dangerous)."
+                )
+            return config
+
+        if self._video_raw is not None:
+            built[None] = build("`video:` section", base)
+        for name, tier in self._tiers.items():
+            if self._video_raw is None and tier.video is None:
+                continue
+            built[name] = build(f"`video:` of tier {name!r}", {**base, **(tier.video or {})})
+
+        def local_only(tier: str) -> bool:
+            leaves = self._leaves(tier)
+            return bool(leaves) and all(LOCAL_TAG in self._endpoints[x].tags for x in leaves)
+
+        for name, config in built.items():
+            if name is None or not config.active or config.is_local:
+                continue
+            if local_only(name):
+                raise ValueError(
+                    f"Tier {name!r} is local-only (every endpoint it can reach is tagged "
+                    f"{LOCAL_TAG!r}) but its video preprocessor is not tagged {LOCAL_TAG!r}, "
+                    f"so video would leave the machine. Point the tier at a local "
+                    f"preprocessor and tag it `tags: [{LOCAL_TAG}]`, or set `mode: refuse`."
+                )
+            if not self._tiers[name].accepts_intent_routing():
+                continue
+            for target in self.intent_targets:
+                if target != name and target in self._tiers and local_only(target):
+                    raise ValueError(
+                        f"Tier {name!r} accepts intent routing and an intent can send it "
+                        f"to local-only tier {target!r}, but its video preprocessor is not "
+                        f"tagged {LOCAL_TAG!r}: video would be sent off-machine before the "
+                        f"move. Use a local preprocessor on {name!r}, set "
+                        f"`intent_routing: false` on it, or `mode: refuse`."
+                    )
+
+        self._videos = built
 
     def _leaves(self, name: str) -> set[str] | None:
         """Return the endpoint names reachable from tier `name`.

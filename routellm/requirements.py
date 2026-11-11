@@ -26,6 +26,8 @@ from typing import Any
 
 import litellm
 
+from routellm.video import is_video_part
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["DEFAULT_AUDIO_TOKENS_PER_SECOND", "Requirements", "audio_seconds", "derive"]
@@ -86,6 +88,8 @@ class Requirements:
         Whether some message carries an image part.
     audio : bool
         Whether some message carries an audio part.
+    video : bool
+        Whether some message still carries a video part (mode `passthrough`).
     tools : bool
         Whether the request defines tools or functions.
     structured_output : bool
@@ -107,6 +111,7 @@ class Requirements:
 
     vision: bool = False
     audio: bool = False
+    video: bool = False
     tools: bool = False
     structured_output: bool = False
     context_needed: int | None = None
@@ -128,6 +133,7 @@ class Requirements:
         return (
             not self.vision
             and not self.audio
+            and not self.video
             and not self.tools
             and not self.structured_output
             and self.context_needed is None
@@ -181,6 +187,7 @@ def derive(
     return Requirements(
         vision=_has_part(messages, _IMAGE_PART_TYPES),
         audio=_has_part(messages, _AUDIO_PART_TYPES),
+        video=_has_video(messages),
         tools=bool(kwargs.get("tools")) or bool(kwargs.get("functions")),
         structured_output=_wants_schema(kwargs.get("response_format")),
         context_needed=_context_needed(messages, kwargs, model, audio_tokens_per_second),
@@ -212,6 +219,18 @@ def _has_part(messages: Any, part_types: frozenset[str]) -> bool:
                 return True
 
     return False
+
+
+def _has_video(messages: Any) -> bool:
+    """Return whether any message content carries a video part."""
+    if not isinstance(messages, list):
+        return False
+    return any(
+        is_video_part(part)
+        for message in messages
+        if isinstance(message, dict) and isinstance(message.get("content"), list)
+        for part in message["content"]
+    )
 
 
 def _wants_schema(response_format: Any) -> bool:
@@ -347,7 +366,7 @@ def _wav_seconds(data: str, size: int) -> float | None:
 
 
 def _without_audio(messages: Any) -> Any:
-    """Return `messages` with audio parts removed, for token counting.
+    """Return `messages` with audio and video parts removed, for token counting.
 
     `litellm.token_counter` raises on an `input_audio` part, and a
     base64 payload counted as text would swamp the estimate. Audio is
@@ -365,7 +384,10 @@ def _without_audio(messages: Any) -> Any:
             kept = [
                 part
                 for part in content
-                if not (isinstance(part, dict) and part.get("type") in _AUDIO_PART_TYPES)
+                if not (
+                    (isinstance(part, dict) and part.get("type") in _AUDIO_PART_TYPES)
+                    or is_video_part(part)
+                )
             ]
             message = {**message, "content": kept}
         cleaned.append(message)

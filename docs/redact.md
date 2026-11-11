@@ -270,6 +270,19 @@ unaffected. Per request, a redact or block class declared with a
 transcriber that is not local is refused (403, `transcriber:<class>:not_local`)
 before any audio is sent.
 
+### Video preprocessor
+
+`video:` is the same case: the video goes to the preprocessing service
+before the class is known. With any `redact` or `block` class, every
+active preprocessor (global and per tier) must be tagged `local`, else
+startup fails (`PolicyError`); `mode: refuse` or `passthrough` is
+unaffected. Per request, a redact or block class with a non-local
+preprocessor is refused (403, `video:<class>:not_local`) before upload.
+The returned transcript and on-screen text are redacted like any user
+text. Frames are images and cannot be: under the default
+`non_text: refuse` a video that yields frames is refused for a `redact`
+class; `non_text: pass` forwards them.
+
 **Gate.** A policy that lets a `redact` class reach the cloud loads only
 when `redact.harness_report` names a passing report stamped for the
 config in effect (see [The harness](#the-harness)). A policy whose redact

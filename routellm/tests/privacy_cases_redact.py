@@ -326,3 +326,110 @@ def transcriber_per_request(w):
     finally:
         endpoints._transcribers.pop("red_cloud")
     return {"status": audio.status_code, "off_host_hits": _off_host_hits(w)}
+
+
+# -- video: the transcript is user content like any other ------------------------------------
+
+VIDEO_MESSAGES = [
+    {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "What does the clip say?"},
+            {"type": "video_url", "video_url": {"url": "data:video/mp4;base64,AAAA"}},
+        ],
+    }
+]
+
+
+def _with_video(w, tier, base, tags, frames, body):
+    """Run `body` with `tier` preprocessing video through the fake service at `base`."""
+    from routellm.tests.fake_video import default_answer
+    from routellm.video import VideoConfig
+
+    def answer(fields, filename, video, transcript):
+        out = default_answer(fields, filename, video, transcript)
+        if not frames:
+            out["scenes"] = [{**s, "frames": []} for s in out["scenes"]]
+        return out
+
+    endpoints = w.server.CONTROLLER.endpoints
+    endpoints._videos[tier] = VideoConfig(api_base=base, tags=tags)
+    try:
+        return body(answer)
+    finally:
+        endpoints._videos.pop(tier)
+
+
+@case(
+    "redact_video_transcript_canary_never_reaches_a_cloud_leaf",
+    200,
+    reaches_off_host=True,
+    redact=True,
+)
+def video_transcript(w):
+    from routellm.tests.fake_video import FakeVideoService
+
+    service = FakeVideoService()
+    service.transcript = (
+        "Jean Tremblay wrote to Marie Gagnon (ACME-12345) at jean.tremblay@example.com:"
+    )
+    _echo(w, "cloud_main")
+
+    def body(answer):
+        service.answer = answer
+        return w.post("red_cloud", VIDEO_MESSAGES, data_class="pii")
+
+    try:
+        r = _with_video(w, "red_cloud", service.base, ["local"], False, body)
+    finally:
+        service.close()
+    return {
+        "status": r.status_code,
+        "leaks": _leaks(w),
+        "off_host_hits": _off_host_hits(w),
+        "service_hits": len(service.hits),
+        "placeholders_sent": "[[" in _sent_off_host(w),
+        "transcript_sent": "Transcript:" in _sent_off_host(w),
+    }
+
+
+@case("redact_video_frames_are_refused_not_sent", 500, redact=True)
+def video_frames(w):
+    from routellm.tests.fake_video import FakeVideoService
+
+    service = FakeVideoService()
+    try:
+        r = _with_video(
+            w,
+            "red_cloud",
+            service.base,
+            ["local"],
+            True,
+            lambda answer: w.post("red_cloud", VIDEO_MESSAGES, data_class="pii"),
+        )
+    finally:
+        service.close()
+    return {"status": r.status_code, "off_host_hits": _off_host_hits(w)}
+
+
+@case("redact_non_local_video_preprocessor_is_refused_before_upload", 403, redact=True)
+def video_per_request(w):
+    from routellm.tests.fake_video import FakeVideoService
+
+    service = FakeVideoService()
+    try:
+        r = _with_video(
+            w,
+            "red_cloud",
+            service.base,
+            [],
+            True,
+            lambda answer: w.post("red_cloud", VIDEO_MESSAGES, data_class="pii"),
+        )
+    finally:
+        service.close()
+    return {
+        "status": r.status_code,
+        "off_host_hits": _off_host_hits(w),
+        "service_hits": len(service.hits),
+    }
