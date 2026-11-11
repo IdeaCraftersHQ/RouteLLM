@@ -21,10 +21,12 @@ from routellm.redact.recognizers import (
     LANGUAGES,
     Span,
     compile_client_id_patterns,
+    find_addresses,
     find_amounts,
     find_client_ids,
     find_date_of_birth,
     find_emails,
+    find_phones,
     find_postal_codes,
     find_ramq,
     find_sin,
@@ -125,6 +127,10 @@ class PresidioAnalyzer:
             "AMOUNT": lambda t, _l: find_amounts(t),
             "DATE_OF_BIRTH": find_date_of_birth,
             "EMAIL": lambda t, _l: find_emails(t),
+            # Presidio's own PHONE_NUMBER scores at the bare threshold; this
+            # one is scored to stand clear of it and wins any overlap.
+            "PHONE": lambda t, _l: find_phones(t),
+            "ADDRESS": lambda t, _l: find_addresses(t),
             "CLIENT_ID": lambda t, _l: find_client_ids(t, client_ids),
         }
         self._wrapped_category = {k: k.lower() for k in wrapped}
