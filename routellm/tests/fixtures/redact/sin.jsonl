@@ -1,0 +1,12 @@
+{"id": "sin-01", "lang": "fr", "text": "Le client, NAS 046 454 286, demande un remboursement.", "spans": [{"start": 15, "end": 26, "category": "sin", "text": "046 454 286"}]}
+{"id": "sin-02", "lang": "fr", "text": "Numéro d'assurance sociale : 130-692-544.", "spans": [{"start": 29, "end": 40, "category": "sin", "text": "130-692-544"}]}
+{"id": "sin-03", "lang": "fr", "text": "NAS 193456787 à valider avant le dépôt.", "spans": [{"start": 4, "end": 13, "category": "sin", "text": "193456787"}]}
+{"id": "sin-04", "lang": "fr", "text": "Veuillez confirmer le NAS 123 456 782 de la cliente.", "spans": [{"start": 26, "end": 37, "category": "sin", "text": "123 456 782"}]}
+{"id": "sin-05", "lang": "fr", "text": "Dossier fiscal 2023, NAS: 046-454-286, déclaration reçue.", "spans": [{"start": 26, "end": 37, "category": "sin", "text": "046-454-286"}]}
+{"id": "sin-06", "lang": "fr", "text": "Le NAS du conjoint est 130 692 544 et celui du dépendant suit.", "spans": [{"start": 23, "end": 34, "category": "sin", "text": "130 692 544"}]}
+{"id": "sin-07", "lang": "en", "text": "Applicant SIN 046 454 286 was verified on intake.", "spans": [{"start": 14, "end": 25, "category": "sin", "text": "046 454 286"}]}
+{"id": "sin-08", "lang": "en", "text": "Social insurance number: 193-456-787, please redact before sharing.", "spans": [{"start": 25, "end": 36, "category": "sin", "text": "193-456-787"}]}
+{"id": "sin-09", "lang": "en", "text": "Her SIN is 123456782; the form is attached.", "spans": [{"start": 11, "end": 20, "category": "sin", "text": "123456782"}]}
+{"id": "sin-10", "lang": "en", "text": "Please update SIN 130 692 544 in the payroll file.", "spans": [{"start": 18, "end": 29, "category": "sin", "text": "130 692 544"}]}
+{"id": "sin-11", "lang": "en", "text": "Customer provided social insurance 046454286 over the phone.", "spans": [{"start": 35, "end": 44, "category": "sin", "text": "046454286"}]}
+{"id": "sin-12", "lang": "en", "text": "Employee record: SIN 193 456 787, start date next month.", "spans": [{"start": 21, "end": 32, "category": "sin", "text": "193 456 787"}]}

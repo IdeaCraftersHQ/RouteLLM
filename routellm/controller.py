@@ -393,6 +393,16 @@ class Controller:
                     "may leave the host, but no redact transform is configured "
                     "(add a `redact:` section)"
                 )
+        if policy is not None and self.transforms.redacts:
+            # Redact + cloud loads only on a passing, current harness report.
+            leaves_host = any(
+                c.treatment == "redact" and set(c.reach) - {"local"}
+                for c in policy.classes.values()
+            )
+            for t in self.transforms.transforms:
+                gate = getattr(t, "harness_gate", None)
+                if leaves_host and gate is not None:
+                    gate.check()
         if egress_gates is not None:
             egress_gates.check(
                 self.endpoints,

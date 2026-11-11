@@ -1,0 +1,10 @@
+{"id": "ramq-01", "lang": "fr", "text": "Carte d'assurance maladie TREJ 8503 1214 expirée.", "spans": [{"start": 26, "end": 40, "category": "ramq", "text": "TREJ 8503 1214"}]}
+{"id": "ramq-02", "lang": "fr", "text": "RAMQ GAGM 9558 2314 du patient, à vérifier.", "spans": [{"start": 5, "end": 19, "category": "ramq", "text": "GAGM 9558 2314"}]}
+{"id": "ramq-03", "lang": "fr", "text": "Numéro RAMQ : LAVS 7811 0509.", "spans": [{"start": 14, "end": 28, "category": "ramq", "text": "LAVS 7811 0509"}]}
+{"id": "ramq-04", "lang": "fr", "text": "La carte soleil BOUP90021105 a été scannée.", "spans": [{"start": 16, "end": 28, "category": "ramq", "text": "BOUP90021105"}]}
+{"id": "ramq-05", "lang": "fr", "text": "Patiente ROYC 6207 2811 admise à la clinique.", "spans": [{"start": 9, "end": 23, "category": "ramq", "text": "ROYC 6207 2811"}]}
+{"id": "ramq-06", "lang": "fr", "text": "Assurance maladie du Québec PELA 9261 1703, renouvellement en cours.", "spans": [{"start": 28, "end": 42, "category": "ramq", "text": "PELA 9261 1703"}]}
+{"id": "ramq-07", "lang": "en", "text": "Health card TREJ 8503 1214 was presented at the desk.", "spans": [{"start": 12, "end": 26, "category": "ramq", "text": "TREJ 8503 1214"}]}
+{"id": "ramq-08", "lang": "en", "text": "RAMQ number GAGM 9558 2314 on file.", "spans": [{"start": 12, "end": 26, "category": "ramq", "text": "GAGM 9558 2314"}]}
+{"id": "ramq-09", "lang": "en", "text": "Patient card: LAVS78110509, valid until next year.", "spans": [{"start": 14, "end": 26, "category": "ramq", "text": "LAVS78110509"}]}
+{"id": "ramq-10", "lang": "en", "text": "Please confirm ROYC 6207 2811 with the clinic.", "spans": [{"start": 15, "end": 29, "category": "ramq", "text": "ROYC 6207 2811"}]}

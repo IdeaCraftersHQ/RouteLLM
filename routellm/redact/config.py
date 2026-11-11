@@ -12,6 +12,7 @@ redact:
     ttl_s: 86400
     encryption: none          # none | aes-gcm (see routellm.redact.cipher)
     key_file: /etc/routellm/redact.key
+  harness_report: redact-report.json   # required to let a redact class reach the cloud
 ```
 
 Everything is checked at startup; nothing is left for the first request
@@ -27,13 +28,22 @@ from typing import Any
 
 from routellm.config import ConfigError
 from routellm.redact.cipher import build_cipher
+from routellm.redact.gate import Gate
 from routellm.redact.placeholders import Redactor
 from routellm.redact.tokens import DEFAULT_TTL_S, TokenStore
 from routellm.redact.transform import RedactTransform, union_languages
 
 __all__ = ["build_redact_transform"]
 
-_KEYS = {"engine", "languages", "client_id_patterns", "models", "non_text", "store"}
+_KEYS = {
+    "engine",
+    "languages",
+    "client_id_patterns",
+    "models",
+    "non_text",
+    "store",
+    "harness_report",
+}
 _STORE_KEYS = {"path", "ttl_s", "encryption", "key_file", "key_env"}
 _LANGUAGES = ("fr", "en")
 
@@ -141,4 +151,7 @@ def build_redact_transform(
         )
     except OSError as exc:
         raise ConfigError(f"redact.store: cannot open the token store: {exc}") from exc
-    return RedactTransform(Redactor(token_store, analyze=analyze), non_text=non_text)
+    transform = RedactTransform(Redactor(token_store, analyze=analyze), non_text=non_text)
+    # Asked by the controller when a policy lets a redact class leave the host.
+    transform.harness_gate = Gate(raw, config_path)
+    return transform

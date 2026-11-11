@@ -38,6 +38,7 @@ from pathlib import Path
 from routellm.pairing import CATALOG_CACHE_ENV, write_snapshot
 from routellm.tests.audit_fixture import audit_section
 from routellm.tests.fake_upstream import FakeUpstream  # noqa: F401  used by the subprocess script
+from routellm.tests.redact_report import write_report
 from routellm.tests.subproc import SUBPROCESS_TIMEOUT
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -368,15 +369,17 @@ def redact_files(tmp_path: Path) -> dict:
     policy["principals"]["suite"]["classes"].append("pii")
     (tmp_path / "policy.json").write_text(json.dumps(policy))
     names = [c for c in CANARIES if " " in c and "@" not in c and c[0].isalpha()]
+    redact = {
+        "engine": "patterns",
+        "client_id_patterns": [*(rf"\b{n}\b" for n in names), r"ACME-\d{5}"],
+        "store": {"path": str(tmp_path / "redact" / "tokens.db")},
+    }
+    redact["harness_report"] = write_report(redact, tmp_path / "harness-report.json")
     return {
         **base,
         "tiers": {**base["tiers"], **red_tiers},
         "comparison": {"enabled": True, "compare_allowed_models": ["cloud_main", "gated_main"]},
-        "redact": {
-            "engine": "patterns",
-            "client_id_patterns": [*(rf"\b{n}\b" for n in names), r"ACME-\d{5}"],
-            "store": {"path": str(tmp_path / "redact" / "tokens.db")},
-        },
+        "redact": redact,
     }
 
 

@@ -179,6 +179,7 @@ redact:
     path: state/tokens.db      # default $XDG_STATE_HOME/routellm/redact/tokens.db
     ttl_s: 86400
     encryption: none
+  harness_report: redact-report.json   # required for redact + cloud; relative to this file
 ```
 
 **Which calls.** For a request whose effective class has treatment
@@ -225,11 +226,74 @@ startup fails. A redact class takes no part in the semantic cache.
 - Mapping ids appear in no cache key, trace or log line.
 - The values live in the token store and nowhere else, protected as above.
 
+**Gate.** A policy that lets a `redact` class reach the cloud loads only
+when `redact.harness_report` names a passing report stamped for the
+config in effect (see [The harness](#the-harness)). A policy whose redact
+classes are local-only needs none.
+
 **Limits.** The transform sees `messages`. Other request fields
 (`user`, `metadata`, tool and schema descriptions, a message's `name`)
 go upstream as sent. A transcriber runs before the class is known; keep
 it local with a redact class. Recall is the analyzers': measure it
-(the leak and recall harness gates the treatment for production).
+(the harness below gates the treatment).
+
+## The harness
+
+```sh
+python -m routellm.redact.harness --config server.yaml --out redact-report.json
+```
+
+Reads the `redact:` section of `--config`, measures it and writes a JSON
+report. Exit 0 when everything passes, 1 on a failed threshold or check,
+2 when it could not run. `--corpus DIR` replaces the shipped fixtures.
+
+**Recall.** The analyzers the section builds run over the labelled corpus
+(`routellm/tests/fixtures/redact/*.jsonl`: synthetic fr and en text; each
+line `{id, lang, text, spans: [{start, end, category, text}]}`, one file
+per category plus `negatives.jsonl`: dates that are not birth dates,
+invoice numbers, versions, Luhn-invalid SINs). A predicted span is right
+when it has the labelled category and overlaps it by at least half. The
+`THRESHOLDS` table in `routellm/redact/harness.py` gives each category a
+minimum recall and precision per engine; under either, the report fails.
+A category with fixtures and no row is reported, not gated, so a new
+recognizer is measured as soon as it has fixtures and gated once it has a
+row. `client_id` is scored against the corpus's `ACME-NNNNN` ids: use
+`client_id_patterns` that match them, or pass a `--corpus` with your own
+synthetic ids.
+
+**Leak.** One run of the real server (policy, auth, audit, cache,
+traces with `capture_content`, the section's redact transform) against a
+recording provider that echoes the last message. Conversations carrying
+the canary values (`canaries.jsonl`) travel as system, multimodal part,
+tool-call arguments, tool result and user text, streamed and not. The
+outbound requests, logs (in-process records, stdout, stderr), traces,
+cache, audit events and, with `store.encryption: aes-gcm`, the token store
+must hold no canary, as written or with separators removed. (A plaintext
+token store holds values by design and is not scanned.) A control request
+through a `raw` class must show its text in the provider request, the
+traces and the cache: a scan that cannot see it is blind and fails. The
+client must read its original text back.
+
+**Re-identification.** No outbound request holds a date and a postal code
+together (matched by shape, independent of the recognizers), name or no
+name. Two identical requests from one principal carry disjoint
+placeholders (the default per-request scope), so they cannot be linked.
+
+**Digest and gate.** The report carries `digest`, `sha256` over the
+engine, languages, client-id patterns, spaCy models and their installed
+versions plus presidio and spaCy versions (presidio engine), the routellm
+version and a hash of the recognizer sources. Store, `non_text` and
+`harness_report` are not in it. At startup, if a policy lets a redact
+class reach the cloud, `redact.harness_report` must name a report that
+exists, has this digest, and in which every category row and the three
+checks (`leak`, `reidentification`, `linkability`) passed. Otherwise the
+server refuses to start, naming the reason; any change to the recognizer
+config calls for a new run.
+
+CI runs the pattern-engine harness (`redact-harness` job, config in
+`routellm/tests/fixtures/redact/harness.yaml`). The presidio engine needs
+the extra and models; its test is marked `redact` and skipped without
+them.
 
 ## Licences
 

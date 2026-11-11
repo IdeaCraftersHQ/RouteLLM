@@ -1,0 +1,10 @@
+{"id": "location-01", "lang": "fr", "text": "Le client habite à Montréal depuis dix ans.", "spans": [{"start": 19, "end": 27, "category": "location", "text": "Montréal"}]}
+{"id": "location-02", "lang": "fr", "text": "La succursale de Québec ferme à 17 h.", "spans": [{"start": 17, "end": 23, "category": "location", "text": "Québec"}]}
+{"id": "location-03", "lang": "fr", "text": "Visite prévue à Sherbrooke et à Gatineau.", "spans": [{"start": 16, "end": 26, "category": "location", "text": "Sherbrooke"}, {"start": 32, "end": 40, "category": "location", "text": "Gatineau"}]}
+{"id": "location-04", "lang": "fr", "text": "Il a déménagé de Trois-Rivières vers Laval.", "spans": [{"start": 17, "end": 31, "category": "location", "text": "Trois-Rivières"}, {"start": 37, "end": 42, "category": "location", "text": "Laval"}]}
+{"id": "location-05", "lang": "fr", "text": "Le sinistre est survenu à Saguenay en janvier.", "spans": [{"start": 26, "end": 34, "category": "location", "text": "Saguenay"}]}
+{"id": "location-06", "lang": "en", "text": "The office in Toronto handles the file.", "spans": [{"start": 14, "end": 21, "category": "location", "text": "Toronto"}]}
+{"id": "location-07", "lang": "en", "text": "She relocated from Ottawa to Vancouver.", "spans": [{"start": 19, "end": 25, "category": "location", "text": "Ottawa"}, {"start": 29, "end": 38, "category": "location", "text": "Vancouver"}]}
+{"id": "location-08", "lang": "en", "text": "Site visit scheduled in Halifax next week.", "spans": [{"start": 24, "end": 31, "category": "location", "text": "Halifax"}]}
+{"id": "location-09", "lang": "en", "text": "The claim originated in Winnipeg.", "spans": [{"start": 24, "end": 32, "category": "location", "text": "Winnipeg"}]}
+{"id": "location-10", "lang": "en", "text": "Shipping to Calgary takes three days.", "spans": [{"start": 12, "end": 19, "category": "location", "text": "Calgary"}]}
