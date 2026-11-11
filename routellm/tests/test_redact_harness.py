@@ -137,7 +137,10 @@ def test_missing_client_id_patterns_fail_client_id(corpus):
 
 def test_a_category_without_a_row_is_reported_not_gated(corpus):
     rows = patterns_scores(corpus)
-    assert rows["address"]["threshold"] is None and rows["address"]["passed"] is True
+    # The pattern engine has no person finder and no row for it: recall 0,
+    # yet the table passes.
+    assert rows["person"]["recall"] == 0.0
+    assert rows["person"]["threshold"] is None and rows["person"]["passed"] is True
 
 
 def test_a_new_category_in_the_output_does_not_fail_the_table(corpus):

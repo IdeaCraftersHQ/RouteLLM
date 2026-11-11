@@ -44,9 +44,9 @@ CANARIES = "canaries.jsonl"
 
 #: Minimum `(recall, precision)` per category and engine. The one table
 #: that gates: a category under either number fails the report. The
-#: pattern recognizers are rules, so their bar is exact; named-entity and
-#: phone recognition (presidio) is statistical and its bar is set under
-#: what the pinned models measure.
+#: pattern recognizers are rules, so their bar is exact; named-entity
+#: recognition and presidio's phone recognizer are statistical, and their
+#: bar is set under what the pinned models measure.
 _RULES: dict[str, tuple[float, float]] = {
     "sin": (1.0, 0.9),
     "ramq": (1.0, 0.9),
@@ -55,6 +55,10 @@ _RULES: dict[str, tuple[float, float]] = {
     "email": (1.0, 0.9),
     "client_id": (1.0, 0.9),
     "date_of_birth": (0.9, 0.9),
+    "phone": (1.0, 0.9),
+    # Number-led phrases ("2024 Capital Drive") read as addresses:
+    # over-detection, the safe side, so precision is not gated.
+    "address": (1.0, 0.0),
 }
 THRESHOLDS: dict[str, dict[str, tuple[float, float]]] = {
     "patterns": dict(_RULES),
