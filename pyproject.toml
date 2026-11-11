@@ -44,7 +44,7 @@ serve = ["fastapi", "shortuuid", "uvicorn", "mcp>=2.3.0,<3"]
 # The `random` router, threshold routing over config tiers and the
 # server need none of it, so none of it is a core dependency.
 ml = ["torch", "transformers", "datasets", "huggingface_hub"]
-eval = ["matplotlib", "pandarallel", "sglang", 'tiktoken', "psutil"]
+eval = ["matplotlib", "sglang", 'tiktoken', "psutil"]
 dev = [
 	"pre-commit",
 	"pytest",
