@@ -8,7 +8,6 @@ import argparse
 import json
 
 from datasets import Dataset, load_dataset
-from pandarallel import pandarallel
 
 from routellm.config import load_config
 from routellm.controller import Controller
@@ -41,7 +40,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.task == "generate":
-        pandarallel.initialize(progress_bar=True)
         battles_df = load_dataset(args.battles_dataset, split="train").to_pandas()
         controller = Controller(
             routers=args.routers,

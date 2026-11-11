@@ -12,6 +12,7 @@ import logging
 import time
 import uuid
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from litellm import acompletion, completion, stream_chunk_builder
@@ -336,6 +337,8 @@ class Controller:
         # task is not garbage collected before it finishes.
         self._trace_writes: set[asyncio.Future] = set()
         self.progress_bar = progress_bar
+        # Default worker count for `batch_calculate_win_rate`; None = pool default.
+        self.max_workers: int | None = None
         self.middleware = middleware or []
         self.decision = decision
         if decision is not None:
@@ -1552,7 +1555,7 @@ class Controller:
             return namespace, "none"
         return namespace, spec.cache or "none"
 
-    def batch_calculate_win_rate(self, prompts, router: str):
+    def batch_calculate_win_rate(self, prompts, router: str, max_workers: int | None = None):
         """Score every prompt's strong win rate with one router.
 
         Used by evaluations and threshold calibration, which need the raw
@@ -1564,6 +1567,9 @@ class Controller:
             Prompts to score.
         router : str
             Name of an initialized router.
+        max_workers : int, optional
+            Worker threads for routers that allow parallel scoring.
+            Default is the `ThreadPoolExecutor` default; 1 scores serially.
 
         Returns
         -------
@@ -1578,15 +1584,21 @@ class Controller:
         self._validate_router_threshold(router, 0)
         router_instance = self.routers[router]
 
-        if not router_instance.NO_PARALLEL:
-            # Needs `pandarallel.initialize()` by the caller.
-            return prompts.parallel_apply(router_instance.calculate_strong_win_rate)
+        if max_workers is None:
+            max_workers = self.max_workers
+        score = router_instance.calculate_strong_win_rate
+        if not router_instance.NO_PARALLEL and (max_workers is None or max_workers > 1):
+            # Threads, not processes: routers hold models and clients that
+            # do not pickle, and their scoring releases the GIL (model
+            # inference, network calls). `map` keeps input order.
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                results = pool.map(score, prompts)
+                if self.progress_bar:
+                    results = tqdm(results, total=len(prompts), desc=f"Scoring {router}")
+                return prompts.__class__(list(results), index=prompts.index)
         if self.progress_bar:
             return prompts.__class__(
-                [
-                    router_instance.calculate_strong_win_rate(p)
-                    for p in tqdm(prompts, desc=f"Scoring {router}")
-                ],
+                [score(p) for p in tqdm(prompts, desc=f"Scoring {router}")],
                 index=prompts.index,
             )
         return prompts.apply(router_instance.calculate_strong_win_rate)

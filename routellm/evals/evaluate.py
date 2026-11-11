@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import psutil
-from pandarallel import pandarallel
 
 from routellm.config import load_config
 from routellm.controller import Controller
@@ -198,7 +197,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     print(args)
 
-    pandarallel.initialize(progress_bar=True, nb_workers=args.parallel)
     controller = Controller(
         routers=args.routers,
         config=load_config(explicit=args.config).data,
@@ -206,6 +204,7 @@ if __name__ == "__main__":
         weak_model=args.weak_model,
         progress_bar=True,
     )
+    controller.max_workers = args.parallel
 
     if args.benchmark == "mmlu":
         print("Running eval for full MMLU.")

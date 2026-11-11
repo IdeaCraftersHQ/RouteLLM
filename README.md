@@ -108,7 +108,7 @@ pip install -e ".[serve]"
 |-------|------|------------|
 | `serve` | fastapi, uvicorn, `mcp` | the OpenAI-compatible server (`mcp` is imported by litellm on any request carrying `tools`) |
 | `ml` | torch, transformers, datasets, huggingface_hub | the `mf`, `bert`, `causal_llm` and `sw_ranking` routers; calibration |
-| `eval` | matplotlib, pandarallel, sglang, tiktoken, psutil | the evaluation scripts |
+| `eval` | matplotlib, sglang, tiktoken, psutil | the evaluation scripts |
 | `pairing` | `hop-top-aim` (models.dev client) | policy-based tier selectors |
 
 The base install and `serve` run the `random` router and threshold routing
