@@ -89,13 +89,15 @@ def config_digest(raw: Mapping[str, Any] | None) -> str:
 class Gate:
     """What a policy enabling redact + cloud asks of the `redact:` section it runs on."""
 
-    def __init__(self, raw: Mapping[str, Any], config_path: str | None = None):
+    def __init__(self, raw: Mapping[str, Any], config_path: str | None = None, resolve_path=None):
         self._raw = dict(raw)
         report = self._raw.pop("harness_report", None)
         if report is not None and (not isinstance(report, str) or not report):
             raise ConfigError("redact.harness_report must be a path")
-        if report and not Path(report).expanduser().is_absolute() and config_path:
-            report = str(Path(config_path).resolve().parent / Path(report).expanduser())
+        if report:
+            from routellm.config import path_resolver
+
+            report = str(path_resolver(config_path, resolve_path)("redact.harness_report", report))
         self.report = report
 
     def check(self) -> None:

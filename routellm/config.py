@@ -45,9 +45,14 @@ String values may read the environment (`${VAR}`, `${VAR:-default}`,
 on the merged mapping, so a variable that a higher layer overrides with a
 literal is never read, and an error names the file that set the value.
 
-Relative paths inside a config file (`prompt_file`, `quality_from`)
-resolve against the file that set them, never the CWD; `origins` records
-which layer last set each leaf key so `resolve_path` can do that.
+Every relative path a config file sets (`policy`, `auth.keys_file`,
+`audit.path`, `audit.hmac_key_file`, `cache.db_path`, `traces.trace_dir`,
+`quality_from`, `redact.store.path`, `redact.store.key_file`,
+`redact.harness_report`) resolves against the directory of the layer file
+that set it, never the CWD and never another layer's file; `origins`
+records which layer last set each leaf key so `resolve_path` can do that.
+A value that no file set (a default, a flag, an environment variable)
+resolves against the CWD. Absolute paths are unchanged; `~` is expanded.
 """
 
 from __future__ import annotations
@@ -157,17 +162,39 @@ class LoadedConfig:
         Returns
         -------
         Path
-            `value` unchanged when it is already absolute or when `key`
-            has no recorded origin; otherwise `value` joined onto the
-            directory of the file that set it.
+            `value` (with a leading `~` expanded) when it is already
+            absolute or when `key` has no recorded origin (a built-in
+            default, a flag or an environment variable: relative to the
+            CWD); otherwise `value` joined onto the directory of the file
+            that set it.
         """
-        path = Path(value)
+        path = Path(value).expanduser()
         if path.is_absolute():
             return path
         origin = self.origins.get(key)
         if origin is None:
             return path
         return origin.parent / path
+
+
+def path_resolver(config_path: str | Path | None = None, resolve_path=None):
+    """Return a `(key, value) -> Path` resolver for path-valued config keys.
+
+    `resolve_path` (`LoadedConfig.resolve_path`) wins: it resolves each
+    value against the layer file that set it. Without it, a relative value
+    resolves against `config_path`'s directory, else the CWD. A leading
+    `~` is expanded either way.
+    """
+    if resolve_path is not None:
+        return resolve_path
+
+    def resolve(key: str, value: Any) -> Path:
+        path = Path(value).expanduser()
+        if path.is_absolute() or not config_path:
+            return path
+        return Path(config_path).resolve().parent / path
+
+    return resolve
 
 
 def system_path() -> Path:

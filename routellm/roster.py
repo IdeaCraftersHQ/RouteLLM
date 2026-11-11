@@ -97,8 +97,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        config = load_config(explicit=args.config).data
-        registry = EndpointRegistry.from_config(config, config_path=args.config)
+        loaded = load_config(explicit=args.config)
+        config = loaded.data
+        registry = EndpointRegistry.from_config(
+            config, config_path=args.config, resolve_path=loaded.resolve_path
+        )
         roster = fetch_roster(args.url, args.suffix)
     except (ConfigError, ValueError, OSError, urllib.error.URLError) as exc:
         print(str(exc), file=sys.stderr)

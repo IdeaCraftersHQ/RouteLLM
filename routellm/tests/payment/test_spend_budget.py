@@ -1129,10 +1129,10 @@ def test_the_server_hands_one_budget_to_both_seams():
         from routellm.endpoints import EndpointRegistry
 
         server.build_registry = staticmethod(
-            lambda file_config, origin: EndpointRegistry.from_config({CONFIG!r})
+            lambda file_config, origin, resolve=None: EndpointRegistry.from_config({CONFIG!r})
         )
         server.load_config = lambda explicit=None, skip_user=None: type(
-            "Loaded", (), {{"layers": [], "chain": [], "data": {{}}, "resolve_path": staticmethod(lambda p: p)}}
+            "Loaded", (), {{"layers": [], "chain": [], "data": {{}}, "resolve_path": staticmethod(lambda k, p: p)}}
         )()
 
         async def main():

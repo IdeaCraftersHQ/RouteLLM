@@ -1238,9 +1238,12 @@ def _explain(config_path: str | None = None) -> str:
         naming the quality it was ordered on, then one line per
         configured intent naming the tier it enters.
     """
-    config = load_config(explicit=config_path).data
+    loaded = load_config(explicit=config_path)
+    config = loaded.data
 
-    registry = EndpointRegistry.from_config(config, config_path=config_path)
+    registry = EndpointRegistry.from_config(
+        config, config_path=config_path, resolve_path=loaded.resolve_path
+    )
     lines: list[str] = []
 
     for name in registry.tier_names():
@@ -1355,9 +1358,12 @@ def _registry_from(
     reaches, so the selectors have to be resolved first: an unresolved
     side names no endpoint and the tier's whole row would read unknown.
     """
-    config = load_config(explicit=config_path).data
+    loaded = load_config(explicit=config_path)
+    config = loaded.data
 
-    registry = EndpointRegistry.from_config(config, config_path=config_path)
+    registry = EndpointRegistry.from_config(
+        config, config_path=config_path, resolve_path=loaded.resolve_path
+    )
     selects = [
         side.select
         for tier in registry.tiers.values()

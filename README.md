@@ -1369,7 +1369,7 @@ config layers loaded: project=/srv/app/.routellm.yaml, flag=/etc/app.yaml; skipp
     cloud_strong: null
   ```
 
-- **Relative paths resolve against their own file.** A user-layer `prompt_file: prompts/router.yaml` means `~/.config/routellm/prompts/router.yaml` wherever the server is run from, not a path relative to the CWD.
+- **Relative paths resolve against their own file.** A user-layer `prompt_file: prompts/router.yaml` means `~/.config/routellm/prompts/router.yaml` wherever the server is run from, not a path relative to the CWD. This holds for every path key (`policy`, `auth.keys_file`, `audit.path`, `audit.hmac_key_file`, `cache.db_path`, `traces.trace_dir`, `quality_from`, `redact.store.path`, `redact.store.key_file`, `redact.harness_report`): a system-layer `auth.keys_file: keys.yaml` is read from the system file's directory even when `ROUTELLM_CONFIG` names a file elsewhere. A value no file set (built-in default) resolves against the CWD; absolute paths are unchanged and a leading `~` is expanded.
 
 ### Governance pinned to the system layer
 
