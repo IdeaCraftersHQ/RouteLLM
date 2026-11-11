@@ -142,6 +142,52 @@ def check_decision_endpoint(policy: Policy, registry, endpoint: str) -> None:
         )
 
 
+#: Treatments whose content must stay on the host (redact) or never leave it (block).
+_HOST_BOUND = ("redact", "block")
+
+
+def transcriber_denial(policy: Policy, config, data_class: str | None) -> str | None:
+    """Return `transcriber:<class>:not_local` when `data_class` may not be transcribed by `config`.
+
+    The audio of a redact or block class cannot be redacted before it
+    is transcribed, so only a transcriber tagged `local` may hear it.
+    None for any other class, a local transcriber or one that is off.
+    """
+    spec = policy.classes.get(data_class) if data_class is not None else None
+    if spec is None or spec.treatment not in _HOST_BOUND:
+        return None
+    if config is None or not config.active or config.is_local:
+        return None
+    return f"transcriber:{data_class}:not_local"
+
+
+def check_transcriber(policy: Policy, registry) -> None:
+    """Refuse a transcriber a redact or block class may not use.
+
+    Audio is transcribed before the request's class is known (the
+    transcript is what the decision step and the routers read), so
+    every transcriber that can run, the global one and each tier's,
+    must be local when any class redacts or blocks.
+
+    Raises
+    ------
+    PolicyError
+        Naming the transcriber and each class that refuses it.
+    """
+    classes = [n for n, c in policy.classes.items() if c.treatment in _HOST_BOUND]
+    if not classes:
+        return
+    for scope, config in registry.transcribers().items():
+        if config.active and not config.is_local:
+            where = "global" if scope is None else scope
+            raise PolicyError(
+                f"transcriber {where!r} hears audio before its class is known, but class "
+                f"{', '.join(classes)} (redact or block) may not reach a transcriber that is "
+                "not tagged `local`; point it at a local service and add `tags: [local]`, "
+                "or set `mode: passthrough`"
+            )
+
+
 def route_error(plain: type[Exception]):
     """Return a factory for the error a failed candidate check raises.
 

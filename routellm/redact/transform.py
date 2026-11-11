@@ -31,6 +31,7 @@ from collections.abc import Callable
 from typing import Any
 
 from routellm.auth import current_principal
+from routellm.redact.fields import redact_fields, redact_messages
 from routellm.redact.placeholders import RedactContext, Redactor, Restorer, split_incomplete
 from routellm.redact.tokens import RedactError
 from routellm.transform import LOCAL_ONLY, HoldbackRestorer, TransformContext, map_text
@@ -129,8 +130,20 @@ class RedactTransform:
     # -- out -----------------------------------------------------------------------
 
     def forward(self, messages: list[dict], ctx: TransformContext) -> tuple[list[dict], Any]:
+        out, state = self.forward_kwargs({"messages": messages}, ctx)
+        return out["messages"], state
+
+    def forward_kwargs(self, kwargs: dict, ctx: TransformContext) -> tuple[dict, Any]:
+        """Redact the whole call: the messages and every field outside them.
+
+        The fields are classified in `routellm.redact.fields`; one it
+        does not know, or cannot redact, refuses the request.
+        """
         if ctx.treatment != TREATMENT or (ctx.reach and ctx.reach <= LOCAL_ONLY):
-            return messages, None
+            return kwargs, None
+        messages = kwargs["messages"]
+        if not isinstance(messages, list):
+            raise RedactError("messages are not a list and cannot be redacted")
         if self.non_text == "refuse":
             _refuse_non_text(messages)
         principal = current_principal.get()
@@ -169,7 +182,10 @@ class RedactTransform:
             doc = walk(doc)
             return json.dumps(doc, ensure_ascii=False) if changed[0] else raw
 
-        out = map_text(messages, red, red_json)
+        out_messages = map_text(messages, red, red_json)
+        redact_messages(out_messages, red)
+        out = redact_fields(kwargs, red)
+        out["messages"] = out_messages
         if mapping[0] is None:
             return out, None  # no text at all: nothing was minted, nothing to restore
         return out, _Ctx(self.redactor.restorer(mapping[0], rctx))

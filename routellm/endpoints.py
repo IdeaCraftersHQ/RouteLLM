@@ -980,6 +980,10 @@ class EndpointRegistry:
         """
         return self._transcribers.get(tier)
 
+    def transcribers(self) -> dict[str | None, TranscriberConfig]:
+        """Return every built transcriber config, keyed by tier (None: the global section)."""
+        return dict(self._transcribers)
+
     def _validate_transcribers(self) -> None:
         """Build every tier's transcriber config and apply the local-only rule.
 
