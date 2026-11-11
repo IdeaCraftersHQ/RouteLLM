@@ -82,12 +82,14 @@ def _run(
     policy_extra=None,
     config_extra=None,
     expect_ok=True,
+    keys_text=None,
 ):
     extra = {}
     if auth:
         keys = tmp_path / "keys.yaml"
         keys.write_text(
-            f"""
+            keys_text
+            or f"""
 keys:
   - key_sha256: "{sha(KEY_A)}"
     principal: team-a

@@ -35,6 +35,19 @@ mf:
 #                                      # unused when a `policy:` is loaded (its
 #                                      # `principals` decides)
 #
+# One key may carry several clients (a local proxy in front of this
+# server). Opt in per entry; other entries ignore the header. Header
+# present and listed -> principal `<principal>/<client>` (the client's
+# profile/allowed_classes, else the entry's); present but unlisted -> 403;
+# absent -> the entry's own principal:
+#
+#     - key_sha256: "<sha256 of the proxy's key>"
+#       principal: gateway
+#       client_header: X-Route-Client
+#       clients:
+#         web: {profile: web, allowed_classes: [public]}
+#         batch: {}
+#
 # A relative path resolves against this file's directory. Keep the file
 # owner-only (0600). The matched caller is on `request.state.principal`.
 # auth:

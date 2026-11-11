@@ -14,6 +14,21 @@ The keys file holds hashes, never keys:
         profile: default            # optional
         allowed_classes: [public]   # optional
 
+A key held by a trusted proxy may carry several clients, named per
+request by a header. Opt in per entry; entries without it are
+untouched and the header is ignored for them:
+
+        client_header: X-Route-Client
+        clients:
+          web: {profile: web, allowed_classes: [public]}   # both optional
+          batch: {}
+
+With the header present and listed, the principal is `<principal>/<client>`
+(profile and classes from the client, else the entry's); present but not
+listed is a 403 (`ClientNotListed`); absent is the entry's own principal.
+Only a key that is already valid reaches this step, so use it only for a
+proxy that sets the header itself and strips any the caller sent.
+
 A key never sits in the config or on a command line; the operator
 hashes it (`printf %s "$KEY" | shasum -a 256`) and keeps the key
 wherever the caller does. An entry carrying a clear-text key
@@ -28,17 +43,20 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
+from collections.abc import Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
 import yaml
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from routellm.config import ConfigError
 
 _HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
+_HEADER_TOKEN = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+_CLIENT_NAME = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 _CLEARTEXT_FIELDS = ("key", "api_key", "secret", "token", "bearer", "password")
 
 
@@ -69,10 +87,44 @@ class Principal:
 current_principal: ContextVar[Principal | None] = ContextVar("current_principal", default=None)
 
 
-class PrincipalResolver(Protocol):
-    """Maps a presented bearer token to a principal, or None if unknown."""
+class ClientNotListed(Exception):
+    """A valid key whose `client_header` names a client the entry does not list.
 
-    def resolve(self, bearer: str) -> Principal | None: ...
+    The value sent is deliberately not kept: it is caller-controlled and
+    unbounded, and nothing downstream needs it.
+    """
+
+    def __init__(self, header: str):
+        super().__init__(f"client named by header {header} is not listed for this key")
+        self.header = header
+
+
+class PrincipalResolver(Protocol):
+    """Maps a presented bearer token to a principal, or None if unknown.
+
+    `headers` are the request headers, for a resolver that lets a key
+    name a client; one that does not may ignore them. It may raise
+    `ClientNotListed` for a valid key naming an unlisted client.
+    """
+
+    def resolve(
+        self, bearer: str, headers: Mapping[str, str] | None = None
+    ) -> Principal | None: ...
+
+
+@dataclass(frozen=True)
+class TrustedProxy:
+    """An entry's opt-in: the header naming a client, and the clients it may name."""
+
+    header: str
+    clients: dict[str, Principal]
+
+
+class _Client(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    profile: str | None = None
+    allowed_classes: list[str] | None = None
 
 
 class _Entry(BaseModel):
@@ -82,6 +134,23 @@ class _Entry(BaseModel):
     principal: str
     profile: str | None = None
     allowed_classes: list[str] = []
+    client_header: str | None = None
+    clients: dict[str, _Client] | None = None
+
+    @model_validator(mode="after")
+    def _trusted_proxy(self) -> _Entry:
+        if (self.client_header is None) != (self.clients is None):
+            raise ValueError("`client_header` and `clients` go together")
+        if self.client_header is None:
+            return self
+        if not _HEADER_TOKEN.match(self.client_header):
+            raise ValueError("`client_header` is not a valid header name")
+        if not self.clients:
+            raise ValueError("`clients` must name at least one client")
+        for name in self.clients:
+            if not _CLIENT_NAME.match(name):
+                raise ValueError("client names are 1-64 chars of letters, digits, `.`, `_`, `-`")
+        return self
 
 
 class _KeysFile(BaseModel):
@@ -91,30 +160,47 @@ class _KeysFile(BaseModel):
 
 
 class StaticKeyResolver:
-    """Resolve against a fixed list of (sha256, principal) pairs.
+    """Resolve against a fixed list of (sha256, principal[, proxy]) entries.
 
     The presented key is hashed and compared with every entry using a
     constant-time comparison, with no early exit, so response time does
-    not say which entry (if any) was close.
+    not say which entry (if any) was close. Only after a key matches is
+    the client header read, and only for an entry that opted in.
     """
 
-    def __init__(self, entries: list[tuple[bytes, Principal]]):
-        self._entries = entries
+    def __init__(self, entries: list[tuple]):
+        self._entries = [(e[0], e[1], e[2] if len(e) > 2 else None) for e in entries]
 
     def __len__(self) -> int:
         return len(self._entries)
 
     def principals(self) -> list[Principal]:
-        """Every principal in the map, for startup checks."""
-        return [p for _, p in self._entries]
+        """Every principal the map can yield, client ones included, for startup checks."""
+        out: list[Principal] = []
+        for _, principal, proxy in self._entries:
+            out.append(principal)
+            if proxy is not None:
+                out.extend(proxy.clients.values())
+        return out
 
-    def resolve(self, bearer: str) -> Principal | None:
+    def resolve(self, bearer: str, headers: Mapping[str, str] | None = None) -> Principal | None:
         digest = hashlib.sha256(bearer.encode("utf-8")).digest()
-        found: Principal | None = None
-        for known, principal in self._entries:
+        found: tuple[Principal, TrustedProxy | None] | None = None
+        for known, principal, proxy in self._entries:
             if hmac.compare_digest(digest, known):
-                found = principal
-        return found
+                found = (principal, proxy)
+        if found is None:
+            return None
+        principal, proxy = found
+        if proxy is None or headers is None:
+            return principal
+        client = headers.get(proxy.header)
+        if client is None:
+            return principal
+        resolved = proxy.clients.get(client)
+        if resolved is None:
+            raise ClientNotListed(proxy.header)
+        return resolved
 
 
 def load_keys_file(path: Path) -> StaticKeyResolver:
@@ -156,8 +242,9 @@ def load_keys_file(path: Path) -> StaticKeyResolver:
         # Pydantic echoes input values only in `input`, which is not used.
         raise ConfigError(f"auth.keys_file {path}: {problems}") from None
 
-    entries: list[tuple[bytes, Principal]] = []
+    entries: list[tuple[bytes, Principal, TrustedProxy | None]] = []
     seen: set[bytes] = set()
+    names: set[str] = set()
     for i, e in enumerate(parsed.keys):
         if not _HEX64.match(e.key_sha256):
             raise ConfigError(
@@ -168,7 +255,32 @@ def load_keys_file(path: Path) -> StaticKeyResolver:
         if digest in seen:
             raise ConfigError(f"auth.keys_file {path}: entry {i} repeats an earlier key_sha256")
         seen.add(digest)
-        entries.append((digest, Principal(e.principal, e.profile, tuple(e.allowed_classes))))
+        principal = Principal(e.principal, e.profile, tuple(e.allowed_classes))
+        proxy = None
+        if e.client_header is not None and e.clients is not None:
+            proxy = TrustedProxy(
+                e.client_header,
+                {
+                    name: Principal(
+                        f"{e.principal}/{name}",
+                        c.profile if c.profile is not None else e.profile,
+                        tuple(
+                            c.allowed_classes
+                            if c.allowed_classes is not None
+                            else e.allowed_classes
+                        ),
+                    )
+                    for name, c in e.clients.items()
+                },
+            )
+        for who in [principal, *(proxy.clients.values() if proxy else ())]:
+            if who.principal in names:
+                raise ConfigError(
+                    f"auth.keys_file {path}: entry {i} yields principal "
+                    f"`{who.principal}`, already taken by another entry or client"
+                )
+            names.add(who.principal)
+        entries.append((digest, principal, proxy))
     if not entries:
         raise ConfigError(f"auth.keys_file {path}: no keys; auth on with no keys admits nobody")
     return StaticKeyResolver(entries)

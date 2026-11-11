@@ -23,7 +23,13 @@ from pydantic import BaseModel, Field
 
 from routellm.audit import Auditor, build_audit
 from routellm.audit_http import Trail, settle
-from routellm.auth import PrincipalResolver, bearer_token, build_auth, current_principal
+from routellm.auth import (
+    ClientNotListed,
+    PrincipalResolver,
+    bearer_token,
+    build_auth,
+    current_principal,
+)
 from routellm.capabilities import Capabilities, side_capabilities, union
 from routellm.comparison import COMPARE_HEADER
 from routellm.config import layer_summary, load_config
@@ -651,7 +657,7 @@ def require_principal(http_request: Request):
     if resolver is None:
         return None
     token = bearer_token(http_request.headers.get("authorization"))
-    principal = resolver.resolve(token) if token else None
+    principal = resolver.resolve(token, http_request.headers) if token else None
     if principal is None:
         raise Unauthorized
     http_request.state.principal = principal
@@ -681,6 +687,18 @@ async def _unauthorized(request: Request, _exc: Unauthorized) -> JSONResponse:
         headers={"WWW-Authenticate": "Bearer"},
     )
     return settle(_early_trail(request), response, "refused", 401, "unauthorized")
+
+
+@app.exception_handler(ClientNotListed)
+async def _client_not_listed(request: Request, exc: ClientNotListed) -> JSONResponse:
+    response = JSONResponse(
+        {
+            "object": "error",
+            "message": f"Header {exc.header} names a client not listed for this key",
+        },
+        status_code=403,
+    )
+    return settle(_early_trail(request), response, "refused", 403, "client_not_listed")
 
 
 @app.exception_handler(RequestValidationError)
