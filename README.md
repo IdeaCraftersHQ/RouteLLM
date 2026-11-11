@@ -282,6 +282,32 @@ keys:
 
 An entry holding a clear-text key stops startup. Keys are compared in constant time and never logged. The matched caller is a `routellm.auth.Principal` on `request.state.principal` and is passed to `Controller.acompletion(principal=...)`; it is never sent upstream. Swap the static map for another source by implementing `routellm.auth.PrincipalResolver`. With auth on, widening `--host` no longer warns.
 
+#### Several clients behind one key
+
+A local proxy that holds one key can name its own clients per request. Opt in on that entry only; every other entry behaves as above and ignores the header, so a caller cannot change its identity by sending it:
+
+```yaml
+keys:
+  - key_sha256: "<sha256 of the proxy's key>"
+    principal: gateway
+    profile: default                 # fallback for clients below
+    allowed_classes: [public]        # fallback for clients below
+    client_header: X-Route-Client    # a valid header name
+    clients:                         # non-empty; names are 1-64 of [A-Za-z0-9._-]
+      web: {profile: web, allowed_classes: [public, internal]}
+      batch: {}
+```
+
+| Request | Resolves to |
+|---|---|
+| key valid, header absent | `gateway` |
+| key valid, header `web` | `gateway/web` (its `profile`/`allowed_classes`, else the entry's) |
+| key valid, header names an unlisted client | `403`, naming the header, never the value |
+| entry without `client_header`, any header | the entry's own principal |
+| key unknown | `401` |
+
+Policy `principals.gateway/web`, audit, cache isolation and redaction scope all key on the resolved principal, and a policy principal naming an unlisted `<entry>/<client>` stops startup like any other principal without a key. The header is never sent upstream. Use it only behind a proxy that sets the header itself and strips any the caller sent: whoever holds the key can name any listed client. The keys file's contents are not config, so no new key appears under `auth:`, which stays a system-layer pinned section; protect the file itself.
+
 For most use-cases, **we recommend the `mf` router** as we have evaluated it to be very strong and lightweight.
 
 ### Endpoints
