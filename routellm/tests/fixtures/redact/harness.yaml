@@ -1,0 +1,5 @@
+# The config the CI harness job measures: the pattern engine, with the
+# client-id format the corpus uses.
+redact:
+  engine: patterns
+  client_id_patterns: ['ACME-\d{5}']

@@ -1,0 +1,11 @@
+{"id": "amount-01", "lang": "fr", "text": "Le solde est de 1 234,56 $ au 31 mars.", "spans": [{"start": 16, "end": 26, "category": "amount", "text": "1 234,56 $"}]}
+{"id": "amount-02", "lang": "fr", "text": "Paiement reçu : 12,50 € par virement.", "spans": [{"start": 16, "end": 23, "category": "amount", "text": "12,50 €"}]}
+{"id": "amount-03", "lang": "fr", "text": "Frais de dossier de 300 CAD à régler.", "spans": [{"start": 20, "end": 27, "category": "amount", "text": "300 CAD"}]}
+{"id": "amount-04", "lang": "fr", "text": "Prêt de 25 000 $ accordé sur cinq ans.", "spans": [{"start": 8, "end": 16, "category": "amount", "text": "25 000 $"}]}
+{"id": "amount-05", "lang": "fr", "text": "Montant dû : 1 250,00 $ avant taxes.", "spans": [{"start": 13, "end": 23, "category": "amount", "text": "1 250,00 $"}]}
+{"id": "amount-06", "lang": "fr", "text": "Remboursement partiel de 89,99 $ émis hier.", "spans": [{"start": 25, "end": 32, "category": "amount", "text": "89,99 $"}]}
+{"id": "amount-07", "lang": "fr", "text": "La prime annuelle s'élève à 2 480 $.", "spans": [{"start": 28, "end": 35, "category": "amount", "text": "2 480 $"}]}
+{"id": "amount-08", "lang": "en", "text": "Outstanding balance of 4 500 $ as of June.", "spans": [{"start": 23, "end": 30, "category": "amount", "text": "4 500 $"}]}
+{"id": "amount-09", "lang": "en", "text": "Wire of 750 EUR received today.", "spans": [{"start": 8, "end": 15, "category": "amount", "text": "750 EUR"}]}
+{"id": "amount-10", "lang": "en", "text": "The deductible is 1 000 CAD per claim.", "spans": [{"start": 18, "end": 27, "category": "amount", "text": "1 000 CAD"}]}
+{"id": "amount-11", "lang": "en", "text": "Refund issued for 56,30 $ on the card.", "spans": [{"start": 18, "end": 25, "category": "amount", "text": "56,30 $"}]}

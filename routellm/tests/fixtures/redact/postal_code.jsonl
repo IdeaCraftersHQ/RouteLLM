@@ -1,0 +1,11 @@
+{"id": "postal_code-01", "lang": "fr", "text": "Adresse : 1234, rue Saint-Denis, Montréal (Québec) H2X 3K8.", "spans": [{"start": 51, "end": 58, "category": "postal_code", "text": "H2X 3K8"}]}
+{"id": "postal_code-02", "lang": "fr", "text": "Livrer au 87, boulevard Laurier, Québec, G1V 4T3.", "spans": [{"start": 41, "end": 48, "category": "postal_code", "text": "G1V 4T3"}]}
+{"id": "postal_code-03", "lang": "fr", "text": "Code postal J4K1A1 pour la succursale de Longueuil.", "spans": [{"start": 12, "end": 18, "category": "postal_code", "text": "J4K1A1"}]}
+{"id": "postal_code-04", "lang": "fr", "text": "Siège : 560, avenue Cartier, Gatineau QC j8x-2p7.", "spans": [{"start": 41, "end": 48, "category": "postal_code", "text": "j8x-2p7"}]}
+{"id": "postal_code-05", "lang": "fr", "text": "Retour à 45, chemin du Lac, Sherbrooke (Québec) J1H 5N2.", "spans": [{"start": 48, "end": 55, "category": "postal_code", "text": "J1H 5N2"}]}
+{"id": "postal_code-06", "lang": "fr", "text": "Envoyer le colis à Laval, H7N 2B6, avant vendredi.", "spans": [{"start": 26, "end": 33, "category": "postal_code", "text": "H7N 2B6"}]}
+{"id": "postal_code-07", "lang": "en", "text": "Ship to 210 King Street, Ottawa ON K1P 5G3.", "spans": [{"start": 35, "end": 42, "category": "postal_code", "text": "K1P 5G3"}]}
+{"id": "postal_code-08", "lang": "en", "text": "Mailing address: 9 Elm Road, Toronto, M5V 2T6.", "spans": [{"start": 38, "end": 45, "category": "postal_code", "text": "M5V 2T6"}]}
+{"id": "postal_code-09", "lang": "en", "text": "Postal code H3B 4W8 for the Montreal office.", "spans": [{"start": 12, "end": 19, "category": "postal_code", "text": "H3B 4W8"}]}
+{"id": "postal_code-10", "lang": "en", "text": "Our branch at 77 Rue Principale, Trois-Rivières QC G9A 1B2.", "spans": [{"start": 51, "end": 58, "category": "postal_code", "text": "G9A 1B2"}]}
+{"id": "postal_code-11", "lang": "en", "text": "Return label: Quebec City, G1R-4P5.", "spans": [{"start": 27, "end": 34, "category": "postal_code", "text": "G1R-4P5"}]}

@@ -1,0 +1,11 @@
+{"id": "person-01", "lang": "fr", "text": "Bonjour, Jean Tremblay a appelé ce matin.", "spans": [{"start": 9, "end": 22, "category": "person", "text": "Jean Tremblay"}]}
+{"id": "person-02", "lang": "fr", "text": "Résume le dossier de Marie Gagnon pour la réunion.", "spans": [{"start": 21, "end": 33, "category": "person", "text": "Marie Gagnon"}]}
+{"id": "person-03", "lang": "fr", "text": "Mme Sophie Lavoie souhaite modifier son contrat.", "spans": [{"start": 4, "end": 17, "category": "person", "text": "Sophie Lavoie"}]}
+{"id": "person-04", "lang": "fr", "text": "Le conseiller Pierre-Luc Bouchard rappellera demain.", "spans": [{"start": 14, "end": 33, "category": "person", "text": "Pierre-Luc Bouchard"}]}
+{"id": "person-05", "lang": "fr", "text": "Transmettre à Isabelle Roy et à Marc-André Pelletier.", "spans": [{"start": 14, "end": 26, "category": "person", "text": "Isabelle Roy"}, {"start": 32, "end": 52, "category": "person", "text": "Marc-André Pelletier"}]}
+{"id": "person-06", "lang": "fr", "text": "La plainte de Nathalie Côté a été reçue lundi.", "spans": [{"start": 14, "end": 27, "category": "person", "text": "Nathalie Côté"}]}
+{"id": "person-07", "lang": "en", "text": "Please email Alice Smith and cc Marie Gagnon.", "spans": [{"start": 13, "end": 24, "category": "person", "text": "Alice Smith"}, {"start": 32, "end": 44, "category": "person", "text": "Marie Gagnon"}]}
+{"id": "person-08", "lang": "en", "text": "Mr. Robert Johnson asked for a refund.", "spans": [{"start": 4, "end": 18, "category": "person", "text": "Robert Johnson"}]}
+{"id": "person-09", "lang": "en", "text": "The claim filed by Emily Carter was approved.", "spans": [{"start": 19, "end": 31, "category": "person", "text": "Emily Carter"}]}
+{"id": "person-10", "lang": "en", "text": "Ask Daniel Murphy to join the call.", "spans": [{"start": 4, "end": 17, "category": "person", "text": "Daniel Murphy"}]}
+{"id": "person-11", "lang": "en", "text": "Meeting notes: Olivia Brown will present the audit.", "spans": [{"start": 15, "end": 27, "category": "person", "text": "Olivia Brown"}]}

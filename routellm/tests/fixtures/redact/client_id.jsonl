@@ -1,0 +1,10 @@
+{"id": "client_id-01", "lang": "fr", "text": "Dossier client ACME-12345 en attente.", "spans": [{"start": 15, "end": 25, "category": "client_id", "text": "ACME-12345"}]}
+{"id": "client_id-02", "lang": "fr", "text": "Le contrat ACME-00872 est renouvelé.", "spans": [{"start": 11, "end": 21, "category": "client_id", "text": "ACME-00872"}]}
+{"id": "client_id-03", "lang": "fr", "text": "Ouvrir les fiches ACME-45019 et ACME-45020.", "spans": [{"start": 18, "end": 28, "category": "client_id", "text": "ACME-45019"}, {"start": 32, "end": 42, "category": "client_id", "text": "ACME-45020"}]}
+{"id": "client_id-04", "lang": "fr", "text": "Réf. client: ACME-77310, priorité haute.", "spans": [{"start": 13, "end": 23, "category": "client_id", "text": "ACME-77310"}]}
+{"id": "client_id-05", "lang": "fr", "text": "Transfert du compte ACME-30001 vers l'équipe nord.", "spans": [{"start": 20, "end": 30, "category": "client_id", "text": "ACME-30001"}]}
+{"id": "client_id-06", "lang": "en", "text": "Client file ACME-12345 is pending review.", "spans": [{"start": 12, "end": 22, "category": "client_id", "text": "ACME-12345"}]}
+{"id": "client_id-07", "lang": "en", "text": "Escalate ACME-99120 to the account manager.", "spans": [{"start": 9, "end": 19, "category": "client_id", "text": "ACME-99120"}]}
+{"id": "client_id-08", "lang": "en", "text": "Merge ACME-20488 into ACME-20489.", "spans": [{"start": 6, "end": 16, "category": "client_id", "text": "ACME-20488"}, {"start": 22, "end": 32, "category": "client_id", "text": "ACME-20489"}]}
+{"id": "client_id-09", "lang": "en", "text": "Customer ACME-65432 asked for a callback.", "spans": [{"start": 9, "end": 19, "category": "client_id", "text": "ACME-65432"}]}
+{"id": "client_id-10", "lang": "en", "text": "Ticket for account ACME-51207 closed.", "spans": [{"start": 19, "end": 29, "category": "client_id", "text": "ACME-51207"}]}

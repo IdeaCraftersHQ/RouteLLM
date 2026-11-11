@@ -1,0 +1,20 @@
+{"id": "negatives-01", "lang": "fr", "text": "La réunion du 12 mars 2024 est reportée au 3 avril 2024.", "spans": []}
+{"id": "negatives-02", "lang": "fr", "text": "Facture no 2024-0345 émise le 2024-03-15, échéance 2024-04-15.", "spans": []}
+{"id": "negatives-03", "lang": "fr", "text": "Mise à jour vers la version 3.4.1 prévue le 12/03/2025.", "spans": []}
+{"id": "negatives-04", "lang": "fr", "text": "Le numéro 123 456 789 n'est pas un NAS valide.", "spans": []}
+{"id": "negatives-05", "lang": "fr", "text": "Référence de commande 4587 1203 9981 pour l'entrepôt.", "spans": []}
+{"id": "negatives-06", "lang": "fr", "text": "Code produit D1D 1D1 et lot A1A-1A1B.", "spans": []}
+{"id": "negatives-07", "lang": "fr", "text": "La température a atteint 12,5 degrés et 300 personnes sont venues.", "spans": []}
+{"id": "negatives-08", "lang": "fr", "text": "Le projet compte 25 000 lignes de code et 1 234 tests.", "spans": []}
+{"id": "negatives-09", "lang": "fr", "text": "Bonjour, pouvez-vous résumer la politique de remboursement ?", "spans": []}
+{"id": "negatives-10", "lang": "fr", "text": "Ticket INC-20931 ouvert, voir le dossier partagé.", "spans": []}
+{"id": "negatives-11", "lang": "en", "text": "The meeting on March 12, 2024 was moved to April 3, 2024.", "spans": []}
+{"id": "negatives-12", "lang": "en", "text": "Invoice 2024-0345 dated 03/15/2024 is due 04/15/2024.", "spans": []}
+{"id": "negatives-13", "lang": "en", "text": "Upgrade to v2.10.4 before the 07/21/2025 release.", "spans": []}
+{"id": "negatives-14", "lang": "en", "text": "The value 123 456 789 is not a valid SIN.", "spans": []}
+{"id": "negatives-15", "lang": "en", "text": "Order reference ABCD 1234 5678 is not a health card.", "spans": []}
+{"id": "negatives-16", "lang": "en", "text": "Error code Z9Z 9Z9 was logged by the build.", "spans": []}
+{"id": "negatives-17", "lang": "en", "text": "We processed 4500 requests in 12 minutes.", "spans": []}
+{"id": "negatives-18", "lang": "en", "text": "The server listens on port 6060 and 8080.", "spans": []}
+{"id": "negatives-19", "lang": "en", "text": "Summarize the privacy policy in three bullet points.", "spans": []}
+{"id": "negatives-20", "lang": "en", "text": "Release notes mention commit 3f2a9c1 and build 20260512.", "spans": []}

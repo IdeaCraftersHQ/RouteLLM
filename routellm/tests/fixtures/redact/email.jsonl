@@ -1,0 +1,10 @@
+{"id": "email-01", "lang": "fr", "text": "Écrire à jean.tremblay@example.com pour le suivi.", "spans": [{"start": 9, "end": 34, "category": "email", "text": "jean.tremblay@example.com"}]}
+{"id": "email-02", "lang": "fr", "text": "Courriel : marie_gagnon+factures@example.org.", "spans": [{"start": 11, "end": 44, "category": "email", "text": "marie_gagnon+factures@example.org"}]}
+{"id": "email-03", "lang": "fr", "text": "Mettre sophie.lavoie@clinique.example.ca en copie conforme.", "spans": [{"start": 7, "end": 40, "category": "email", "text": "sophie.lavoie@clinique.example.ca"}]}
+{"id": "email-04", "lang": "fr", "text": "Contact secondaire (p-l.bouchard@example.qc.ca), à rappeler.", "spans": [{"start": 20, "end": 46, "category": "email", "text": "p-l.bouchard@example.qc.ca"}]}
+{"id": "email-05", "lang": "fr", "text": "Adresse de facturation comptes@example.com et ti@example.net.", "spans": [{"start": 23, "end": 42, "category": "email", "text": "comptes@example.com"}, {"start": 46, "end": 60, "category": "email", "text": "ti@example.net"}]}
+{"id": "email-06", "lang": "en", "text": "Please email alice.smith@example.com with the report.", "spans": [{"start": 13, "end": 36, "category": "email", "text": "alice.smith@example.com"}]}
+{"id": "email-07", "lang": "en", "text": "Contact: r.johnson@mail.example.co.uk.", "spans": [{"start": 9, "end": 37, "category": "email", "text": "r.johnson@mail.example.co.uk"}]}
+{"id": "email-08", "lang": "en", "text": "cc billing-team@example.org on the thread.", "spans": [{"start": 3, "end": 27, "category": "email", "text": "billing-team@example.org"}]}
+{"id": "email-09", "lang": "en", "text": "Reach her at ALICE.S@EXAMPLE.COM before noon.", "spans": [{"start": 13, "end": 32, "category": "email", "text": "ALICE.S@EXAMPLE.COM"}]}
+{"id": "email-10", "lang": "en", "text": "Send the invoice to accounts+qc@example.io.", "spans": [{"start": 20, "end": 42, "category": "email", "text": "accounts+qc@example.io"}]}

@@ -1,0 +1,12 @@
+{"id": "date_of_birth-01", "lang": "fr", "text": "Le client est né le 12 mars 1985 à Trois-Rivières.", "spans": [{"start": 20, "end": 32, "category": "date_of_birth", "text": "12 mars 1985"}]}
+{"id": "date_of_birth-02", "lang": "fr", "text": "Date de naissance : 03/07/1990.", "spans": [{"start": 20, "end": 30, "category": "date_of_birth", "text": "03/07/1990"}]}
+{"id": "date_of_birth-03", "lang": "fr", "text": "DDN 1978-11-02, dossier ouvert hier.", "spans": [{"start": 4, "end": 14, "category": "date_of_birth", "text": "1978-11-02"}]}
+{"id": "date_of_birth-04", "lang": "fr", "text": "Née le 1er août 1972 à Gatineau.", "spans": [{"start": 7, "end": 20, "category": "date_of_birth", "text": "1er août 1972"}]}
+{"id": "date_of_birth-05", "lang": "fr", "text": "Naissance : 25.12.1969 selon le certificat.", "spans": [{"start": 12, "end": 22, "category": "date_of_birth", "text": "25.12.1969"}]}
+{"id": "date_of_birth-06", "lang": "fr", "text": "Le patient (né le 7 février 2001) consulte aujourd'hui.", "spans": [{"start": 18, "end": 32, "category": "date_of_birth", "text": "7 février 2001"}]}
+{"id": "date_of_birth-07", "lang": "en", "text": "The applicant was born on March 12, 1985.", "spans": [{"start": 26, "end": 40, "category": "date_of_birth", "text": "March 12, 1985"}]}
+{"id": "date_of_birth-08", "lang": "en", "text": "Date of birth: 1990-07-21.", "spans": [{"start": 15, "end": 25, "category": "date_of_birth", "text": "1990-07-21"}]}
+{"id": "date_of_birth-09", "lang": "en", "text": "DOB 07/21/1990 was entered twice.", "spans": [{"start": 4, "end": 14, "category": "date_of_birth", "text": "07/21/1990"}]}
+{"id": "date_of_birth-10", "lang": "en", "text": "Her birthday is Nov 3, 1975 per the form.", "spans": [{"start": 16, "end": 27, "category": "date_of_birth", "text": "Nov 3, 1975"}]}
+{"id": "date_of_birth-11", "lang": "en", "text": "Birth date: 14 September 1988.", "spans": [{"start": 12, "end": 29, "category": "date_of_birth", "text": "14 September 1988"}]}
+{"id": "date_of_birth-12", "lang": "en", "text": "Born 1982-04-09 in Halifax.", "spans": [{"start": 5, "end": 15, "category": "date_of_birth", "text": "1982-04-09"}]}

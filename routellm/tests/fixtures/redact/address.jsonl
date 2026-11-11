@@ -1,0 +1,8 @@
+{"id": "address-01", "lang": "fr", "text": "Il réside au 1234, rue Saint-Denis, Montréal.", "spans": [{"start": 13, "end": 34, "category": "address", "text": "1234, rue Saint-Denis"}]}
+{"id": "address-02", "lang": "fr", "text": "Livraison au 87, boulevard Laurier, Québec.", "spans": [{"start": 13, "end": 34, "category": "address", "text": "87, boulevard Laurier"}]}
+{"id": "address-03", "lang": "fr", "text": "Siège social : 560, avenue Cartier, Gatineau.", "spans": [{"start": 15, "end": 34, "category": "address", "text": "560, avenue Cartier"}]}
+{"id": "address-04", "lang": "fr", "text": "Retour à 45, chemin du Lac, Sherbrooke.", "spans": [{"start": 9, "end": 26, "category": "address", "text": "45, chemin du Lac"}]}
+{"id": "address-05", "lang": "en", "text": "She lives at 210 King Street, Ottawa.", "spans": [{"start": 13, "end": 28, "category": "address", "text": "210 King Street"}]}
+{"id": "address-06", "lang": "en", "text": "Mailing address: 9 Elm Road, Toronto.", "spans": [{"start": 17, "end": 27, "category": "address", "text": "9 Elm Road"}]}
+{"id": "address-07", "lang": "en", "text": "Branch at 77 Rue Principale, Trois-Rivières.", "spans": [{"start": 10, "end": 27, "category": "address", "text": "77 Rue Principale"}]}
+{"id": "address-08", "lang": "en", "text": "Deliver to 1500 Maisonneuve Boulevard, Montreal.", "spans": [{"start": 11, "end": 37, "category": "address", "text": "1500 Maisonneuve Boulevard"}]}

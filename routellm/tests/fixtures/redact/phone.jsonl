@@ -1,0 +1,10 @@
+{"id": "phone-01", "lang": "fr", "text": "Joindre le client au 514-555-0142 après 17 h.", "spans": [{"start": 21, "end": 33, "category": "phone", "text": "514-555-0142"}]}
+{"id": "phone-02", "lang": "fr", "text": "Téléphone : (418) 555-0199.", "spans": [{"start": 12, "end": 26, "category": "phone", "text": "(418) 555-0199"}]}
+{"id": "phone-03", "lang": "fr", "text": "Appelez-moi au 438 555 0173 demain matin.", "spans": [{"start": 15, "end": 27, "category": "phone", "text": "438 555 0173"}]}
+{"id": "phone-04", "lang": "fr", "text": "Numéro de la cliente +1 450 555 0128, cellulaire.", "spans": [{"start": 21, "end": 36, "category": "phone", "text": "+1 450 555 0128"}]}
+{"id": "phone-05", "lang": "fr", "text": "Standard : 01 23 45 67 89.", "spans": [{"start": 11, "end": 25, "category": "phone", "text": "01 23 45 67 89"}]}
+{"id": "phone-06", "lang": "en", "text": "Call me at 514-555-0188 tomorrow.", "spans": [{"start": 11, "end": 23, "category": "phone", "text": "514-555-0188"}]}
+{"id": "phone-07", "lang": "en", "text": "Phone: (613) 555-0104.", "spans": [{"start": 7, "end": 21, "category": "phone", "text": "(613) 555-0104"}]}
+{"id": "phone-08", "lang": "en", "text": "Her mobile is +1 416 555 0166.", "spans": [{"start": 14, "end": 29, "category": "phone", "text": "+1 416 555 0166"}]}
+{"id": "phone-09", "lang": "en", "text": "Fax and phone: 819.555.0150.", "spans": [{"start": 15, "end": 27, "category": "phone", "text": "819.555.0150"}]}
+{"id": "phone-10", "lang": "en", "text": "Office line 604 555 0121, ext. 4.", "spans": [{"start": 12, "end": 24, "category": "phone", "text": "604 555 0121"}]}

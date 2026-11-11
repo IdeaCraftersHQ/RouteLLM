@@ -1,0 +1,14 @@
+{"id": "canaries-01", "lang": "fr", "text": "Bonjour, Jean Tremblay a demandé un suivi de son dossier.", "spans": [{"start": 9, "end": 22, "category": "person", "text": "Jean Tremblay"}]}
+{"id": "canaries-02", "lang": "en", "text": "Please email Alice Smith and cc Marie Gagnon.", "spans": [{"start": 13, "end": 24, "category": "person", "text": "Alice Smith"}, {"start": 32, "end": 44, "category": "person", "text": "Marie Gagnon"}]}
+{"id": "canaries-03", "lang": "fr", "text": "Courriel du client : jean.tremblay@example.com.", "spans": [{"start": 21, "end": 46, "category": "email", "text": "jean.tremblay@example.com"}]}
+{"id": "canaries-04", "lang": "fr", "text": "Le NAS 046 454 286 figure au dossier.", "spans": [{"start": 7, "end": 18, "category": "sin", "text": "046 454 286"}]}
+{"id": "canaries-05", "lang": "en", "text": "Her SIN is 130-692-544 on the form.", "spans": [{"start": 11, "end": 22, "category": "sin", "text": "130-692-544"}]}
+{"id": "canaries-06", "lang": "fr", "text": "Carte d'assurance maladie TREJ 8503 1214 présentée à l'accueil.", "spans": [{"start": 26, "end": 40, "category": "ramq", "text": "TREJ 8503 1214"}]}
+{"id": "canaries-07", "lang": "en", "text": "Ship to 87 Laurier Boulevard, Quebec G1V 4T3.", "spans": [{"start": 37, "end": 44, "category": "postal_code", "text": "G1V 4T3"}]}
+{"id": "canaries-08", "lang": "fr", "text": "Le solde du compte est de 1 234,56 $ ce mois-ci.", "spans": [{"start": 26, "end": 36, "category": "amount", "text": "1 234,56 $"}]}
+{"id": "canaries-09", "lang": "en", "text": "Client file ACME-12345 is pending review.", "spans": [{"start": 12, "end": 22, "category": "client_id", "text": "ACME-12345"}]}
+{"id": "canaries-10", "lang": "fr", "text": "Joindre le client au 514-555-0142 après 17 h.", "spans": [{"start": 21, "end": 33, "category": "phone", "text": "514-555-0142"}]}
+{"id": "canaries-11", "lang": "fr", "text": "Le client est né le 2 février 1971 à Laval.", "spans": [{"start": 20, "end": 34, "category": "date_of_birth", "text": "2 février 1971"}]}
+{"id": "canaries-12", "lang": "en", "text": "The applicant was born on July 9, 1969.", "spans": [{"start": 26, "end": 38, "category": "date_of_birth", "text": "July 9, 1969"}]}
+{"id": "canaries-13", "lang": "fr", "text": "Cliente née le 12 mars 1985, code postal H2X 3K8.", "spans": [{"start": 15, "end": 27, "category": "date_of_birth", "text": "12 mars 1985"}, {"start": 41, "end": 48, "category": "postal_code", "text": "H2X 3K8"}]}
+{"id": "canaries-14", "lang": "en", "text": "Applicant born on March 12, 1985, postal code J4K 1A1.", "spans": [{"start": 18, "end": 32, "category": "date_of_birth", "text": "March 12, 1985"}, {"start": 46, "end": 53, "category": "postal_code", "text": "J4K 1A1"}]}
