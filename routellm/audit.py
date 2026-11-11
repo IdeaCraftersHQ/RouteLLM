@@ -162,6 +162,7 @@ class AuditRecord:
     streaming: bool = False
     walk: list[dict[str, Any]] | None = None
     targets: list[str] | None = None
+    video: dict[str, Any] | None = None
     started: float = field(default_factory=time.monotonic)
 
 
@@ -280,6 +281,12 @@ class Auditor:
             routing["walk"] = walk
         if record.targets:
             routing["targets"] = list(record.targets)
+        if record.video:
+            routing["video"] = {
+                k: v
+                for k, v in record.video.items()
+                if isinstance(v, int) and not isinstance(v, bool)
+            }
         return {
             "v": SCHEMA_VERSION,
             "ts": datetime.now(UTC).isoformat(timespec="milliseconds"),

@@ -188,6 +188,47 @@ def check_transcriber(policy: Policy, registry) -> None:
             )
 
 
+def video_denial(policy: Policy, config, data_class: str | None) -> str | None:
+    """Return `video:<class>:not_local` when `data_class` may not be preprocessed by `config`.
+
+    A redact or block class's video cannot be redacted before a
+    preprocessor sees it, so only one tagged `local` may. None for any
+    other class, a local preprocessor or one that is off.
+    """
+    spec = policy.classes.get(data_class) if data_class is not None else None
+    if spec is None or spec.treatment not in _HOST_BOUND:
+        return None
+    if config is None or not config.active or config.is_local:
+        return None
+    return f"video:{data_class}:not_local"
+
+
+def check_video(policy: Policy, registry) -> None:
+    """Refuse a video preprocessor a redact or block class may not use.
+
+    Video is preprocessed before the request's class is known, so every
+    active preprocessor, the global one and each tier's, must be local
+    when any class redacts or blocks.
+
+    Raises
+    ------
+    PolicyError
+        Naming the preprocessor and each class that refuses it.
+    """
+    classes = [n for n, c in policy.classes.items() if c.treatment in _HOST_BOUND]
+    if not classes:
+        return
+    for scope, config in registry.videos().items():
+        if config.active and not config.is_local:
+            where = "global" if scope is None else scope
+            raise PolicyError(
+                f"video preprocessor {where!r} sees video before its class is known, but class "
+                f"{', '.join(classes)} (redact or block) may not reach a preprocessor that is "
+                "not tagged `local`; point it at a local service and add `tags: [local]`, "
+                "or set `mode: refuse`"
+            )
+
+
 def route_error(plain: type[Exception]):
     """Return a factory for the error a failed candidate check raises.
 

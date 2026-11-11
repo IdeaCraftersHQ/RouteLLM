@@ -64,6 +64,7 @@ from routellm.server_config import (
 )
 from routellm.transcription import TranscriptionError
 from routellm.transform import TransformError
+from routellm.video import VideoError, has_video
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 CONTROLLER = None
@@ -823,6 +824,7 @@ def request_summary(request: "ChatCompletionRequest") -> str:
         f"Received request: model={request.model} messages={count} "
         f"tools={bool(request.tools)} images={_has_images(messages)} "
         f"audio={_has_audio(messages)} "
+        f"video={has_video(messages)} "
         f"stream={bool(request.stream)}"
     )
 
@@ -875,6 +877,27 @@ def _transcription_failure(exc: TranscriptionError, request_id: str) -> JSONResp
             "object": "error",
             "message": f"Audio transcription failed: {exc.public} (request id {request_id})",
             "type": kind,
+            "request_id": request_id,
+        },
+        status_code=exc.status_code,
+    )
+
+
+def _video_failure(exc: VideoError, request_id: str) -> JSONResponse:
+    """Answer a failed video preprocessing: a bounded public message and its code.
+
+    What the service said stays in the server log under the same id.
+    """
+    logging.getLogger(__name__).error(
+        f"Video preprocessing failed (request id {request_id}): {exc.detail}"
+    )
+    kind = "invalid_request_error" if exc.status_code < 500 else "server_error"
+    return JSONResponse(
+        {
+            "object": "error",
+            "message": f"Video preprocessing failed: {exc.public[:200]} (request id {request_id})",
+            "type": kind,
+            "code": exc.code,
             "request_id": request_id,
         },
         status_code=exc.status_code,
@@ -1062,6 +1085,9 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
         return settle(
             trail, _transcription_failure(e, request_id), "failed", e.status_code, "transcription"
         )
+    except VideoError as e:
+        outcome = "refused" if e.status_code < 500 else "failed"
+        return settle(trail, _video_failure(e, request_id), outcome, e.status_code, "video")
     except EndpointsCooling as e:
         return settle(trail, _cooling_response(e, request_id), "failed", 503, "endpoints_cooling")
     except TransformError as e:

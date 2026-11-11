@@ -513,7 +513,7 @@ def matches(caps: Capabilities, query: CapabilityQuery) -> bool:
 
 #: Requirements in the order `satisfies` checks them, so the name it
 #: reports for a side that fails several is stable.
-_REQUIREMENT_ORDER = ("vision", "audio", "tools", "structured_output", "context")
+_REQUIREMENT_ORDER = ("vision", "audio", "video", "tools", "structured_output", "context")
 
 #: (endpoint, requirement) pairs whose unknown assumption has been
 #: logged. One INFO line per pair per process.
@@ -569,6 +569,13 @@ def satisfies(
 
         if not getattr(reqs, requirement):
             continue
+
+        if requirement == "video":
+            # Listed in `modalities_in` or refused: a leaf that does not
+            # say it takes video would drop the part silently.
+            if "video" in (caps.modalities_in or []):
+                continue
+            return requirement
 
         value = getattr(caps, requirement)
         if value is True:

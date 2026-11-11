@@ -111,3 +111,18 @@ def test_a_field_that_cannot_be_redacted_is_refused_not_sent(name, results):
 def test_a_non_local_transcriber_is_refused_before_audio_leaves(results):
     got = obs(results, "redact_non_local_transcriber_is_refused_before_transcription")
     assert got["status"] == 403 and got["off_host_hits"] == 0
+
+
+def test_a_video_transcript_is_redacted_like_any_user_text(results):
+    got = obs(results, "redact_video_transcript_canary_never_reaches_a_cloud_leaf")
+    assert got["service_hits"] == 1 and got["off_host_hits"] >= 1
+    assert got["transcript_sent"] and got["placeholders_sent"] and got["leaks"] == []
+
+
+def test_video_frames_cannot_be_redacted_so_the_request_is_refused(results):
+    assert obs(results, "redact_video_frames_are_refused_not_sent")["off_host_hits"] == 0
+
+
+def test_a_non_local_video_preprocessor_never_sees_the_video(results):
+    got = obs(results, "redact_non_local_video_preprocessor_is_refused_before_upload")
+    assert got["status"] == 403 and got["service_hits"] == 0 and got["off_host_hits"] == 0

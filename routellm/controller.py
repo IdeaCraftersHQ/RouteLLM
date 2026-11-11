@@ -19,7 +19,7 @@ from litellm import acompletion, completion, stream_chunk_builder
 from tqdm import tqdm
 
 from routellm import requirements as requirements_module
-from routellm import transcription
+from routellm import transcription, video
 from routellm.audit import note as audit_note
 from routellm.auth import Principal, current_principal
 from routellm.caching import Cache, CacheConfig, cache_namespace, context_key, conversation_key
@@ -35,10 +35,12 @@ from routellm.class_tiers import (
     check_decision_endpoint,
     check_entry_tier,
     check_transcriber,
+    check_video,
     class_denial,
     redact_aux_denial,
     route_error,
     transcriber_denial,
+    video_denial,
 )
 from routellm.comparison import ComparisonConfig, ComparisonManager
 from routellm.config import ConfigError
@@ -421,6 +423,7 @@ class Controller:
             check_decision_endpoint(policy, self.endpoints, decision.config.endpoint)
         if policy is not None:
             check_transcriber(policy, self.endpoints)
+            check_video(policy, self.endpoints)
 
         if config is None:
             config = GPT_4_AUGMENTED_CONFIG
@@ -1039,6 +1042,54 @@ class Controller:
             if denied is not None:
                 raise PolicyDenied(
                     f"{denied}: the class may not use a transcriber that is not local"
+                )
+        return config
+
+    def _video_for(
+        self, kwargs: dict[str, Any], tier: str | None, declared_class: str | None = None
+    ):
+        """Return the video preprocessor to run on this request, or None.
+
+        Like `_transcriber_for`: the ADDRESSED tier's config (the global
+        section for no tier), read before any intent re-routing. None when
+        the request carries no video or the mode is `passthrough` (the
+        part is forwarded and capability filtering sends it to a leaf
+        that lists `video`).
+
+        Raises
+        ------
+        VideoError
+            400 when video arrives with no `video:` section, in mode
+            `refuse`, or in a part shape that is not accepted.
+        PolicyDenied
+            The class is redact or block and the preprocessor is not
+            local; checked before any video is sent.
+        """
+        messages = kwargs.get("messages")
+        if not video.has_video(messages):
+            return None
+        config = self.endpoints.video_for(tier)
+        if config is None:
+            raise video.VideoError(
+                400,
+                "this request carries a video part but no `video:` section is configured; "
+                "add one (mode preprocess, passthrough or refuse)",
+                code="video_not_configured",
+            )
+        if config.mode == "refuse":
+            raise video.VideoError(
+                400,
+                "video parts are not accepted here (video mode is refuse)",
+                code="video_refused",
+            )
+        video.check_parts(messages, config)
+        if not config.active:
+            return None
+        if self.policy is not None:
+            denied = video_denial(self.policy, config, declared_class)
+            if denied is not None:
+                raise PolicyDenied(
+                    f"{denied}: the class may not use a preprocessor that is not local"
                 )
         return config
 
@@ -2004,6 +2055,16 @@ class Controller:
 
         # Audio becomes text before anything reads the messages, so the
         # router, the requirements and the cache key all see the transcript.
+        previewer = self._video_for(kwargs, tier, declared_class)
+        if previewer is not None:
+            summary: dict[str, Any] = {}
+            kwargs = {
+                **kwargs,
+                "messages": video.preprocess_sync(
+                    kwargs["messages"], previewer, transcribe_language, request_id, summary
+                ),
+            }
+            audit_note(video=summary)
         transcriber = self._transcriber_for(kwargs, tier, declared_class)
         if transcriber is not None:
             kwargs = {
@@ -2301,6 +2362,16 @@ class Controller:
         # Audio becomes text before anything reads the messages, so the
         # router, the requirements and the cache key all see the
         # transcript. Streaming is unaffected: this finishes before routing.
+        previewer = self._video_for(kwargs, tier, declared_class)
+        if previewer is not None:
+            summary: dict[str, Any] = {}
+            kwargs = {
+                **kwargs,
+                "messages": await video.preprocess(
+                    kwargs["messages"], previewer, transcribe_language, request_id, summary
+                ),
+            }
+            audit_note(video=summary)
         transcriber = self._transcriber_for(kwargs, tier, declared_class)
         if transcriber is not None:
             kwargs = {

@@ -760,6 +760,49 @@ The raw audio is never forwarded to a model instead, and no other transcriber is
 
 **Logging and caching.** Audio and transcript text are never logged at INFO. One INFO line gives counts and latency: `transcribed audio: parts=1 seconds=6.5 segments=2 speakers=2 latency_ms=120 request_id=...`. Transcription runs before routing, so the router, the capability check and the cache key all see the transcript: two clips that transcribe differently never share a cache entry, and a cache hit still costs one transcription. (In `passthrough`, the raw audio is part of the key by value.) A stream request is transcribed first and then streams as usual.
 
+#### Video: preprocess-then-route
+
+Video is turned into frames and a transcript by a separate local service, then routed as an ordinary vision request. RouteLLM is only the client of that service (HTTP contract: `POST <api_base>/v1/video/preprocess`, multipart `file` plus option fields, JSON answer with `scenes[].frames[].image`, `transcript.segments[]`, optional `ocr_text`).
+
+Accepted part shapes; anything else that claims to be video is a 400:
+
+```json
+{"type": "video_url", "video_url": {"url": "data:video/mp4;base64,..."}}
+{"type": "file", "file": {"file_data": "data:video/mp4;base64,...", "filename": "clip.mp4"}}
+```
+
+A remote `http(s)` URL is always refused (400): this server does not fetch client-named URLs. `allow_urls: true` only changes the message; fetching is not implemented. The client's `filename` is never sent to the service.
+
+```yaml
+video:                              # global default; a tier overrides key by key under its own `video:`
+  mode: preprocess                  # preprocess | passthrough | refuse (default preprocess)
+  api_base: http://127.0.0.1:9100   # required for preprocess; the service root, no /v1
+  api_key_env: VIDEO_PREPROCESSOR_KEY   # optional; the variable's NAME, read per call
+  timeout_ms: 600000
+  max_video_bytes: 209715200        # per video, decoded; larger is a 413 before any call
+  allow_urls: false
+  tags: [local]                     # `local` needs a loopback/private api_base (or allow_public_base: true)
+  max_frames: 12                    # 1..64, sent to the service
+  layout: frames                    # frames | contact_sheet
+  max_side: 768                     # 256..2048 px
+  transcribe: true
+  language: null                    # per request: X-RouteLLM-Transcribe-Language header
+  ocr: false
+  scene_detection: true
+  require_transcript: false         # true: a failed speech-to-text is a 502, not a warning
+  max_transcript_chars: 20000       # bound on the transcript and on the on-screen text
+```
+
+Unknown keys are a load error. **Modes.** `preprocess` calls the service. `passthrough` forwards the part unchanged, only to a leaf whose `capabilities.modalities_in` lists `video` (unknown or absent is a refusal, like audio); any other leaf is dropped by the usual capability filtering. `refuse` answers 400. A request with a video part and no `video:` section is a 400 naming the section; video is never silently dropped.
+
+**Replacement.** Each video part is replaced in place, other parts keep their order: a text part `Video <n>: <duration>s, <k> scenes`; per scene a text label `[scene i, start-end s]` followed by its image parts (with `layout: contact_sheet`: one label text and one grid image); then a `Transcript:` text with `[mm:ss SPEAKER] text` lines (cut at `max_transcript_chars` with `[transcript truncated]`; `[no speech detected]`, `[no audio track]` or `[not available]` when there is nothing to show); then `On-screen text:` per scene when `ocr` found any. The request then needs a vision-capable leaf, and the inserted images count in the context estimate like any image part. Only `data:image/` frames are accepted from the service; anything else is a 502.
+
+**Errors.** Each carries a `code` and the request id; what the service said stays in the server log. Service unreachable or 5xx: 502 (`video_unavailable`, or the service's own code). Timeout (`timeout_ms`, or a service 504): 504 `video_timeout`. Service 4xx: 400 with the service's error code (`ocr_unavailable`, `unsupported_media`, ...) and none of its message text; a 401/403 from the service is this server's misconfiguration and is a 502. Over `max_video_bytes`: 413. There is no retry and no fallback: the raw video is never forwarded instead.
+
+**Privacy.** The video is sent to the service before the request's class is known, so it cannot be redacted first. A tier that is local-only, or that intent routing may send to a local-only tier, needs a preprocessor tagged `local`. Under a policy, when any class is `redact` or `block` every active preprocessor must be tagged `local` (startup `PolicyError`), and a request declaring such a class with a non-local preprocessor is refused (403, `video:<class>:not_local`) before upload. The transcript and OCR text then go through the class pipeline like any user text, so a `redact` class redacts names in them. Frames are images and cannot be redacted: with the default `redact.non_text: refuse` a video that yields frames is refused for a `redact` class (500, nothing sent); `non_text: pass` forwards them.
+
+**Logging, audit, caching.** Video, frames and transcript are never logged at INFO; one line gives counts and latency (`preprocessed video: parts=1 seconds=93.4 scenes=2 frames=3 ...`). The audit event gets `routing.video` with `parts`, `scenes` and `frames` counts only, and the prompt digest covers text parts of the original request, never video bytes. The cache key follows the inserted frames and text, so identical frames hit the cache but still cost one preprocessing call.
+
 #### Three outcomes
 
 Each level of the tier walk checks both its sides before running its router:
@@ -1017,7 +1060,7 @@ egress_gates:
 | Comparison judge | the `judge:<endpoint>` | shadow output recorded unscored |
 | Decision classifier | its `decision.endpoint` | it runs before the class is known, so startup fails unless every non-`vault` class may reach it |
 
-Audio transcription runs before the class is known too; a tier whose endpoints are all `local` already requires a `local` transcriber at load. An embedding call with no registry endpoint carries no tags, so `--allow-remote-embeddings` is refused at startup under a policy; give the server an embedding endpoint instead.
+Video preprocessing does too: under a `redact` or `block` class every active `video:` preprocessor must be tagged `local`. Audio transcription runs before the class is known too; a tier whose endpoints are all `local` already requires a `local` transcriber at load. An embedding call with no registry endpoint carries no tags, so `--allow-remote-embeddings` is refused at startup under a policy; give the server an embedding endpoint instead.
 
 **`require_policy_allow`** makes the gate depend on the request's [routing policy](#policy-routing): a leaf the gate selects is a candidate only when the selected policy's `allow_tags` lists one of the leaf's tags and its `deny_tags` list none; otherwise the reason is `gate:<name>:policy`. Without `policy_routing:` there is no selected policy, so such a gate refuses every request to its endpoints. The intent detector is not a request with a policy: a gated detector endpoint of such a gate gets no call.
 

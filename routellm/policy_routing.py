@@ -75,7 +75,7 @@ DEFAULT_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,62}$"
 
 #: Matchers with a meaning of their own; no attribute may take one of these names.
 RESERVED_MATCHERS = frozenset({"class", "intent", "modality"})
-MODALITIES = ("text", "image", "audio")
+MODALITIES = ("text", "image", "audio", "video")
 
 
 class PolicyRoutingError(PolicyError):
@@ -350,6 +350,8 @@ class PolicyRouter:
             found.add("image")
         if getattr(reqs, "audio", False):
             found.add("audio")
+        if getattr(reqs, "video", False):
+            found.add("video")
         return found or {"text"}
 
     def _matches(self, rule: Rule, facts: dict[str, Any]) -> bool:
