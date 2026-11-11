@@ -18,6 +18,7 @@ which is either a string or a callable taking the parsed body:
   first / second event is an in-stream rate-limit error event
   (`finish_reason: error` with an `error` object).
 
+`reply` replaces the default answer text of `ok`.
 `delay` holds every answer back, before the first byte.
 
 Nothing here leaves the loopback interface.
@@ -44,6 +45,7 @@ class FakeUpstream:
         self.delay = 0.0  # seconds to wait before answering anything
         self.retry_after = None  # `Retry-After` value on a 429, as sent
         self.reset_ms = None  # `X-RateLimit-Reset` (epoch ms) on a 429_daily
+        self.reply = None  # answer text (or callable(body) -> text) in place of the default
         self.hits = []  # (path, headers, body)
         fake = self
 
@@ -69,6 +71,8 @@ class FakeUpstream:
                     time.sleep(fake.delay)
                 model = body.get("model", "m")
                 reply = f"hello from {fake.name}"
+                if fake.reply is not None:
+                    reply = fake.reply(body) if callable(fake.reply) else fake.reply
                 if mode == "echo":
                     reply = "echo: " + _last_text(body)
 
