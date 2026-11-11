@@ -177,7 +177,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         loaded = load_config(explicit=args.config)
         origin = str(loaded.layers[-1].path) if loaded.layers else None
-        registry = EndpointRegistry.from_config(loaded.data or {}, config_path=origin)
+        registry = EndpointRegistry.from_config(
+            loaded.data or {}, config_path=origin, resolve_path=loaded.resolve_path
+        )
         config = build_comparison_config(loaded.data)
         raw = config.model_dump()
         raw["enabled"] = True

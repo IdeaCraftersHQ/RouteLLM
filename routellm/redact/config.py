@@ -48,16 +48,13 @@ _STORE_KEYS = {"path", "ttl_s", "encryption", "key_file", "key_env"}
 _LANGUAGES = ("fr", "en")
 
 
-def _store_path(raw: Any, config_path: str | None) -> Path:
+def _store_path(raw: Any, resolve) -> Path:
     if raw is None:
         state = os.environ.get("XDG_STATE_HOME") or os.path.join(Path.home(), ".local", "state")
         return Path(state) / "routellm" / "redact" / "tokens.db"
     if not isinstance(raw, str) or not raw:
         raise ConfigError("redact.store.path must be a path")
-    path = Path(raw).expanduser()
-    if not path.is_absolute() and config_path:
-        path = Path(config_path).resolve().parent / path
-    return path
+    return resolve("redact.store.path", raw)
 
 
 def _analyzer(raw: Mapping[str, Any], languages: tuple[str, ...]):
@@ -102,7 +99,7 @@ def _analyzer(raw: Mapping[str, Any], languages: tuple[str, ...]):
 
 
 def build_redact_transform(
-    raw: Mapping[str, Any] | None, config_path: str | None
+    raw: Mapping[str, Any] | None, config_path: str | None, resolve_path=None
 ) -> RedactTransform | None:
     """The transform a `redact:` section describes, or None without one.
 
@@ -141,17 +138,21 @@ def build_redact_transform(
     if non_text not in ("refuse", "pass"):
         raise ConfigError(f"redact.non_text must be refuse or pass, got {non_text!r}")
 
+    from routellm.config import path_resolver
+
+    resolve = path_resolver(config_path, resolve_path)
     analyze = _analyzer(raw, tuple(languages))
-    cipher = build_cipher(
-        {k: store[k] for k in ("encryption", "key_file", "key_env") if k in store}
-    )
+    cipher_cfg = {k: store[k] for k in ("encryption", "key_file", "key_env") if k in store}
+    if isinstance(cipher_cfg.get("key_file"), str) and cipher_cfg["key_file"]:
+        cipher_cfg["key_file"] = os.fspath(resolve("redact.store.key_file", cipher_cfg["key_file"]))
+    cipher = build_cipher(cipher_cfg)
     try:
         token_store = TokenStore(
-            os.fspath(_store_path(store.get("path"), config_path)), ttl_s=ttl, cipher=cipher
+            os.fspath(_store_path(store.get("path"), resolve)), ttl_s=ttl, cipher=cipher
         )
     except OSError as exc:
         raise ConfigError(f"redact.store: cannot open the token store: {exc}") from exc
     transform = RedactTransform(Redactor(token_store, analyze=analyze), non_text=non_text)
     # Asked by the controller when a policy lets a redact class leave the host.
-    transform.harness_gate = Gate(raw, config_path)
+    transform.harness_gate = Gate(raw, config_path, resolve_path)
     return transform

@@ -113,7 +113,9 @@ def legacy_pair() -> tuple[str, str]:
     return LEGACY_STRONG, LEGACY_WEAK
 
 
-def build_registry(file_config: dict | None, config_path: str | None = None) -> EndpointRegistry:
+def build_registry(
+    file_config: dict | None, config_path: str | None = None, resolve_path=None
+) -> EndpointRegistry:
     """Build the endpoint registry the server routes against.
 
     The merged config is the single source for endpoints and tiers, and
@@ -146,7 +148,9 @@ def build_registry(file_config: dict | None, config_path: str | None = None) -> 
         Registry holding the configured endpoints and tiers, plus the
         implicit `default` tier when one was derived.
     """
-    registry = EndpointRegistry.from_config(file_config or {}, config_path=config_path)
+    registry = EndpointRegistry.from_config(
+        file_config or {}, config_path=config_path, resolve_path=resolve_path
+    )
 
     if registry.has_tier("default"):
         logging.info("default tier: from --config")
@@ -541,7 +545,7 @@ async def lifespan(app):
     POLICY = build_policy(file_config, loaded.resolve_path)
     # A loaded policy requires an audit trail: no audit, no startup.
     AUDIT = build_audit(file_config, POLICY, loaded.resolve_path)
-    endpoints = build_registry(file_config, config_origin)
+    endpoints = build_registry(file_config, config_origin, loaded.resolve_path)
     intents = build_intents(file_config, endpoints)
     decision = build_decision(file_config, endpoints)
     if POLICY is not None and decision is not None:
@@ -592,7 +596,7 @@ async def lifespan(app):
     )
 
     global AUTH
-    AUTH = build_auth(file_config, config_origin)
+    AUTH = build_auth(file_config, config_origin, loaded.resolve_path)
     if POLICY is not None:
         check_policy_principals(POLICY, AUTH)
     if AUTH is None and args.host not in LOOPBACK_HOSTS:
@@ -617,17 +621,17 @@ async def lifespan(app):
         default_threshold=args.default_threshold,
         middleware=[intents] if intents else None,
         decision=decision,
-        cache_config=build_cache_config(file_config, config_origin),
+        cache_config=build_cache_config(file_config, config_origin, loaded.resolve_path),
         resilience_config=build_resilience_config(file_config),
         comparison_config=build_comparison_config(file_config),
-        quality_manager=build_quality_manager(file_config, config_origin),
+        quality_manager=build_quality_manager(file_config, config_origin, loaded.resolve_path),
         strict_registry=endpoints.strict_registry,
         policy=POLICY,
         egress_gates=build_egress_gates(file_config),
         policy_routing=build_policy_routing(file_config, POLICY),
         embedding_endpoint=build_embedding_endpoint(file_config),
         allow_remote_embeddings=args.allow_remote_embeddings,
-        transforms=build_transforms(file_config, config_origin),
+        transforms=build_transforms(file_config, config_origin, loaded.resolve_path),
     )
     if AUDIT is not None:
         AUDIT.resolve = _endpoint_facts

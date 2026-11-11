@@ -13,7 +13,6 @@ in force.
 """
 
 import os
-from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -69,7 +68,9 @@ def _validate(model: type[BaseModel], name: str, raw: dict[str, Any]):
         raise ConfigError(f"invalid `{name}:` section: {problems}") from exc
 
 
-def build_cache_config(file_config: dict | None, config_path: str | None) -> CacheConfig:
+def build_cache_config(
+    file_config: dict | None, config_path: str | None, resolve_path=None
+) -> CacheConfig:
     """Return the cache settings; disabled unless the config enables it.
 
     Parameters
@@ -84,9 +85,9 @@ def build_cache_config(file_config: dict | None, config_path: str | None) -> Cac
     raw = dict(_section(file_config, "cache"))
     raw.setdefault("enabled", False)
     config = _validate(_StrictCache, "cache", raw)
-    path = Path(config.db_path).expanduser()
-    if not path.is_absolute() and config_path:
-        path = Path(config_path).resolve().parent / path
+    from routellm.config import path_resolver
+
+    path = path_resolver(config_path, resolve_path)("cache.db_path", config.db_path)
     return CacheConfig(**{**config.model_dump(), "db_path": os.fspath(path)})
 
 
@@ -102,7 +103,9 @@ def build_embedding_endpoint(file_config: dict | None) -> str | None:
     return name
 
 
-def build_transforms(file_config: dict | None, config_path: str | None = None) -> list:
+def build_transforms(
+    file_config: dict | None, config_path: str | None = None, resolve_path=None
+) -> list:
     """Return the request transforms, in order: the redactor, then `transforms:`.
 
     The redactor is built from a `redact:` section (see
@@ -114,7 +117,7 @@ def build_transforms(file_config: dict | None, config_path: str | None = None) -
     """
     from routellm.redact.config import build_redact_transform
 
-    redactor = build_redact_transform((file_config or {}).get("redact"), config_path)
+    redactor = build_redact_transform((file_config or {}).get("redact"), config_path, resolve_path)
     chain = load_transforms((file_config or {}).get("transforms"))
     return [redactor, *chain] if redactor is not None else chain
 
@@ -135,7 +138,7 @@ def build_comparison_config(file_config: dict | None) -> ComparisonConfig:
 
 
 def build_quality_manager(
-    file_config: dict | None, config_path: str | None
+    file_config: dict | None, config_path: str | None, resolve_path=None
 ) -> QualityManager | None:
     """Return the trace recorder the `traces:` section asks for, else None.
 
@@ -160,8 +163,8 @@ def build_quality_manager(
     config = _validate(_StrictTraces, "traces", dict(raw))
     if not config.enabled:
         return None
-    path = Path(config.trace_dir).expanduser()
-    if not path.is_absolute() and config_path:
-        path = Path(config_path).resolve().parent / path
+    from routellm.config import path_resolver
+
+    path = path_resolver(config_path, resolve_path)("traces.trace_dir", config.trace_dir)
     values = {**config.model_dump(), "trace_dir": os.fspath(path)}
     return QualityManager(fine_tune_config=FineTuneConfig(**values))

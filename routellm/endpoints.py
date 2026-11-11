@@ -704,7 +704,10 @@ class EndpointRegistry:
 
     @classmethod
     def from_config(
-        cls, config: dict[str, Any], config_path: Any | None = None
+        cls,
+        config: dict[str, Any],
+        config_path: Any | None = None,
+        resolve_path: Any | None = None,
     ) -> "EndpointRegistry":
         """Build a registry from a loaded config dict.
 
@@ -724,6 +727,10 @@ class EndpointRegistry:
         ----------
         config : dict
             Loaded YAML config. Absent keys yield empty collections.
+        resolve_path : callable, optional
+            `(key, value) -> Path`, resolving `quality_from` against the
+            layer file that set it (`LoadedConfig.resolve_path`); wins
+            over `config_path`.
         config_path : str or Path, optional
             The file `config` was read from, used to resolve a relative
             `quality_from:`. Without it a relative path falls back to
@@ -795,16 +802,15 @@ class EndpointRegistry:
         # `quality_from_override: false` to flip it.
         quality_from = config.get("quality_from")
         if quality_from:
-            from routellm.quality_scores import (
-                apply_sidecar,
-                load_sidecar,
-                resolve_sidecar_path,
-            )
+            from routellm.config import path_resolver
+            from routellm.quality_scores import apply_sidecar, load_sidecar
 
             override = config.get("quality_from_override", True)
             apply_sidecar(
                 registry,
-                load_sidecar(str(resolve_sidecar_path(quality_from, config_path))),
+                load_sidecar(
+                    str(path_resolver(config_path, resolve_path)("quality_from", quality_from))
+                ),
                 override=bool(override),
             )
 

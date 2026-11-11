@@ -286,7 +286,7 @@ def load_keys_file(path: Path) -> StaticKeyResolver:
     return StaticKeyResolver(entries)
 
 
-def build_auth(file_config: dict[str, Any] | None, config_path: str | None):
+def build_auth(file_config: dict[str, Any] | None, config_path: str | None, resolve_path=None):
     """Return the resolver the `auth:` section asks for, else None (auth off)."""
     raw = (file_config or {}).get("auth")
     if raw is None:
@@ -299,10 +299,9 @@ def build_auth(file_config: dict[str, Any] | None, config_path: str | None):
     keys_file = raw.get("keys_file")
     if not isinstance(keys_file, str) or not keys_file:
         raise ConfigError("invalid `auth:` section: `keys_file` is required")
-    path = Path(keys_file).expanduser()
-    if not path.is_absolute() and config_path:
-        path = Path(config_path).resolve().parent / path
-    return load_keys_file(path)
+    from routellm.config import path_resolver
+
+    return load_keys_file(path_resolver(config_path, resolve_path)("auth.keys_file", keys_file))
 
 
 def bearer_token(authorization: str | None) -> str | None:
