@@ -510,6 +510,6 @@ def test_analyze_patterns_includes_new_categories():
 
 
 def test_curly_apostrophes():
-    text = "au 12 rue de l’Église, Laval"
-    assert texts(text, find_addresses(text)) == ["12 rue de l’Église"]
-    assert detect_language("Je n’ai pas l’été pour j’habiter")[0] == "fr"
+    text = "au 12 rue de l\u2019Église, Laval"
+    assert texts(text, find_addresses(text)) == ["12 rue de l\u2019Église"]
+    assert detect_language("Je n\u2019ai pas l\u2019été pour j\u2019habiter")[0] == "fr"
