@@ -741,7 +741,10 @@ def test_a_tier_that_intent_routing_can_send_to_a_local_only_tier_needs_a_local_
 
 
 def test_the_same_config_is_fine_with_a_local_transcriber():
-    spec = _intent_spec({**CLOUD_STT, "tags": ["local"]}, {"confidential": "private"})
+    spec = _intent_spec(
+        {**CLOUD_STT, "api_base": "http://127.0.0.1:9/v1", "tags": ["local"]},
+        {"confidential": "private"},
+    )
 
     assert EndpointRegistry.from_config(spec).transcriber_for("default").is_local
 

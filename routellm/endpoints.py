@@ -1008,26 +1008,43 @@ class EndpointRegistry:
         tagged `local` either: its audio would leave the place its text
         is confined to. A tier whose sides are still unresolved
         selectors cannot be judged yet; `revalidate` judges it once
-        pairing has named them.
+        pairing has named them. A `local`-tagged transcriber must also
+        name a non-public `api_base` (judged as written, no DNS) unless
+        `allow_public_base` is set.
 
         Raises
         ------
         ValueError
-            On an invalid transcriber section, or a local-only tier
-            using a non-local transcriber that would transcribe.
+            On an invalid transcriber section, a `local` transcriber on
+            a public host, or a local-only tier using a non-local
+            transcriber that would transcribe.
         """
         built: dict[str | None, TranscriberConfig] = {}
         base = self._transcriber_raw or {}
 
         def build(label: str, spec: dict[str, Any]) -> TranscriberConfig:
             try:
-                return TranscriberConfig(**spec)
+                config = TranscriberConfig(**spec)
             except ValidationError as exc:
                 problems = "; ".join(
                     f"{'.'.join(str(p) for p in err['loc']) or '<section>'}: {err['msg']}"
                     for err in exc.errors()
                 )
                 raise ValueError(f"invalid {label}: {problems}") from exc
+            if (
+                config.active
+                and config.is_local
+                and not config.allow_public_base
+                and not is_non_public_base(config.api_base or "")
+            ):
+                raise ValueError(
+                    f"invalid {label}: tagged `local` but its `api_base` "
+                    f"{config.api_base!r} is not a loopback, private, link-local, .local, "
+                    ".internal, .lan or single-label host, so audio would leave the "
+                    "machine or network. Point `api_base` at a local host, drop the "
+                    "`local` tag, or set `allow_public_base: true` (dangerous)."
+                )
+            return config
 
         if self._transcriber_raw is not None:
             built[None] = build("`transcriber:` section", base)

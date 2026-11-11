@@ -717,6 +717,7 @@ transcriber:                      # global default; omit to keep audio routing a
   format_no_speaker: "[{start}-{end}] {text}"     # a line without one (the default)
   allow_urls: false               # fetch audio_url parts? default false: refused
   tags: [local]                   # `local` declares the service runs on your own machine/network
+  allow_public_base: false        # DANGEROUS: lets a `local` transcriber name a public host; default false
 
 tiers:
   default:
@@ -730,7 +731,7 @@ tiers:
     transcriber: {mode: passthrough}   # this tier routes audio to an audio-capable side
 ```
 
-Unknown keys under `transcriber:` are a load error, as are unknown placeholders in a template. A tier's keys are laid over the global section; `mode: passthrough` (or no `transcriber:` at all) leaves audio routing exactly as described above. The transcriber used is the one on the tier the request **addresses** (the global section when it addresses none), decided before any intent re-routing. Because of that, a tier that accepts intent routing (`default`, or `intent_routing: true`) and that an `intents:` mapping can send to a local-only tier (see Private tiers) must itself use a `local` transcriber, or the config is rejected at load. Middleware supplied in code rather than through `intents:` is not visible to this check.
+A transcriber tagged `local` must name a loopback, private (RFC 1918 / ULA), link-local, `localhost`, `.local`, `.internal` or `.localhost` host in `api_base`, judged as written after `${VAR}` expansion with no DNS lookup; a public, `.lan`, single-label or shared-space (100.64/10) host fails at load, globally and per tier, with the same rule as a `local` endpoint. `allow_public_base: true` (a real boolean) is the explicit, dangerous opt-out. An untagged transcriber may use any host. Unknown keys under `transcriber:` are a load error, as are unknown placeholders in a template. A tier's keys are laid over the global section; `mode: passthrough` (or no `transcriber:` at all) leaves audio routing exactly as described above. The transcriber used is the one on the tier the request **addresses** (the global section when it addresses none), decided before any intent re-routing. Because of that, a tier that accepts intent routing (`default`, or `intent_routing: true`) and that an `intents:` mapping can send to a local-only tier (see Private tiers) must itself use a `local` transcriber, or the config is rejected at load. Middleware supplied in code rather than through `intents:` is not visible to this check.
 
 For every `input_audio` part the server POSTs the decoded bytes as multipart to `<api_base>/audio/transcriptions` with `response_format=verbose_json` and `timestamp_granularities[]=segment`, plus `language` when one applies, and replaces the part with a text part, one line per segment:
 

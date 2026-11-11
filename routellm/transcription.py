@@ -165,9 +165,13 @@ class TranscriberConfig(BaseModel):
         Whether `audio_url` parts may be fetched. Default False: they
         are refused, because fetching a client-named URL from the
         server is a request-forgery vector.
+    allow_public_base : bool
+        DANGEROUS. Lets a `local`-tagged transcriber name a public host.
     tags : list[str]
         Labels; `local` declares the service runs on this machine or
         network, which a tier whose endpoints are all `local` requires.
+        A `local` transcriber's `api_base` must then name a loopback,
+        private or internal host.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -184,6 +188,7 @@ class TranscriberConfig(BaseModel):
     allow_urls: StrictBool = False
     allowed_url_hosts: list[str] = Field(default_factory=list)
     allow_private_url_hosts: StrictBool = False
+    allow_public_base: StrictBool = False
     tags: list[str] = Field(default_factory=list)
 
     @field_validator("format", "format_no_speaker")
