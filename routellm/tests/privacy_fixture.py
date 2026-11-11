@@ -62,6 +62,7 @@ CASE_MODULES = [
     "routellm.tests.privacy_cases_policy_routing",
     "routellm.tests.privacy_cases_aux",
     "routellm.tests.privacy_cases_redact",
+    "routellm.tests.privacy_cases_decision",
 ]
 
 #: The caller every class-policy case sends as, and its key.
@@ -396,6 +397,7 @@ class Case:
     route: bool = False  # runs in the route world (two classes plus `policy_routing:`)
     aux: bool = False  # runs in the auxiliary-call world (policy world plus `AUX_CONFIG`)
     redact: bool = False  # runs in the redact world (see `redact_files`)
+    decision: bool = False  # runs in the decision world (see `privacy_decision_world`)
 
 
 CASES: dict[str, Case] = {}
@@ -412,6 +414,7 @@ def case(
     route=False,
     aux=False,
     redact=False,
+    decision=False,
 ):
     """Register a case. `status` and `local` are what the test asserts.
 
@@ -431,11 +434,12 @@ def case(
             None if total is not None else dict(local or {}),
             total,
             reaches_off_host,
-            policy or gate or route or aux or redact,
+            policy or gate or route or aux or redact or decision,
             gate,
             route,
             aux,
             redact,
+            decision,
         )
         return fn
 
@@ -467,7 +471,12 @@ class World:
         self._admitted.clear()
         for fake in self.fakes.values():
             fake.mode = "ok"
+            fake.reply = None
+            fake.delay = 0.0
             fake.hits.clear()
+        decision = self.server.CONTROLLER.decision
+        if decision is not None and decision.sticky is not None:
+            decision.sticky._seen.clear()
         self.server.CONTROLLER.resilience.cb_map.clear()
 
     def hits(self) -> dict[str, int]:
@@ -540,6 +549,12 @@ from routellm.tests import privacy_fixture as pf
 fakes = {{n: pf.FakeUpstream(n) for n in pf.LEAVES}}
 cfg = pf.build_config({{n: f.base for n, f in fakes.items()}})
 cfg.update(json.loads({extra!r}))
+if cfg.pop("decider", None):
+    fakes["decider"] = pf.FakeUpstream("decider")
+    cfg["endpoints"]["decider"] = {{
+        "model": "openai/decider", "api_base": fakes["decider"].base, "api_key_env": "FAKE_KEY",
+        "tags": ["local", "decider", "jur:ca"], "extra": {{"max_retries": 0}},
+    }}
 aux = cfg.pop("aux", None)
 if aux:
     leaf = dict(cfg["endpoints"][aux])
@@ -595,6 +610,7 @@ def run_cases(
     class_policy=False,
     route=False,
     redact=False,
+    decision=False,
 ):
     """Run the named cases in one subprocess; return {case: {obs, hits}}.
 
@@ -603,13 +619,18 @@ def run_cases(
     `class_policy` starts the app under a policy file and an auth key, with
     the extra tiers of `policy_tiers`; cases then declare a class.
     """
-    if route:
+    if decision:
+        from routellm.tests.privacy_decision_world import decision_config
+
+        class_policy = True
+        extra_config = {**decision_config(tmp_path, route), **(extra_config or {})}
+    elif route:
         class_policy = True
         extra_config = {**route_config(), **(extra_config or {})}
     if redact:
         class_policy = True
         extra_config = {**redact_files(tmp_path), **AUX_CONFIG, **(extra_config or {})}
-    elif class_policy:
+    elif class_policy and not decision:
         extra_config = {**class_policy_files(tmp_path, route), **(extra_config or {})}
     # Selector tiers consult the models.dev catalog on construction; an
     # empty snapshot keeps that off the network (tags need no catalog).
