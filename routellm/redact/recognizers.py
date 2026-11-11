@@ -9,7 +9,8 @@ location) on top.
 A span is `{start, end, category, score}`, offsets in characters into
 the text given. Categories:
 
-    sin, ramq, postal_code, amount, date_of_birth, client_id, email
+    sin, ramq, postal_code, amount, date_of_birth, client_id, email,
+    phone, address
 
 Guards named in the docs are real checks, not shape matches: a SIN must
 pass the Luhn checksum, a RAMQ number must carry a calendar-plausible
@@ -27,13 +28,17 @@ __all__ = [
     "Span",
     "analyze_patterns",
     "compile_client_id_patterns",
+    "detect_language",
+    "find_addresses",
     "find_amounts",
     "find_client_ids",
     "find_date_of_birth",
     "find_emails",
+    "find_phones",
     "find_postal_codes",
     "find_ramq",
     "find_sin",
+    "languages_for",
     "luhn_valid",
     "resolve_overlaps",
 ]
@@ -152,14 +157,40 @@ _AMOUNT = re.compile(
     rf"(?<![\d,.])(?:\d{{1,3}}(?:{_SP}\d{{3}})+|\d+)(?:,\d{{1,2}})?{_SP}?(?:\$|€|(?:CAD|EUR|USD)\b)"
 )
 
+# English format: comma groups thousands, dot marks decimals.
+_EN_NUM = r"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?"
+_CODE = r"(?:CAD|USD|EUR|GBP)"
+# A trailing digit, or a separator then a digit, means the number goes on
+# (`$1.2.3`, `$1,234.567`): not an amount.
+_NOT_CONT = r"(?![\d_]|[.,]\d)"
+_AMOUNT_EN_PREFIX = re.compile(
+    rf"(?<![\w,.])(?:[$€£]{_SP}?|{_CODE}{_SP}?)"
+    rf"(?:{_EN_NUM}|\d{{1,3}}(?:\.\d{{3}})+(?:,\d{{1,2}})?|\d+(?:,\d{{1,2}})?){_NOT_CONT}"
+)
+# Suffix form needs a thousands group or a decimal part: `300 $` is the
+# French pattern's, and a bare `5 USD` too, so nothing here is new for them.
+_AMOUNT_EN_SUFFIX = re.compile(
+    rf"(?<![\d,.])(?:\d{{1,3}}(?:,\d{{3}})+(?:\.\d{{1,2}})?|\d+\.\d{{1,2}}){_SP}?"
+    rf"(?:\$|£|{_CODE}\b){_NOT_CONT}"
+)
+
 
 def find_amounts(text: str) -> list[Span]:
-    """French-format money: `1 234,56 $`, `12,50 €`, `300 CAD`.
+    """Money, French or English format, with a currency.
 
-    Space (also no-break) groups thousands, comma marks decimals, the
-    currency follows the number. A bare number is not an amount.
+    French: `1 234,56 $`, `12,50 €`, `300 CAD`; space (also no-break)
+    groups thousands, comma marks decimals, the currency follows.
+    English: `$1,234.56`, `USD 1,234.56`, `1,234.56 $`, `£5`; comma
+    groups, dot marks decimals. `€12,50` and `€1.234,56` are read too.
+    A bare number is not an amount, and neither is a version (`1.2.3`),
+    a year, a phone number or an id: a currency is always required.
     """
-    return [Span(m.start(), m.end(), "amount", 0.8) for m in _AMOUNT.finditer(text)]
+    spans = {
+        (m.start(), m.end())
+        for rx in (_AMOUNT, _AMOUNT_EN_PREFIX, _AMOUNT_EN_SUFFIX)
+        for m in rx.finditer(text)
+    }
+    return [Span(a, b, "amount", 0.8) for a, b in sorted(spans)]
 
 
 # -- date of birth -----------------------------------------------------
@@ -327,6 +358,170 @@ def find_client_ids(text: str, patterns: Iterable[re.Pattern[str]]) -> list[Span
     return out
 
 
+# -- phone -------------------------------------------------------------
+
+_PHONE_CUE = re.compile(
+    r"(?:\bt[ée]l(?:[ée]phone)?\b|\bphone\b|\bcell(?:ulaire)?\b|\bmobile\b"
+    r"|\bfax\b|\bcall\b|\bappel(?:ez|er)?\b|\bjoindre\b|\btext\b)\W{0,6}$",
+    re.I,
+)
+# NANP: area code and exchange start 2-9. Separators (or parens, or +1)
+# are what make ten digits a phone number rather than an id.
+_NANP = re.compile(
+    r"(?<![\w+-])(?:\+1[ .-]?|1[ .-])?"
+    r"(?:\([2-9]\d{2}\)[ .-]?|[2-9]\d{2}([ .-]))[2-9]\d{2}(?:\1|[ .-])\d{4}(?![\w-])"
+    r"|(?<![\w+-])\([2-9]\d{2}\)[ .-]?[2-9]\d{2}[ .-]?\d{4}(?![\w-])"
+)
+_NANP_BARE = re.compile(r"(?<![\w+-])(?:\+?1)?[2-9]\d{2}[2-9]\d{6}(?![\w-])")
+_FR_PHONE = re.compile(
+    r"(?<![\w+-])(?:(?:\+33|0033)[ .-]?\(?0?\)?[ .-]?[1-9]|0[1-9])(?:([ .-]?)\d{2}){4}(?![\w-])"
+)
+
+
+def find_phones(text: str) -> list[Span]:
+    """North American (NANP) and French phone numbers.
+
+    `514-555-0123`, `(514) 555-0123`, `+1 514 555 0123`, `06 12 34 56 78`,
+    `+33 6 12 34 56 78`. Ten bare digits are a number only after a cue
+    word (`tel`, `phone`, `cell`): they are otherwise as likely an id.
+    Presidio's phone recognizer scores a match at the bare threshold; this
+    one gives a proper score so the number is not borderline.
+    """
+    out: dict[tuple[int, int], float] = {}
+    for m in _NANP.finditer(text):
+        digits = re.sub(r"\D", "", m.group())
+        if len(digits) in (10, 11):
+            out[(m.start(), m.end())] = 0.8
+    for m in _FR_PHONE.finditer(text):
+        sep = m.group(1)
+        raw = m.group()
+        bare = sep == "" and re.fullmatch(r"0\d{9}", raw) is not None
+        if bare and not _has_cue(text, m.start(), _PHONE_CUE):
+            continue
+        out[(m.start(), m.end())] = 0.7 if bare else 0.8
+    for m in _NANP_BARE.finditer(text):
+        if _has_cue(text, m.start(), _PHONE_CUE):
+            out[(m.start(), m.end())] = 0.7
+    return [Span(a, b, "phone", score) for (a, b), score in sorted(out.items())]
+
+
+# -- street address ----------------------------------------------------
+
+_CAP = r"[A-ZÀ-ÝŒ][\wÀ-ÿŒœ'\u2019]+(?:-[A-ZÀ-ÝŒa-zà-ÿ][\wÀ-ÿŒœ'\u2019]*)*"
+_PART = r"(?:(?:de\s+la|de\s+l['\u2019]|du|des|de|d['\u2019]|la|le|les|l['\u2019])\s*)"
+_FR_TYPES = (
+    r"(?i:rue|avenue|av|boulevard|boul|bd|chemin|ch|rang|route|rte|place|all[ée]e|impasse"
+    r"|mont[ée]e|c[ôo]te|terrasse|croissant|promenade|cours|quai|sentier|autoroute)"
+)
+_EN_TYPES = (
+    r"(?i:street|st|avenue|ave|av|boulevard|blvd|road|rd|drive|dr|lane|ln|court|ct|way"
+    r"|place|pl|crescent|cres|terrace|terr|highway|hwy|parkway|pkwy|trail|circle|cir|square|sq)"
+)
+_CIVIC = r"(?<![\w.,/-])\d{1,5}(?:-\d{1,5})?[A-Za-z]?(?![\w])"
+_DIR = r"(?:\s+(?:Est|Ouest|Nord|Sud|East|West|North|South|[ENSOW]\b\.?|NE|NW|SE|SW))"
+_UNIT = (
+    r"(?:(?i:apt|appt|app|appartement|apartment|unit|unité|unite|suite|ste|bureau|local)\b"
+    r"\.?\s*#?\s*[\w-]{1,6}|\#[\w-]{1,6})"
+)
+_ADDR_FR = re.compile(
+    rf"{_CIVIC},?\s+{_FR_TYPES}\b\.?\s+{_PART}?{_CAP}(?:\s+{_PART}?{_CAP}){{0,3}}"
+    rf"(?:{_DIR})?(?:\s*,?\s*{_UNIT})?"
+)
+_ADDR_EN = re.compile(
+    rf"{_CIVIC}\s+{_CAP}(?:\s+{_CAP}){{0,2}}\s+{_EN_TYPES}\b\.?"
+    rf"(?:{_DIR})?(?:\s*,?\s*{_UNIT})?"
+)
+
+
+def find_addresses(text: str) -> list[Span]:
+    """Civic street address, French or English (Canada first).
+
+    A civic number, a street type, a street name; an optional direction
+    and unit follow: `1234 rue Saint-Denis`, `123 Main St. Apt 4`,
+    `45 avenue du Parc, app. 5`. The number and a capitalised name are
+    both required, so `4 rue` in prose, dates and `5 pounds to drive`
+    are not addresses. A street name written all lower-case is missed.
+    """
+    spans: dict[tuple[int, int], None] = {}
+    for rx in (_ADDR_FR, _ADDR_EN):
+        for m in rx.finditer(text):
+            spans[(m.start(), m.end())] = None
+    return [Span(a, b, "address", 0.75) for a, b in sorted(spans)]
+
+
+# -- language detection ------------------------------------------------
+
+_FR_WORDS = frozenset(
+    "le la les un une des du de au aux et est sont je tu il elle nous vous ils elles ce cette ces "
+    "mon ma mes ton ta tes sa ses notre nos votre vos leur leurs qui que quoi dont où ou mais donc "
+    "car ne pas pour avec sans dans sur sous par chez très aussi bien comme être avoir fait faire "
+    "peut pouvez voulez voici voilà merci bonjour bonsoir salut oui non svp quand comment pourquoi "
+    "avez ont suis êtes sommes c'est qu'il qu'elle j'ai j'habite m'appelle dû dossier fichier "
+    "réunion prévue demandés demandé veuillez cordialement".split()
+)
+_EN_WORDS = frozenset(
+    "the a an and is are was were be been am i you he she it we they this that these those my your "
+    "his her its our their who what which where when why how but or so because not no yes for with "
+    "without in on at by from of to into about as than then there here have has had do does did can "
+    "could will would should may might must please thanks thank hello hi dear regards live name "
+    "tell me us them if just also very file documents asked scheduled meeting".split()
+)
+# Words that exist in both languages (`on`, `a`, `me`, `son`, `plus`).
+_SHARED = frozenset({"a", "on", "me", "son", "plus", "an", "as", "do", "pas", "ma", "des", "ton"})
+_EN_ONLY = _EN_WORDS - _SHARED
+_FR_ONLY = _FR_WORDS - _SHARED
+_WORD = re.compile(r"[A-Za-zÀ-ÿ]+(?:['\u2019][A-Za-zÀ-ÿ]+)?")
+_FR_ELISION = re.compile(r"\b(?:[jltdnsmc]|qu|jusqu|lorsqu|puisqu)['\u2019]\w", re.I)
+_EN_CONTRACTION = re.compile(r"\w(?:n['\u2019]t|['\u2019](?:ll|re|ve|m|d))\b|\w['\u2019]s\b", re.I)
+_FR_ACCENT = re.compile("[éèêëàâçùûôîïœ]", re.I)
+#: Evidence (in word hits) at which a one-sided result is fully confident.
+_FULL_EVIDENCE = 5.0
+
+
+def detect_language(text: str) -> tuple[str, float]:
+    """Guess whether `text` is French or English: `(lang, confidence)`.
+
+    Pure Python, no model: counts stop-words, elisions (`j'ai`, `l'été`),
+    contractions (`don't`) and French diacritics. Confidence is in 0..1
+    and grows with both how one-sided the evidence is and how much of it
+    there is, so a short text, a name, a number or a mixed text scores
+    low. With no evidence at all the result is `("en", 0.0)`: read the
+    confidence, not the language, before trusting it.
+    """
+    fr = en = 0.0
+    for m in _WORD.finditer(text):
+        w = m.group().lower().replace("\u2019", "'")
+        if w in _FR_ONLY:
+            fr += 1
+        elif w in _EN_ONLY:
+            en += 1
+    fr += len(_FR_ELISION.findall(text))
+    en += len(_EN_CONTRACTION.findall(text))
+    fr += min(len(_FR_ACCENT.findall(text)), 3) * 0.5
+    total = fr + en
+    if total == 0:
+        return "en", 0.0
+    lang = "fr" if fr > en else "en"
+    margin = abs(fr - en) / total
+    return lang, round(margin * min(1.0, total / _FULL_EVIDENCE), 4)
+
+
+def languages_for(
+    text: str, languages: Iterable[str], min_confidence: float = 0.7
+) -> tuple[str, ...]:
+    """Languages to analyse `text` under: the detected one, or all of them.
+
+    Fails safe: below `min_confidence`, or when the detected language is
+    not among `languages`, every configured language is returned, since
+    over-detecting is the safe side. Order of `languages` is kept.
+    """
+    langs = tuple(languages)
+    lang, confidence = detect_language(text)
+    if confidence >= min_confidence and lang in langs:
+        return (lang,)
+    return langs
+
+
 # -- composition -------------------------------------------------------
 
 
@@ -348,6 +543,8 @@ _FINDERS: list[Callable[[str, str], list[Span]]] = [
     lambda t, _lang: find_ramq(t),
     lambda t, _lang: find_postal_codes(t),
     lambda t, _lang: find_amounts(t),
+    lambda t, _lang: find_phones(t),
+    lambda t, _lang: find_addresses(t),
     find_date_of_birth,
     lambda t, _lang: find_emails(t),
 ]

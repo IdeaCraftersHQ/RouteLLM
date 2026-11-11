@@ -6,13 +6,17 @@ from routellm.redact.recognizers import (
     Span,
     analyze_patterns,
     compile_client_id_patterns,
+    detect_language,
+    find_addresses,
     find_amounts,
     find_client_ids,
     find_date_of_birth,
     find_emails,
+    find_phones,
     find_postal_codes,
     find_ramq,
     find_sin,
+    languages_for,
     luhn_valid,
     resolve_overlaps,
 )
@@ -266,3 +270,246 @@ def test_span_dict_shape():
 
 def test_empty_text():
     assert analyze_patterns("", "en") == []
+
+
+# -- amounts, English format ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "amount",
+    [
+        "$1,234.56",
+        "$5",
+        "$ 12.50",
+        "$1,234",
+        "USD 1,234.56",
+        "CAD 300",
+        "USD1,000.00",
+        "1,234.56 $",
+        "1,234 $",
+        "12.50 USD",
+        "€12,50",
+        "€1.234,56",
+        "£1,299.99",
+    ],
+)
+def test_amount_en_valid(amount):
+    text = f"total {amount} due"
+    assert texts(text, find_amounts(text)) == [amount]
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "version 1.2.3",
+        "v1.2.3 released",
+        "in 2024 we",
+        "call 514-555-1234",
+        "invoice INV-1,234",
+        "invoice 2024-0042",
+        "ref 1,234.56",
+        "pi is 3.14159",
+        "$1.2.3",
+        "USD",
+        "price in USDT 5",
+        "a $ b",
+    ],
+)
+def test_amount_en_negatives(bad):
+    assert find_amounts(bad) == []
+
+
+def test_amount_en_not_cut_from_a_longer_number():
+    assert find_amounts("$1,234.567") == []
+    assert find_amounts("x 12,345,67 $") == []
+
+
+# -- street addresses -----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        "1234 rue Saint-Denis",
+        "1234, rue Saint-Denis",
+        "45 avenue du Parc",
+        "5600 boulevard de la Gauchetière Ouest",
+        "12 chemin des Érables",
+        "7 rue Saint-Denis, app. 5",
+        "12 rue Principale #4",
+        "123 Main St.",
+        "123 Main St. Apt 4",
+        "42 Queen Street West",
+        "1600 Pennsylvania Avenue",
+        "9 Elm Dr, Unit 12",
+        "250 Rue Sherbrooke O., bureau 300",
+        "2020 University Blvd",
+    ],
+)
+def test_address_valid(address):
+    text = f"j'habite au {address} depuis"
+    assert texts(text, find_addresses(text)) == [address]
+
+
+def test_address_category_and_score():
+    (span,) = find_addresses("1234 rue Saint-Denis")
+    assert span.category == "address"
+    assert 0.5 < span.score < 1
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "il y a 4 rue",
+        "ouvre la 4 rue principale",
+        "a 4 rue(s) plus loin",
+        "le 12 mars 2024",
+        "on 12 March 2024",
+        "5 pounds to drive home",
+        "rue Saint-Denis sans numéro",
+        "Main St. is closed",
+        "3 Dr",
+        "version 12 Street Fighter",
+        "il a 12 ans",
+    ],
+)
+def test_address_negatives(bad):
+    assert find_addresses(bad) == []
+
+
+def test_address_stops_before_following_sentence():
+    text = "123 Main St. Then we left."
+    assert texts(text, find_addresses(text)) == ["123 Main St."]
+
+
+# -- phone numbers --------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "phone",
+    [
+        "514-555-0123",
+        "(514) 555-0123",
+        "514 555 0123",
+        "514.555.0123",
+        "+1 514 555 0123",
+        "1-800-555-0199",
+        "+33 6 12 34 56 78",
+        "06 12 34 56 78",
+        "01.23.45.67.89",
+        "0033 6 12 34 56 78",
+    ],
+)
+def test_phone_valid(phone):
+    text = f"appelez {phone} svp"
+    spans = find_phones(text)
+    assert texts(text, spans) == [phone]
+    assert spans[0].category == "phone"
+    assert spans[0].score >= 0.7
+
+
+def test_phone_bare_digits_need_a_cue():
+    assert find_phones("ref 5145550123 ok") == []
+    assert find_phones("ref 0612345678 ok") == []
+    text = "tel: 5145550123"
+    assert texts(text, find_phones(text)) == ["5145550123"]
+    text = "cell 0612345678"
+    assert texts(text, find_phones(text)) == ["0612345678"]
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "version 1.2.3",
+        "date 2024-01-15",
+        "invoice 2024-0042-17",
+        "id 123-45-6789",
+        "046 454 286",
+        "4111 1111 1111 1111",
+        "total 1 234,56 $",
+        "0123456789012",
+        "114-555-0123",
+        "514-155-0123",
+        "12 34 56 78",
+        "5145550123456",
+    ],
+)
+def test_phone_negatives(bad):
+    assert find_phones(bad) == []
+
+
+# -- language detection ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Bonjour, je m'appelle Jean Tremblay et j'habite à Montréal.",
+        "Pouvez-vous me dire quand la réunion est prévue avec le client?",
+        "Voici les documents que vous avez demandés pour le dossier.",
+    ],
+)
+def test_detect_french(text):
+    lang, conf = detect_language(text)
+    assert lang == "fr"
+    assert conf >= 0.7
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Hello, my name is John Smith and I live in Toronto.",
+        "Can you tell me when the meeting is scheduled with the client?",
+        "Here are the documents that you asked for the file.",
+    ],
+)
+def test_detect_english(text):
+    lang, conf = detect_language(text)
+    assert lang == "en"
+    assert conf >= 0.7
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["", "   ", "514-555-0123", "Jean Tremblay", "ok", "$1,234.56", "Montréal"],
+)
+def test_detect_low_confidence_when_no_evidence(text):
+    _, conf = detect_language(text)
+    assert conf < 0.5
+
+
+def test_detect_mixed_text_is_not_confident():
+    _, conf = detect_language("Please send the dossier à Marie, merci and thanks pour le fichier")
+    assert conf < 0.7
+
+
+def test_languages_for_confident_picks_one():
+    assert languages_for("Hello, my name is John and I live in Toronto.", ("fr", "en")) == ("en",)
+    assert languages_for("Bonjour, je m'appelle Jean et j'habite à Québec.", ("en", "fr")) == (
+        "fr",
+    )
+
+
+def test_languages_for_fails_safe_to_all():
+    assert languages_for("Jean Tremblay", ("fr", "en")) == ("fr", "en")
+    assert languages_for("", ("fr", "en")) == ("fr", "en")
+
+
+def test_languages_for_detected_language_not_configured_falls_back_to_all():
+    assert languages_for("Hello, my name is John and I live in Toronto.", ("fr",)) == ("fr",)
+
+
+def test_analyze_patterns_includes_new_categories():
+    text = "Tel 514-555-0123, 1234 rue Saint-Denis, $1,234.56"
+    got = {s.category: text[s.start : s.end] for s in analyze_patterns(text, "fr")}
+    assert got == {
+        "phone": "514-555-0123",
+        "address": "1234 rue Saint-Denis",
+        "amount": "$1,234.56",
+    }
+
+
+def test_curly_apostrophes():
+    text = "au 12 rue de l’Église, Laval"
+    assert texts(text, find_addresses(text)) == ["12 rue de l’Église"]
+    assert detect_language("Je n’ai pas l’été pour j’habiter")[0] == "fr"

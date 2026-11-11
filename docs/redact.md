@@ -21,12 +21,14 @@ higher score wins, then the longer span.
 | Category | Source | Notes |
 |----------|--------|-------|
 | `person`, `location` | spaCy NER via Presidio | needs `redact` |
-| `phone`, `iban`, `card` | Presidio | card and IBAN are checksum-validated; needs `redact` |
+| `iban`, `card` | Presidio | card and IBAN are checksum-validated; needs `redact` |
+| `phone` | pattern + Presidio | NANP and French formats (`514-555-0123`, `+33 6 12 34 56 78`) scored 0.8, ahead of Presidio's borderline 0.4; ten bare digits only after a cue (`tel`, `cell`) |
+| `address` | pattern | civic number + street type + capitalised name, fr/en: `1234 rue Saint-Denis`, `123 Main St. Apt 4`, `45 avenue du Parc, app. 5` |
 | `email` | pattern | |
 | `sin` | pattern | nine digits, spaced, dashed or bare; Luhn-validated |
 | `ramq` | pattern | four letters, eight digits (`DUPJ 8503 1234`); the digits must hold a plausible birth month and day |
 | `postal_code` | pattern | `A1A 1A1`; only letters Canada Post issues |
-| `amount` | pattern | French format with a currency: `1 234,56 $`, `12,50 €` |
+| `amount` | pattern | French (`1 234,56 $`, `12,50 €`) or English (`$1,234.56`, `USD 1,234.56`, `1,234.56 $`) format; a currency is always required |
 | `date_of_birth` | pattern | a real date after a birth cue ("né le", "date de naissance", "born", "DOB") |
 | `client_id` | config | your regexes |
 
@@ -248,7 +250,14 @@ file, not this code. If its terms do not suit your distribution, point
 
 ## Limits
 
-- Language is declared by the caller; there is no detection.
-- Street addresses are covered only as far as the NER model tags them
-  as locations.
-- Amounts use French separators; `$1,234.56` is not matched.
+- `routellm.redact.detect_language(text)` returns `(lang, confidence)`
+  from stop-words, elisions, contractions and diacritics (no model).
+  `languages_for(text, languages)` picks the detected language only when
+  confidence is at least 0.7, else all configured ones; short text,
+  names, numbers and mixed text stay on all languages. The transform
+  still analyses under every configured language until it is wired to it.
+- Addresses need a civic number, a street type and a capitalised name;
+  a name in all lower-case (`12 rue de la paix`) is missed, and a
+  number-led capitalised phrase ending in a street word (`2024 Capital
+  Drive`) is flagged. Addresses beyond that rely on the NER location tag.
+- Ten bare digits are a phone number only after a cue word.
