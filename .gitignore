@@ -173,3 +173,4 @@ cython_debug/
 # repo root, so both names must be ignored everywhere.
 .routellm.yaml
 routellm.yaml
+.pytest-tmp/
