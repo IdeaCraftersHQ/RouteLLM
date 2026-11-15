@@ -417,3 +417,72 @@ def test_show_lists_the_new_pins(layers, capsys):
     assert "auth" in out.split("pinned to the system layer", 1)[1]
     assert "decision" in out.split("pinned to the system layer", 1)[1]
     assert "endpoints.*.allow_public_base" in out
+
+
+MEDIA_SECTIONS = {
+    "transcriber": {"mode": "transcribe", "api_base": "http://127.0.0.1:9000"},
+    "video": {"api_base": "http://127.0.0.1:9100"},
+}
+
+
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("key", sorted(MEDIA_SECTIONS))
+def test_media_section_in_a_higher_layer_stops_startup(layers, _env_layer, source, key):
+    path = _higher(layers, source, {key: MEDIA_SECTIONS[key]})
+    with pytest.raises(cfg.ConfigError) as exc:
+        _go(layers, _env_layer)
+    text = str(exc.value)
+    assert str(path) in text and f"`{key}`" in text and "system" in text
+
+
+@pytest.mark.parametrize("key", sorted(MEDIA_SECTIONS))
+def test_system_layer_may_set_media_sections(layers, _env_layer, key):
+    layers.write(layers.system, {"policy": "p.yaml", key: MEDIA_SECTIONS[key]})
+    assert _go(layers, _env_layer).data[key] == MEDIA_SECTIONS[key]
+
+
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("key", sorted(MEDIA_SECTIONS))
+def test_tier_media_override_from_a_higher_layer_stops_startup(layers, _env_layer, source, key):
+    path = _higher(layers, source, {"tiers": {"fast": {key: {"timeout_ms": 5}}}})
+    with pytest.raises(cfg.ConfigError) as exc:
+        _go(layers, _env_layer)
+    text = str(exc.value)
+    assert str(path) in text and f"tiers.fast.{key}" in text and "system" in text
+
+
+@pytest.mark.parametrize("key", sorted(MEDIA_SECTIONS))
+def test_tier_media_change_over_a_system_value_stops_startup(layers, _env_layer, key):
+    layers.write(
+        layers.system,
+        {"policy": "p.yaml", "tiers": {"fast": {key: {"timeout_ms": 1}}}},
+    )
+    _higher(layers, "project", {"tiers": {"fast": {key: {"timeout_ms": 2}}}})
+    with pytest.raises(cfg.ConfigError, match=f"tiers.fast.{key}"):
+        _go(layers, _env_layer)
+
+
+@pytest.mark.parametrize("key", sorted(MEDIA_SECTIONS))
+def test_tier_media_override_from_the_system_layer_loads(layers, _env_layer, key):
+    layers.write(
+        layers.system,
+        {"policy": "p.yaml", "tiers": {"fast": {key: {"timeout_ms": 1}}}},
+    )
+    _higher(layers, "project", {"tiers": {"fast": {"models": ["x"]}}})
+    assert _go(layers, _env_layer).data["tiers"]["fast"][key] == {"timeout_ms": 1}
+
+
+@pytest.mark.parametrize("source", SOURCES)
+@pytest.mark.parametrize("key", sorted(MEDIA_SECTIONS))
+def test_media_sections_merge_freely_without_a_system_policy(layers, _env_layer, source, key):
+    layers.write(layers.system, {"endpoints": SYSTEM_ENDPOINTS})
+    _higher(layers, source, {key: MEDIA_SECTIONS[key], "tiers": {"fast": {key: {"a": 1}}}})
+    data = _go(layers, _env_layer).data
+    assert data[key] == MEDIA_SECTIONS[key]
+    assert data["tiers"]["fast"][key] == {"a": 1}
+
+
+def test_show_lists_the_media_pins(layers, capsys):
+    assert cfg.main(["show"]) == 0
+    out = capsys.readouterr().out.split("pinned to the system layer", 1)[1]
+    assert "transcriber" in out and "video" in out and "tiers.*.transcriber" in out

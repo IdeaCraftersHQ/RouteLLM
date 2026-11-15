@@ -1379,7 +1379,8 @@ Layers merge by key, so a project file could otherwise add `local` to a cloud en
 | Pinned | When |
 |---|---|
 | `policy:` | always system-only, whether or not the system layer sets one |
-| `governance`, `strict_registry`, `tag_namespaces`, `egress_gates`, `auth`, `decision`, `audit` (whole sections) | while the system layer sets a `policy:` |
+| `governance`, `strict_registry`, `tag_namespaces`, `egress_gates`, `auth`, `decision`, `audit`, `transcriber`, `video` (whole sections) | while the system layer sets a `policy:` |
+| `tiers.<name>.transcriber` and `tiers.<name>.video` (a non-system layer may not add or change them) | while the system layer sets a `policy:` |
 | governance tags of every endpoint: reach labels (`local`, `vpn`, `cloud`) and namespaced tags (`jur:ca`, `team:x`) | while the system layer sets a `policy:` |
 | every endpoint's `allow_public_base`, including on endpoints a higher layer adds | while the system layer sets a `policy:` |
 
