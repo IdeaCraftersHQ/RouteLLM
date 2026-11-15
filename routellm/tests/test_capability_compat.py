@@ -16,6 +16,7 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -88,7 +89,7 @@ class _StubRouter(Router):
     """Router returning a fixed win rate and counting its calls."""
 
     win_rate = 0.9
-    calls: list[str] = []
+    calls: ClassVar[list[str]] = []
 
     def calculate_strong_win_rate(self, prompt):
         type(self).calls.append(prompt)

@@ -16,6 +16,7 @@ import logging
 import subprocess
 import sys
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -64,7 +65,7 @@ class _StubRouter(Router):
     """
 
     win_rate = 0.5
-    calls: list[str] = []
+    calls: ClassVar[list[str]] = []
 
     def calculate_strong_win_rate(self, prompt):
         type(self).calls.append(prompt)

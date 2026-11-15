@@ -10,6 +10,8 @@ litellm and never count as audio capable.
 Routers are stubs and every upstream is a mock; no network is touched.
 """
 
+from typing import ClassVar
+
 import pytest
 
 import routellm.controller
@@ -67,7 +69,7 @@ def _image():
 
 
 class _Stub(Router):
-    calls: list = []
+    calls: ClassVar[list] = []
 
     def calculate_strong_win_rate(self, prompt):
         type(self).calls.append(prompt)
@@ -77,7 +79,7 @@ class _Stub(Router):
 @pytest.fixture
 def hi_router(monkeypatch):
     class Stub(_Stub):
-        calls = []
+        calls: ClassVar[list] = []
 
     monkeypatch.setitem(routellm.controller.ROUTER_CLS, "hi", lambda **kw: Stub())
     return Stub

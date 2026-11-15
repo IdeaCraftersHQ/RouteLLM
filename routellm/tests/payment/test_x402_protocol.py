@@ -7,6 +7,7 @@ not a local re-implementation of it.
 
 import base64
 import json
+from typing import ClassVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -122,7 +123,7 @@ async def test_controller_parses_real_402_into_challenge():
 
     class RecordingGateway:
         name = "x402"
-        networks = ["base"]
+        networks: ClassVar[list[str]] = ["base"]
 
         async def pay(self, challenge):
             seen.append(challenge)
@@ -266,7 +267,7 @@ async def test_retry_uses_version_appropriate_header(response_factory, expected_
 
     class VersionGateway:
         name = "x402"
-        networks = ["base"]
+        networks: ClassVar[list[str]] = ["base"]
 
         async def pay(self, challenge):
             return PaymentReceipt(
@@ -422,7 +423,7 @@ async def test_non_402_error_never_pays():
 
     class SpyGateway:
         name = "x402"
-        networks = ["base"]
+        networks: ClassVar[list[str]] = ["base"]
 
         async def pay(self, challenge):
             paid.append(challenge)
@@ -466,7 +467,7 @@ async def test_402_without_response_carries_no_invented_amount():
 
     class SpyGateway:
         name = "x402"
-        networks = ["base"]
+        networks: ClassVar[list[str]] = ["base"]
 
         async def pay(self, challenge):
             seen.append(challenge)
