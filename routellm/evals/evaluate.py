@@ -226,7 +226,7 @@ if __name__ == "__main__":
         # For non-deterministic routers like random, we average over multiple runs
         if router in ["random"]:
             router_results = []
-            for i in range(args.random_iters):
+            for _ in range(args.random_iters):
                 for threshold, accuracy, model_counts, total in benchmark.evaluate(
                     controller, router, args.num_results, True
                 ):
