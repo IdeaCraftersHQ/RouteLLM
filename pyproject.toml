@@ -179,7 +179,6 @@ ignore = [
 	"RUF005",   # 6 collection literal concatenation
 	"F811",     # 2 redefinition -- pytest fixture params, false positive
 	"RUF015",   # 2 prefer next(iter(...)) over list slice
-	"F841",     # 1 unused local, in the payment suite
 	"RUF043",   # 1 pattern passed to re without raw string
 	"UP042",    # 1 class inherits from both str and enum
 ]

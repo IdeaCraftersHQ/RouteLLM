@@ -77,7 +77,7 @@ async def test_controller_retries_on_402():
             payment_gateway=gateway,
         )
         # Call the internal payment helper directly
-        result = await controller._request_with_payment(
+        await controller._request_with_payment(
             lambda extra_headers: mock_acompletion(extra_headers=extra_headers)
         )
 
