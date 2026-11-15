@@ -60,7 +60,7 @@ def compute_tiers(model_ratings, num_tiers):
         split_idx.append(split)
         cur_n = split + 1
 
-    split_idx = split_idx[::-1] + [n - 1]
+    split_idx = [*split_idx[::-1], n - 1]
     model2tier = {}
     cur_idx = 0
     for i in range(len(split_idx)):

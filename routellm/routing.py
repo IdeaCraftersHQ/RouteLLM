@@ -361,7 +361,7 @@ def resolve_tier(
         error_cls=error_cls,
     )
 
-    return leaf, [entry] + child_path
+    return leaf, [entry, *child_path]
 
 
 def sibling_of(

@@ -1137,14 +1137,14 @@ def _capability_matrix(registry: EndpointRegistry, selects: list[str] | None = N
         caps = caps_by_name[name]
         cells = [f"{_cell(getattr(caps, column)):>18}" for column in _MATRIX_COLUMNS]
         cells.append(f"{_quality_cell(registry.get(name)):>18}")
-        lines.append("  ".join([f"{name:<{width}}"] + cells + [""]).rstrip())
+        lines.append("  ".join([f"{name:<{width}}", *cells, ""]).rstrip())
 
     for tier_name in registry.tier_names():
         caps = tier_index.get(tier_name, Capabilities())
         cells = [f"{_cell(getattr(caps, column)):>18}" for column in _MATRIX_COLUMNS]
         cells.append(f"{'-':>18}")
         via = _via(registry, tier_name, caps_by_name)
-        lines.append("  ".join([f"{tier_name + ' (tier)':<{width}}"] + cells + [via]).rstrip())
+        lines.append("  ".join([f"{tier_name + ' (tier)':<{width}}", *cells, via]).rstrip())
 
     lines.append("")
     lines.append("Unknown:")
