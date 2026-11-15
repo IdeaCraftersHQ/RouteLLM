@@ -81,7 +81,7 @@ def main(args):
     for i in range(len(lines)):
         questions.append(get_one_example(lines, i, False))
         labels.append(get_answer_value(lines[i]["answer"]))
-    assert all(l != INVALID for l in labels)
+    assert all(label != INVALID for label in labels)
     arguments = [{"question": q} for q in questions]
 
     #####################################
@@ -138,7 +138,7 @@ prompts = pd.read_json(f"{current_dir}/test.jsonl", lines=True)["question"].toli
 assert len(weak_cors) == len(strong_cors)
 
 result_df = pd.DataFrame(
-    zip(prompts, weak_cors, strong_cors, weak_responses, strong_responses),
+    zip(prompts, weak_cors, strong_cors, weak_responses, strong_responses, strict=False),
     columns=[
         "prompt",
         ROUTED_PAIR.weak,
