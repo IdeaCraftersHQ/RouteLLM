@@ -40,9 +40,9 @@ def select_sglang_backend(args):
 
 
 def format_subject(subject):
-    l = subject.split("_")
+    parts = subject.split("_")
     s = ""
-    for entry in l:
+    for entry in parts:
         s += " " + entry
     return s
 
@@ -125,7 +125,7 @@ def evaluate(args, subject, dev_df, test_df):
     models = [s["model"] for s in states]
     latency = time.time() - tic
 
-    cors = [pred == label for pred, label in zip(preds, labels)]
+    cors = [pred == label for pred, label in zip(preds, labels, strict=False)]
     acc = np.mean(cors)
     cors = np.array(cors)
     model_counts = Counter(models)
@@ -170,7 +170,7 @@ def generate_domain_data(args, domain):
     assert len(weak_cors) == len(strong_cors)
 
     result_df = pd.DataFrame(
-        zip(prompts, weak_cors, strong_cors),
+        zip(prompts, weak_cors, strong_cors, strict=False),
         columns=["prompt", ROUTED_PAIR.weak, ROUTED_PAIR.strong],
     )
 
