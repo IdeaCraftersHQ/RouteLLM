@@ -4,7 +4,7 @@ Defines model types, prompt formatting, and router model configurations
 for causal language model routing.
 """
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
 
@@ -21,7 +21,7 @@ PROMPT_FORMAT_CONFIGS = {
 }
 
 
-class ModelTypeEnum(str, Enum):
+class ModelTypeEnum(StrEnum):
     """Enumeration of supported causal model types."""
 
     CAUSAL = "causal"
