@@ -177,7 +177,6 @@ ignore = [
 	"B017",     # 6 assert on bare Exception, all in the payment suite
 	"RUF059",   # 8 unused unpacked variable
 	"RUF005",   # 6 collection literal concatenation
-	"B905",     # 3 zip() without explicit strict=
 	"F811",     # 2 redefinition -- pytest fixture params, false positive
 	"RUF015",   # 2 prefer next(iter(...)) over list slice
 	"F841",     # 1 unused local, in the payment suite
