@@ -147,6 +147,9 @@ audio_tokens_per_second: 32
 # any key under its own `video:`. Under a policy with a `redact` or `block`
 # class the service must be tagged `local`. Remote URLs are refused.
 # Commented out: the sample should send video nowhere by default.
+# With a system `policy:`, `transcriber:` and `video:` (and any tier's own
+# `transcriber:` / `video:`) are pinned to the system config: a user,
+# project, env or flag layer that sets them stops startup.
 #
 # video:
 #   mode: preprocess                 # preprocess | passthrough | refuse

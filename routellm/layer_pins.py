@@ -13,7 +13,9 @@ The rules, applied to every non-system layer as it is merged:
 * When the system layer sets a `policy:`, these are pinned too: the keys
   in `PINNED_KEYS`, and the governance tags of every endpoint, meaning
   the reach labels (`local`, `vpn`, `cloud`) and every namespaced tag
-  (`jur:ca`, `team:x`), and each endpoint's `allow_public_base`. A
+  (`jur:ca`, `team:x`), and each endpoint's `allow_public_base`, and
+  `tiers.<name>.transcriber` / `tiers.<name>.video` (the whole top-level
+  `transcriber:` and `video:` sections are in `PINNED_KEYS`). A
   higher layer may not add, remove or change them on any endpoint,
   including one it defines itself. Plain tags,
   every other endpoint key and deleting an endpoint outright stay
@@ -47,7 +49,12 @@ PINNED_KEYS: tuple[str, ...] = (
     "auth",
     "decision",
     "audit",
+    "transcriber",
+    "video",
 )
+
+#: Per-tier override keys guarded like the top-level sections of the same name.
+TIER_PINNED_KEYS: tuple[str, ...] = ("transcriber", "video")
 
 #: Display name of the endpoint-tag pin, listed beside `PINNED_KEYS`.
 TAGS_PIN = "endpoints.*.tags"
@@ -57,7 +64,12 @@ PUBLIC_BASE_PIN = f"endpoints.*.{PUBLIC_BASE_KEY}"
 
 def pinned_labels() -> tuple[str, ...]:
     """Every pin, as `config show` lists them."""
-    return (*PINNED_KEYS, TAGS_PIN, PUBLIC_BASE_PIN)
+    return (
+        *PINNED_KEYS,
+        *(f"tiers.*.{k}" for k in TIER_PINNED_KEYS),
+        TAGS_PIN,
+        PUBLIC_BASE_PIN,
+    )
 
 
 def is_pinning(system_layer: Mapping[str, Any]) -> bool:
@@ -160,3 +172,22 @@ def check_layer(
                 f"{where} set or change `{PUBLIC_BASE_KEY}` on endpoint {name!r}: "
                 f"pinned to the system layer ({system_path}) while a `policy:` is loaded"
             )
+    tiers_before = merged_before.get("tiers")
+    tiers_after = merged_after.get("tiers")
+    tiers_before = tiers_before if isinstance(tiers_before, Mapping) else {}
+    tiers_after = tiers_after if isinstance(tiers_after, Mapping) else {}
+    for name in sorted(set(tiers_before) | set(tiers_after), key=str):
+        for key in TIER_PINNED_KEYS:
+            old = _tier_value(tiers_before, name, key, missing)
+            new = _tier_value(tiers_after, name, key, missing)
+            if old != new or (old is missing) != (new is missing):
+                raise ConfigError(
+                    f"{where} set or change `tiers.{name}.{key}`: "
+                    f"it must come from the system config ({system_path}) "
+                    "while a `policy:` is loaded"
+                )
+
+
+def _tier_value(tiers: Mapping[Any, Any], name: Any, key: str, missing: object) -> Any:
+    spec = tiers.get(name)
+    return spec.get(key, missing) if isinstance(spec, Mapping) else missing
