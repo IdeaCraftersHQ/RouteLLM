@@ -112,7 +112,7 @@ def test_a_local_ollama_model_is_not_flagged():
 def test_a_leaf_with_an_unknown_key_does_not_load():
     cfg = _config()
     cfg["endpoints"]["local_main"]["api_base_env"] = "SOMEWHERE"
-    with pytest.raises(ValueError, match="local_main.*api_base_env|api_base_env.*local_main"):
+    with pytest.raises(ValueError, match=r"local_main.*api_base_env|api_base_env.*local_main"):
         EndpointRegistry.from_config(cfg)
 
 
@@ -165,5 +165,5 @@ def test_a_cloud_leaf_under_a_private_tier_stops_startup():
 def test_a_cloud_leaf_behind_a_nested_tier_stops_startup():
     cfg = _config()
     cfg["tiers"]["default"]["strong"] = "general"
-    with pytest.raises(PolicyError, match="tier 'default'.*leaf 'gated_main'"):
+    with pytest.raises(PolicyError, match=r"tier 'default'.*leaf 'gated_main'"):
         _start(cfg)

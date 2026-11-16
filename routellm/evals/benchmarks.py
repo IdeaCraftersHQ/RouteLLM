@@ -34,12 +34,14 @@ class Benchmark(abc.ABC):
         num_results: int,
         overwrite_router_cache: bool,
     ) -> tuple[str, dict[str, int], str]:
-        """Takes in a router and threshold and returns a tuple of weighted accuracy, model counts, and number of requests."""
+        """Takes in a router and threshold and returns a tuple of weighted accuracy,
+        model counts, and number of requests."""
         pass
 
     @abc.abstractmethod
     def get_optimal_accuracy(self, strong_percent: float) -> float:
-        """Takes in % strong model calls and returns the optimal score for the benchmark given these % of calls."""
+        """Takes in % strong model calls and returns the optimal score for the benchmark
+        given these % of calls."""
         pass
 
     @abc.abstractmethod
@@ -98,7 +100,8 @@ class MMLU(Benchmark):
         )["eval_prompt"].tolist()
         self.all_data = all_data[~all_data["prompt"].isin(contaminated_prompts)]
         print(
-            f"Remaining {len(self.all_data)}/{original_length} prompts for MMLU after decontamination"
+            f"Remaining {len(self.all_data)}/{original_length} prompts for MMLU "
+            "after decontamination"
         )
 
     def evaluate(self, controller, router, num_results, overwrite_router_cache):

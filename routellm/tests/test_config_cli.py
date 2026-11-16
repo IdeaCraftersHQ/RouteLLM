@@ -343,7 +343,7 @@ def test_paths_marks_skipped_user_layer(env):
     _, out, _ = env.run("paths", "--no-user-config")
     _, js, _ = env.run("paths", "--no-user-config", "--format", "json")
 
-    assert any(l.startswith("[skipped]") and str(env.user) in l for l in out.splitlines())
+    assert any(line.startswith("[skipped]") and str(env.user) in line for line in out.splitlines())
     user = next(e for e in json.loads(js) if e["source"] == "user")
     assert user["skipped"] is True and user["exists"] is False
 

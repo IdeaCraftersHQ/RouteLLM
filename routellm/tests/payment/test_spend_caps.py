@@ -26,6 +26,7 @@ import json
 import httpx
 import litellm
 import pytest
+from pydantic import ValidationError
 
 from routellm.tests.subproc import SUBPROCESS_TIMEOUT
 
@@ -285,8 +286,10 @@ async def test_an_endpoint_cap_lower_than_the_global_one_wins():
         payable_bases=[AUTHORISED, OTHER],
         limits=PaymentLimits(global_cap="$0.01", per_base={AUTHORISED: "$0.0005"}),
     )
+    from x402.http.clients.httpx import PaymentError
+
     async with session:
-        with pytest.raises(Exception):
+        with pytest.raises(PaymentError):
             await session.post(f"{AUTHORISED}/chat/completions", json={"messages": []})
         allowed = await session.post(f"{OTHER}/chat/completions", json={"messages": []})
 
@@ -316,8 +319,10 @@ async def test_no_configured_cap_keeps_the_sdk_default_ceiling():
         payable_bases=[AUTHORISED],
         limits=PaymentLimits(),
     )
+    from x402.http.clients.httpx import PaymentError
+
     async with session:
-        with pytest.raises(Exception):
+        with pytest.raises(PaymentError):
             await session.post(f"{AUTHORISED}/chat/completions", json={"messages": []})
 
     assert provider.paid_urls == []
@@ -640,7 +645,7 @@ def test_a_malformed_cap_is_refused_at_load():
 
     from routellm.endpoints import EndpointRegistry
 
-    with _pytest.raises(Exception):
+    with _pytest.raises(ValidationError):
         EndpointRegistry.from_config(
             {
                 "endpoints": {
@@ -666,7 +671,7 @@ def test_a_cap_on_an_unpayable_endpoint_is_refused_at_load():
 
     from routellm.endpoints import EndpointRegistry
 
-    with _pytest.raises(Exception):
+    with _pytest.raises(ValidationError):
         EndpointRegistry.from_config(
             {
                 "endpoints": {

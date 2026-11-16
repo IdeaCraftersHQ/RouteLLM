@@ -55,8 +55,8 @@ def load_intent_config(config_path: str) -> IntentModelSelector:
 
     # Parse intent mappings
     intent_mappings = []
-    for intent_name, intent_config in (config.get("intents") or {}).items():
-        intent_config = intent_config or {}
+    for intent_name, raw_intent_config in (config.get("intents") or {}).items():
+        intent_config = raw_intent_config or {}
         raw_models = intent_config.get("models")
         if raw_models:
             model_pair = ModelPair(

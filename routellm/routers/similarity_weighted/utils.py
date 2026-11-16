@@ -48,10 +48,10 @@ def compute_tiers(model_ratings, num_tiers):
         for i in range(n):
             for j in range(i + 1, n):
                 dp[i][j][tier] = 1000000000
-                for l in range(i, j):
-                    if dp[i][j][tier] > dp[i][l][tier - 1] + dp[l + 1][j][0]:
-                        dp_split[i][j][tier] = l
-                        dp[i][j][tier] = dp[i][l][tier - 1] + dp[l + 1][j][0]
+                for k in range(i, j):
+                    if dp[i][j][tier] > dp[i][k][tier - 1] + dp[k + 1][j][0]:
+                        dp_split[i][j][tier] = k
+                        dp[i][j][tier] = dp[i][k][tier - 1] + dp[k + 1][j][0]
 
     cur_n = n
     split_idx = []
@@ -60,7 +60,7 @@ def compute_tiers(model_ratings, num_tiers):
         split_idx.append(split)
         cur_n = split + 1
 
-    split_idx = split_idx[::-1] + [n - 1]
+    split_idx = [*split_idx[::-1], n - 1]
     model2tier = {}
     cur_idx = 0
     for i in range(len(split_idx)):

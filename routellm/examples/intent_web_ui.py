@@ -99,7 +99,8 @@ def create_web_ui(intent_selector: IntentModelSelector, config_path: str | None 
     # Load example prompts
     example_prompts = {
         "marketing": [
-            "Create a Facebook ad campaign for our new accounting software targeting small businesses",
+            "Create a Facebook ad campaign for our new accounting software "
+            "targeting small businesses",
             "I need to market my digital product to accountants, what's the best approach?",
             "How can I improve the conversion rate for my SaaS landing page?",
             "Design a marketing strategy for our fintech app aimed at freelancers",
@@ -161,7 +162,9 @@ def create_web_ui(intent_selector: IntentModelSelector, config_path: str | None 
                 f"Embedding-based intent: {embedding_intent}",
                 f"Error getting confidence scores: {e!s}",
                 "",
-                f"Selected model pair:\nStrong: {intent_selector.get_model_pair(prompt).strong}\nWeak: {intent_selector.get_model_pair(prompt).weak}",
+                "Selected model pair:\n"
+                f"Strong: {intent_selector.get_model_pair(prompt).strong}\n"
+                f"Weak: {intent_selector.get_model_pair(prompt).weak}",
             )
 
     def add_example(prompt: str, intent: str):

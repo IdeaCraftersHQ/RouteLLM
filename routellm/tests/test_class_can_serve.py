@@ -348,7 +348,7 @@ def test_an_intent_tier_walked_at_startup_is_held_to_the_class(fakes):
     registry = EndpointRegistry.from_config(
         {"endpoints": eps, "tiers": tier_cfg("loc", "loc2"), "strict_registry": True}
     )
-    with pytest.raises(PolicyError, match="class 'secret'.*tier 'general'.*leaf 'cld'"):
+    with pytest.raises(PolicyError, match=r"class 'secret'.*tier 'general'.*leaf 'cld'"):
         Controller(
             routers=["random"],
             endpoints=registry,

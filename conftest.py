@@ -8,6 +8,7 @@ with no heavy deps and is registered via ROUTER_CLS.
 Also stubs x402 so X402Adapter tests can exercise the adapter logic without
 the real PyPI package installed.
 """
+
 import os
 
 # MUST come before anything imports litellm, directly or transitively.
@@ -23,9 +24,6 @@ import os
 # variable keeps their choice.
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
-import sys  # noqa: E402
-from unittest.mock import MagicMock  # noqa: E402
-
 # ---------------------------------------------------------------------------
 # Network blocker: the suite must make zero non-loopback connections.
 #
@@ -40,7 +38,9 @@ from unittest.mock import MagicMock  # noqa: E402
 # ---------------------------------------------------------------------------
 import importlib.util  # noqa: E402
 import subprocess  # noqa: E402
+import sys  # noqa: E402
 import tempfile  # noqa: E402
+from unittest.mock import MagicMock  # noqa: E402
 
 _NONET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "routellm", "tests", "_nonet")
 _spec = importlib.util.spec_from_file_location(
@@ -98,7 +98,7 @@ def _stub(name: str) -> MagicMock:
     m.__path__ = []
     m.__file__ = ""
     m.__spec__ = None
-    m.__package__ = name.split(".")[0]
+    m.__package__ = name.split(".", maxsplit=1)[0]
     return m
 
 
@@ -107,6 +107,7 @@ def _stub(name: str) -> MagicMock:
 # We register a fake ROUTER_CLS with the "random" router so Controller.__init__
 # can instantiate it.
 # ---------------------------------------------------------------------------
+
 
 class _FakeRandomRouter:
     NO_PARALLEL = True
@@ -137,6 +138,7 @@ sys.modules["routellm.routers.routers"] = _fake_routers_mod
 # those tests exist to catch. So the stub is now a fallback for an
 # environment without the extra installed, not the default.
 # ---------------------------------------------------------------------------
+
 
 def _x402_is_installed() -> bool:
     import importlib.util

@@ -114,6 +114,14 @@ exclude = ["assets", "benchmarks", "extensions", "docs", "models"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Third-party extensions checked out under extensions/ but not part of
+# this repo.
+extend-exclude = [
+	"extensions/context7",
+	"extensions/gemini-cli-jules",
+	"extensions/huggingface",
+	"extensions/redis",
+]
 
 [tool.ruff.lint]
 # The default rules plus the upgrade, import-hygiene and bugbear sets the
@@ -146,45 +154,36 @@ ignore = [
 	# them, deliberately, so importing routellm stays cheap. (65)
 	"PLC0415",
 
+	# The literals this flags are HTTP status codes (402, 429, 504),
+	# fixed key and header lengths (32, 16, 12) and calendar bounds
+	# (12, 31). Naming each would add indirection without clarity, and
+	# tests compare against expected numbers by design. (433)
+	"PLR2004",
+
 	# ---- Debt: not yet worked through ------------------------------
 	# Listed explicitly so `make lint` is green and a NEW violation is
 	# visible rather than buried. Each should be retired deliberately.
+	# Counts are for routellm/, tests included where the rule is not
+	# already ignored there.
 
-	# Volume rules. PLR2004 alone is 138 findings and churning them
-	# buys nothing; these go last, if ever.
-	"PLR2004",  # 138 magic value in comparison
-	"E501",     # 21 line too long
-	"PLR0913",  # 15 too many arguments
-	"PLR0917",  # 12 too many positional arguments
+	# Signature shape. Fixing means changing public signatures, or
+	# introducing parameter objects; neither is a lint edit.
+	"PLR0913",  # 51 too many arguments
+	"PLR0917",  # 33 too many positional arguments
 
-	# Blind except. 30 sites, and most are deliberate: documented
-	# best-effort boundaries in the payment, trace-recording, cache,
-	# plugin-discovery and provider-fallback paths, where the contract
-	# is that they never fail the caller. Retiring this rule means
-	# making each of those explicit, not narrowing them wholesale.
+	# Blind except. 45 sites outside tests, and most are deliberate:
+	# documented best-effort boundaries in the payment, trace-recording,
+	# cache, plugin-discovery and provider-fallback paths, where the
+	# contract is that they never fail the caller. Retiring this rule
+	# means making each of those explicit, not narrowing them wholesale.
 	"BLE001",
 
-	# Structural. Real but each is a refactor, not an edit.
-	"E402",     # 9 module import not at top of file
-	"PLW2901",  # 9 loop variable overwritten
-	"PLW0603",  # 8 global statement
-	"PLR0912",  # 3 too many branches
-	"PLR0915",  # 3 too many statements
-	"PLR0911",  # 2 too many return statements
-
-	# Correctness-adjacent, small, and worth doing next.
-	"RUF012",   # 8 mutable class default
-	"B017",     # 6 assert on bare Exception, all in the payment suite
-	"RUF059",   # 8 unused unpacked variable
-	"RUF005",   # 6 collection literal concatenation
-	"E741",     # 3 ambiguous variable name
-	"B905",     # 3 zip() without explicit strict=
-	"F811",     # 2 redefinition -- pytest fixture params, false positive
-	"RUF015",   # 2 prefer next(iter(...)) over list slice
-	"B007",     # 2 unused loop control variable
-	"F841",     # 1 unused local, in the payment suite
-	"RUF043",   # 1 pattern passed to re without raw string
-	"UP042",    # 1 class inherits from both str and enum
+	# Structural. Each is a refactor, not an edit.
+	"PLW0603",  # 11 global statement: module-level singletons in the server,
+	#             embeddings router and request requirements
+	"PLR0912",  # 12 too many branches
+	"PLR0915",  # 5 too many statements
+	"PLR0911",  # 6 too many return statements
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -194,9 +193,30 @@ ignore = [
 #   PLC0415  tests import heavy deps inside the test that needs them
 #   BLE001   a test that asserts on failure catches broadly on purpose
 #   PLW1510  subprocess.run in a test whose returncode is the assertion
+#   F811     tests import shared pytest fixtures from sibling modules and
+#            take them as parameters, which ruff reads as a redefinition
+#   E501     many tests build a script or YAML as a string and run it in a
+#            subprocess; the formatter cannot wrap those and wrapping them
+#            hurts readability
 #   B018     `controller.model_pair` inside pytest.raises is a property
 #            access that must raise; it only looks useless (1 site)
-"routellm/tests/*" = ["PLC0415", "BLE001", "PLW1510", "B018"]
+"routellm/tests/*" = ["PLC0415", "BLE001", "PLW1510", "B018", "F811", "E501"]
 # The fallback loop defines a closure and calls it in the same
 # iteration, so late binding never bites; B023 cannot see that. (9)
 "routellm/controller.py" = ["B023"]
+# The example scripts put the repo root on sys.path, or check for optional
+# packages and exit with a hint, before importing routellm. The imports
+# have to come after that.
+"routellm/examples/*" = ["E402"]
+# The root conftest sets an env var before its imports, and the `noqa: E402`
+# marks on those imports record that the order is required. ruff does not
+# count `os.environ` edits as code and so calls the marks unused.
+"conftest.py" = ["RUF100"]
+# The extension supports Python 3.10, which has no StrEnum.
+"extensions/policy_routing/routellm_policy_routing/policy.py" = ["UP042"]
+# The classifier prompts are sent verbatim; re-wrapping them would change
+# what the model reads.
+"routellm/middleware/intent_model_selector.py" = ["E501"]
+# DEBT, deferred: one long f-string, left alone while another branch edits
+# the file. Remove this entry with the line fix.
+"routellm/policy.py" = ["E501"]

@@ -225,7 +225,10 @@ def main(argv: list[str] | None = None) -> int:
                 handle.write(json.dumps(row) + "\n")
 
     print(f"{len(rows)} rows x {len(next(iter(results), {'results': []})['results'])} models")
-    header = f"{'endpoint':<20} {'calls':>5} {'errors':>6} {'latency_ms':>11} {'ttft_ms':>8} {'tok/s':>8} {'cost_usd':>10}"
+    header = (
+        f"{'endpoint':<20} {'calls':>5} {'errors':>6} {'latency_ms':>11} "
+        f"{'ttft_ms':>8} {'tok/s':>8} {'cost_usd':>10}"
+    )
     print(header)
     for name, row in summarize(results).items():
         print(

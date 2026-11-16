@@ -5,6 +5,7 @@ Implements W3C Payment Handler for fulfilling 402 challenges via blockchain.
 
 import os
 import time
+from typing import ClassVar
 
 from .gateway import PaymentGateway
 from .types import PaymentChallenge, PaymentReceipt
@@ -83,7 +84,7 @@ class X402Adapter(PaymentGateway):
         return self._networks
 
     # Legacy v1 network names mapped to the CAIP-2 identifiers v2 uses.
-    _CAIP2 = {
+    _CAIP2: ClassVar[dict[str, str]] = {
         "base": "eip155:8453",
         "base-sepolia": "eip155:84532",
         "ethereum": "eip155:1",

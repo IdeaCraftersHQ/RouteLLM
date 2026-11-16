@@ -31,7 +31,6 @@ import logging
 import os
 import sys
 from collections import defaultdict
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +68,8 @@ def load_scores(path: str) -> list:
 
     rows = []
     with open(path) as handle:
-        for number, line in enumerate(handle, start=1):
-            line = line.strip()
+        for number, raw_line in enumerate(handle, start=1):
+            line = raw_line.strip()
             if not line:
                 continue
             try:
@@ -100,10 +99,7 @@ def _means_per_prompt(rows: list) -> dict:
         totals[prompt][endpoint].append(float(score))
 
     return {
-        prompt: {
-            endpoint: sum(scores) / len(scores)
-            for endpoint, scores in endpoints.items()
-        }
+        prompt: {endpoint: sum(scores) / len(scores) for endpoint, scores in endpoints.items()}
         for prompt, endpoints in totals.items()
     }
 
@@ -246,7 +242,7 @@ def _train_advisor(examples: list, out_dir: str) -> str:
     return out_dir
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     """Run the CLI, returning its exit code."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
@@ -285,8 +281,7 @@ def main(argv: Optional[list] = None) -> int:
         print(f"{len(examples)} training examples")
         for example in examples:
             candidates = ", ".join(
-                f"{name}={mean:.3f}"
-                for name, mean in example["candidates"].items()
+                f"{name}={mean:.3f}" for name, mean in example["candidates"].items()
             )
             print(
                 f"  {example['prompt_hash']} -> {example['best_endpoint']} "

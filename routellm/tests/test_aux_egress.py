@@ -327,14 +327,14 @@ def test_the_judge_runs_for_a_class_it_passes(world, monkeypatch):
 
 
 def decision_for(world, endpoint):
-    chat, _ = world
+    _chat, _ = world
     registry = build(world).endpoints
     return build_decision({"decision": {"endpoint": endpoint, "data_classes": CLASSES}}, registry)
 
 
 def test_a_cloud_decision_endpoint_is_refused_under_a_class_that_may_not_reach_it(world):
     # The classifier reads every request before its class is known.
-    with pytest.raises(PolicyError, match="decision endpoint 'cld'.*sealed"):
+    with pytest.raises(PolicyError, match=r"decision endpoint 'cld'.*sealed"):
         build(world, decision=decision_for(world, "cld"))
 
 

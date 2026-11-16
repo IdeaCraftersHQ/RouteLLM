@@ -437,7 +437,8 @@ def run_test_suite(
 
     # Only test the controller if it's available
     if controller_available and controller:
-        # The controller will automatically select the appropriate model pair based on the detected intent
+        # The controller will automatically select the appropriate model pair
+        # based on the detected intent
         print("\nTesting controller with intent-based routing...")
         try:
             # Test with one prompt from each category
@@ -472,7 +473,7 @@ def run_test_suite(
 
     try:
         # Try one prompt from each category
-        for category, prompts in test_prompts.items():
+        for prompts in test_prompts.values():
             analyze_prompt_confidence(prompts[1], visualize)
 
         # Try an ambiguous prompt

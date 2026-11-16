@@ -462,7 +462,8 @@ _FR_WORDS = frozenset(
 _EN_WORDS = frozenset(
     "the a an and is are was were be been am i you he she it we they this that these those my your "
     "his her its our their who what which where when why how but or so because not no yes for with "
-    "without in on at by from of to into about as than then there here have has had do does did can "
+    "without in on at by from of to into about as than then there here have has had do does "
+    "did can "
     "could will would should may might must please thanks thank hello hi dear regards live name "
     "tell me us them if just also very file documents asked scheduled meeting".split()
 )

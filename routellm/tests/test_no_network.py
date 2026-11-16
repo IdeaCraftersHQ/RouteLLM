@@ -34,7 +34,7 @@ def _log() -> str:
 def test_non_loopback_connect_is_refused_naming_the_host():
     s = socket.socket()
     try:
-        with pytest.raises(ConnectionRefusedError, match="192.0.2.1"):
+        with pytest.raises(ConnectionRefusedError, match=r"192.0.2.1"):
             s.connect((OFFSITE, 443))
     finally:
         s.close()
@@ -43,13 +43,13 @@ def test_non_loopback_connect_is_refused_naming_the_host():
 
 @pytest.mark.blocker_probe
 def test_create_connection_to_a_hostname_is_refused():
-    with pytest.raises(ConnectionRefusedError, match="api.openai.com"):
+    with pytest.raises(ConnectionRefusedError, match=r"api.openai.com"):
         socket.create_connection(("api.openai.com", 443), timeout=1)
 
 
 @pytest.mark.blocker_probe
 def test_dns_lookup_of_a_remote_name_is_refused():
-    with pytest.raises(ConnectionRefusedError, match="example.com"):
+    with pytest.raises(ConnectionRefusedError, match=r"example.com"):
         socket.getaddrinfo("example.com", 80)
 
 

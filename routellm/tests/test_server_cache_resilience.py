@@ -12,6 +12,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import litellm
 import pytest
 
 from routellm.caching import CacheConfig
@@ -322,7 +323,7 @@ def test_timeout_from_config_is_observed_against_a_slow_upstream():
         config = build_resilience_config({"resilience": {"timeout_ms": 300, "max_retries": 0}})
         controller = _controller(slow, resilience=config)
         started = time.monotonic()
-        with pytest.raises(Exception):
+        with pytest.raises(TimeoutError):
             _ask(controller, [{"role": "user", "content": "hi"}])
         assert time.monotonic() - started < 1.2
     finally:
@@ -355,7 +356,7 @@ def test_max_retries_from_config_is_observed_against_a_failing_upstream():
                 resilience_config=config,
                 cache_config=CacheConfig(enabled=False),
             )
-            with pytest.raises(Exception):
+            with pytest.raises(litellm.exceptions.InternalServerError):
                 _ask(controller, [{"role": "user", "content": "hi"}], route=TIER)
             assert len(failing.hits) == retries + 1
         finally:
@@ -397,7 +398,7 @@ def test_per_endpoint_timeout_overrides_the_global_one():
             cache_config=CacheConfig(enabled=False),
         )
         started = time.monotonic()
-        with pytest.raises(Exception):
+        with pytest.raises(TimeoutError):
             _ask(controller, [{"role": "user", "content": "hi"}], route=TIER)
         assert time.monotonic() - started < 1.2
         assert len(slow.hits) >= 1

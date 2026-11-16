@@ -962,10 +962,10 @@ class EndpointRegistry:
             exceed `MAX_TIER_DEPTH` tier levels.
         """
         if name in ancestors:
-            cycle = ancestors[ancestors.index(name) :] + [name]
+            cycle = [*ancestors[ancestors.index(name) :], name]
             raise ValueError(f"Tier cycle: {' -> '.join(cycle)}")
 
-        path = ancestors + [name]
+        path = [*ancestors, name]
         if len(path) > MAX_TIER_DEPTH:
             raise ValueError(
                 f"Tier nesting exceeds the maximum depth of {MAX_TIER_DEPTH}: {' -> '.join(path)}"

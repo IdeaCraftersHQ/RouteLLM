@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import stat
+from typing import ClassVar
 
 import pytest
 
@@ -244,7 +245,10 @@ def test_endpoint_reach_and_jur_are_resolved():
     a = Auditor(sink, KEY, enforce=True, resolve=lambda n: (["local"], "ca"))
 
     class Res:
-        _hidden_params = {"routellm_endpoint": "leaf", "routellm_path": [{"tier": "t"}]}
+        _hidden_params: ClassVar[dict] = {
+            "routellm_endpoint": "leaf",
+            "routellm_path": [{"tier": "t"}],
+        }
 
     a.emit(rec(), "served", res=Res())
     ev = sink.events[0]
@@ -256,7 +260,7 @@ def test_decision_detail_and_error_text_are_dropped():
     a = Auditor(sink, KEY, enforce=True)
 
     class Res:
-        _hidden_params = {
+        _hidden_params: ClassVar[dict] = {
             "routellm_endpoint": "leaf",
             "routellm_path": [
                 {

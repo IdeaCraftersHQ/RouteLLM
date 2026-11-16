@@ -94,12 +94,12 @@ def test_unset_model_disables_detection_with_one_info_line(
 
 
 def test_raw_model_name_is_a_startup_error(registry, server_config):
-    with pytest.raises(ValueError, match="gpt-4o-mini.*registry endpoint"):
+    with pytest.raises(ValueError, match=r"gpt-4o-mini.*registry endpoint"):
         server_config.build_intents(_intents(model="gpt-4o-mini"), registry)
 
 
 def test_tier_name_is_not_an_endpoint(registry, server_config):
-    with pytest.raises(ValueError, match="legal.*tier"):
+    with pytest.raises(ValueError, match=r"legal.*tier"):
         server_config.build_intents(_intents(model="legal"), registry)
 
 
@@ -130,7 +130,7 @@ def test_jev_without_upstream_is_a_startup_error(registry, server_config):
 
 
 def test_jev_with_unknown_upstream_is_a_startup_error(registry, server_config):
-    with pytest.raises(ValueError, match="ghost.*registry endpoint"):
+    with pytest.raises(ValueError, match=r"ghost.*registry endpoint"):
         server_config.build_intents(_jev(upstream="ghost"), registry)
 
 
@@ -174,12 +174,12 @@ def _controller(monkeypatch, router_config):
 
 
 def test_hosted_router_without_upstream_refuses_to_load(monkeypatch):
-    with pytest.raises(ValueError, match="hosted.*upstream"):
+    with pytest.raises(ValueError, match=r"hosted.*upstream"):
         _controller(monkeypatch, {})
 
 
 def test_hosted_router_with_unknown_upstream_refuses_to_load(monkeypatch):
-    with pytest.raises(ValueError, match="ghost.*registry endpoint"):
+    with pytest.raises(ValueError, match=r"ghost.*registry endpoint"):
         _controller(monkeypatch, {"upstream": "ghost"})
 
 

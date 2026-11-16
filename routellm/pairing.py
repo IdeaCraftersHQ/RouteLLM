@@ -509,7 +509,7 @@ def _split_terms(select: str) -> tuple[list[TagTerm], list[str], str]:
                 "Every term must be key:value, either tag:<label> or a "
                 "models.dev key."
             )
-        key, _, value = term.partition(":")
+        key = term.partition(":")[0]
         if key == "free":
             # Judged by `_free_term` and `rank_candidates`, never by aim.
             continue
@@ -554,8 +554,9 @@ def _free_term(select: str) -> bool | None:
 def _is_free(record: ModelRecord | None, endpoint: Endpoint | None = None) -> bool:
     """Return whether input and output are priced at zero.
 
-    An endpoint's own `price` / `free` wins over the catalog. An uncatalogued endpoint, or one whose record leaves either price
-    unstated, is not free: absence of a price is not a price of zero.
+    An endpoint's own `price` / `free` wins over the catalog. An uncatalogued
+    endpoint, or one whose record leaves either price unstated, is not free:
+    absence of a price is not a price of zero.
     """
     override = endpoint.price_override if endpoint is not None else None
     if override is not None:
@@ -1137,14 +1138,14 @@ def _capability_matrix(registry: EndpointRegistry, selects: list[str] | None = N
         caps = caps_by_name[name]
         cells = [f"{_cell(getattr(caps, column)):>18}" for column in _MATRIX_COLUMNS]
         cells.append(f"{_quality_cell(registry.get(name)):>18}")
-        lines.append("  ".join([f"{name:<{width}}"] + cells + [""]).rstrip())
+        lines.append("  ".join([f"{name:<{width}}", *cells, ""]).rstrip())
 
     for tier_name in registry.tier_names():
         caps = tier_index.get(tier_name, Capabilities())
         cells = [f"{_cell(getattr(caps, column)):>18}" for column in _MATRIX_COLUMNS]
         cells.append(f"{'-':>18}")
         via = _via(registry, tier_name, caps_by_name)
-        lines.append("  ".join([f"{tier_name + ' (tier)':<{width}}"] + cells + [via]).rstrip())
+        lines.append("  ".join([f"{tier_name + ' (tier)':<{width}}", *cells, via]).rstrip())
 
     lines.append("")
     lines.append("Unknown:")

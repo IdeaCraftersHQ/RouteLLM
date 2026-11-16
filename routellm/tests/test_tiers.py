@@ -16,6 +16,7 @@ import logging
 import subprocess
 import sys
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -64,7 +65,7 @@ class _StubRouter(Router):
     """
 
     win_rate = 0.5
-    calls: list[str] = []
+    calls: ClassVar[list[str]] = []
 
     def calculate_strong_win_rate(self, prompt):
         type(self).calls.append(prompt)
@@ -1031,7 +1032,7 @@ def test_real_fallback_is_still_labelled(registry, tmp_path, lo_router, monkeypa
         default_router="lo",
         resilience_config=ResilienceConfig(max_retries=0),
     )
-    _, res = _failing_completion(monkeypatch, "ollama_chat/qwen3:8b")
+    _, _res = _failing_completion(monkeypatch, "ollama_chat/qwen3:8b")
 
     out = controller.completion(model="default", messages=[{"role": "user", "content": "easy"}])
 

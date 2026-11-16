@@ -70,7 +70,8 @@ def expand(value: str, env: Mapping[str, str], fail: Callable[[str], Exception])
         name = match["name"]
         if name is None:
             raise fail(
-                "malformed `${...}` reference (expected ${NAME}, ${NAME:-default}, ${NAME:?message})"
+                "malformed `${...}` reference "
+                "(expected ${NAME}, ${NAME:-default}, ${NAME:?message})"
             )
         raw = env.get(name)
         if match["op"] is None:

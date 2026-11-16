@@ -20,8 +20,7 @@ import numpy as np
 import onnx
 import onnxruntime as ort
 import torch
-import torch.nn as nn
-from huggingface_hub import PyTorchModelHubMixin
+from torch import nn
 
 # ---------------------------------------------------------------------------
 # ONNX-exportable wrapper
@@ -146,9 +145,7 @@ def validate(
     diff = np.abs(pt_out - ort_out).max()
     print(f"Max absolute diff (PyTorch vs ONNX): {diff:.2e}")
     if diff > atol:
-        raise ValueError(
-            f"Validation FAILED: max diff {diff:.2e} > tolerance {atol:.2e}"
-        )
+        raise ValueError(f"Validation FAILED: max diff {diff:.2e} > tolerance {atol:.2e}")
     print("Validation PASSED")
 
 

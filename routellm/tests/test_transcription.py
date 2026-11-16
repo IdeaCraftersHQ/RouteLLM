@@ -124,7 +124,7 @@ def test_unknown_template_placeholder_is_rejected():
 
 
 def test_unknown_key_is_rejected():
-    with pytest.raises(ValueError, match="extra|Extra"):
+    with pytest.raises(ValueError, match=r"extra|Extra"):
         EndpointRegistry.from_config(
             {"transcriber": {"api_base": "http://x/v1", "api_basee": "typo"}}
         )

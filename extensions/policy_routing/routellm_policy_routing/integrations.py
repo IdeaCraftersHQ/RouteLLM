@@ -15,7 +15,8 @@ stays pure — easier to unit-test and swap.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from routellm_policy_routing.policy import (
     DEFAULT_POLICY,
@@ -32,7 +33,7 @@ CacheHook = Callable[[Request, ClassificationResult], CachePolicy]
 
 
 def build_cache_hook(
-    classifier: Optional[Classifier] = None,
+    classifier: Classifier | None = None,
 ) -> CacheHook:
     """Return a cache_policy hook for routellm's controller.
 

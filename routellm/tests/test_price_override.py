@@ -87,5 +87,5 @@ def test_cost_ordering_override_replaces_catalog_price(make):
     ],
 )
 def test_malformed_override_rejected_at_load(make, bad):
-    with pytest.raises(Exception, match="price|free|input|output|Input|Extra|greater"):
+    with pytest.raises(Exception, match=r"price|free|input|output|Input|Extra|greater"):
         make(local=bad)

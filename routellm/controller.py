@@ -2334,7 +2334,8 @@ class Controller:
         if not write.cancelled() and write.exception() is not None:
             logger.error(f"Recording a stream trace failed: {write.exception()!s}")
 
-    # Matches OpenAI's Async Chat Completions interface, but also supports optional router and threshold args
+    # Matches OpenAI's Async Chat Completions interface, but also supports
+    # optional router and threshold args
     async def acompletion(
         self,
         *,

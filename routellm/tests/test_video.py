@@ -121,7 +121,7 @@ def test_bad_base64_and_oversize_are_refused_before_any_call(svc):
 
 
 def test_unknown_key_and_bad_ranges_are_rejected():
-    with pytest.raises(ValueError, match="extra|Extra"):
+    with pytest.raises(ValueError, match=r"extra|Extra"):
         EndpointRegistry.from_config({"video": {"api_base": "http://x", "api_basee": "t"}})
     with pytest.raises(ValueError, match="max_frames"):
         EndpointRegistry.from_config({"video": {"api_base": "http://x", "max_frames": 65}})

@@ -178,7 +178,7 @@ def test_the_recorded_trace_carries_the_area(tmp_path):
     import os
 
     directory = manager.fine_tune_config.trace_dir
-    name = [n for n in os.listdir(directory) if n.endswith(".json")][0]
+    name = next(n for n in os.listdir(directory) if n.endswith(".json"))
     with open(os.path.join(directory, name)) as handle:
         trace = json.load(handle)
 
@@ -241,7 +241,7 @@ def test_the_controller_fills_the_area_from_the_registry(tmp_path):
     import os
 
     directory = controller.quality_manager.fine_tune_config.trace_dir
-    name = [n for n in os.listdir(directory) if n.endswith(".json")][0]
+    name = next(n for n in os.listdir(directory) if n.endswith(".json"))
     with open(os.path.join(directory, name)) as handle:
         trace = json.load(handle)
 

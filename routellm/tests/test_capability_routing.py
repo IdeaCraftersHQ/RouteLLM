@@ -14,6 +14,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -59,7 +60,7 @@ class _StubRouter(Router):
     """Router returning a fixed win rate and counting its calls."""
 
     win_rate = 0.5
-    calls: list[str] = []
+    calls: ClassVar[list[str]] = []
 
     def calculate_strong_win_rate(self, prompt):
         type(self).calls.append(prompt)
@@ -153,7 +154,7 @@ def test_a_text_request_routes_exactly_as_before(hi_router, tmp_path):
 def test_a_vision_request_is_forced_to_the_only_capable_side(hi_router, tmp_path):
     controller = _controller(CONFIG, tmp_path)
 
-    picked, path, _ = _route(controller, _vision())
+    picked, _path, _ = _route(controller, _vision())
 
     assert picked == "seeing"
     assert hi_router.calls == []

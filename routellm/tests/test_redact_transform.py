@@ -185,7 +185,7 @@ def test_selects_only_a_redact_class(transform):
 
 def test_the_output_holds_no_mapping_id_and_the_log_no_value(transform, store, caplog):
     caplog.set_level(logging.DEBUG)
-    out, state = transform.forward(MESSAGES, ctx())
+    out, _state = transform.forward(MESSAGES, ctx())
     ids = [r[0] for r in _mapping_ids(store)]
     assert ids and not any(i in json.dumps(out) for i in ids)
     assert leaked(caplog.text) == []

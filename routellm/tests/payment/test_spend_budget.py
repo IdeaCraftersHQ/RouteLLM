@@ -510,8 +510,10 @@ async def test_a_refused_payment_does_not_consume_the_budget():
         limits=PaymentLimits(global_cap="$0.005"),
         budget=budget,
     )
+    from x402.http.clients.httpx import PaymentError
+
     async with session:
-        with pytest.raises(Exception):
+        with pytest.raises(PaymentError):
             await session.post(f"{AUTHORISED}/chat/completions", json={"messages": []})
 
     assert provider.paid_urls == []
@@ -931,7 +933,7 @@ async def test_a_failed_payment_at_the_controller_seam_is_refunded():
         raise refusal()
 
     for _ in range(10):
-        with pytest.raises(Exception):
+        with pytest.raises(RuntimeError):
             await controller._request_with_payment(call, endpoint="cheap")
 
     assert gateway.attempts == 10
