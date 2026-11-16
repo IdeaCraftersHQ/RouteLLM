@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Constants — single source of truth for thresholds + TTLs.
@@ -242,9 +242,6 @@ def classify_to_policy(request: Any, classification: Any) -> CachePolicy:
 
 
 __all__ = [
-    "CacheAction",
-    "CachePolicy",
-    "MatchStrategy",
     "DEFAULT_NAMESPACE_KEY",
     "DEFAULT_POLICY",
     "JAILBREAK_HIGH",
@@ -255,5 +252,8 @@ __all__ = [
     "TTL_DEFAULT",
     "TTL_LONG",
     "TTL_SHORT",
+    "CacheAction",
+    "CachePolicy",
+    "MatchStrategy",
     "classify_to_policy",
 ]

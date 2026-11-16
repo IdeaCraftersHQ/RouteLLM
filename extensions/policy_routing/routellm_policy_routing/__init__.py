@@ -21,9 +21,9 @@ from routellm_policy_routing.policy import (
 )
 
 __all__ = [
+    "DEFAULT_NAMESPACE_KEY",
     "CacheAction",
     "CachePolicy",
-    "DEFAULT_NAMESPACE_KEY",
     "MatchStrategy",
     "classify_to_policy",
 ]

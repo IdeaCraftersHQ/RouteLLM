@@ -114,6 +114,14 @@ exclude = ["assets", "benchmarks", "extensions", "docs", "models"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Third-party extensions checked out under extensions/ but not part of
+# this repo.
+extend-exclude = [
+	"extensions/context7",
+	"extensions/gemini-cli-jules",
+	"extensions/huggingface",
+	"extensions/redis",
+]
 
 [tool.ruff.lint]
 # The default rules plus the upgrade, import-hygiene and bugbear sets the
@@ -200,6 +208,12 @@ ignore = [
 # packages and exit with a hint, before importing routellm. The imports
 # have to come after that.
 "routellm/examples/*" = ["E402"]
+# The root conftest sets an env var before its imports, and the `noqa: E402`
+# marks on those imports record that the order is required. ruff does not
+# count `os.environ` edits as code and so calls the marks unused.
+"conftest.py" = ["RUF100"]
+# The extension supports Python 3.10, which has no StrEnum.
+"extensions/policy_routing/routellm_policy_routing/policy.py" = ["UP042"]
 # The classifier prompts are sent verbatim; re-wrapping them would change
 # what the model reads.
 "routellm/middleware/intent_model_selector.py" = ["E501"]

@@ -7,8 +7,8 @@ documented attributes; any duck-typed shape works.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Iterable, Optional
+from collections.abc import Iterable
+from dataclasses import FrozenInstanceError, dataclass, field
 
 import pytest
 from routellm_policy_routing import (
@@ -36,11 +36,11 @@ class FakeClassification:
     pii_labels: Iterable[str] = field(default_factory=tuple)
     jailbreak_score: float = 0.0
     toxicity_score: float = 0.0
-    code_content: Optional[str] = None
-    domain: Optional[str] = None
-    complexity: Optional[str] = None
-    cost_estimate: Optional[str] = None
-    output_format: Optional[str] = None
+    code_content: str | None = None
+    domain: str | None = None
+    complexity: str | None = None
+    cost_estimate: str | None = None
+    output_format: str | None = None
 
 
 # Request is unused by current rules — sentinel keeps the signature
@@ -253,7 +253,7 @@ def test_cache_policy_is_frozen_and_hashable():
     p2 = CachePolicy()
     assert p1 == p2
     assert hash(p1) == hash(p2)
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         p1.action = CacheAction.SKIP  # type: ignore[misc]
 
 

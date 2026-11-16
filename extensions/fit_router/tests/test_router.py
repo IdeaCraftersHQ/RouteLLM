@@ -1,9 +1,9 @@
 """The `fit` router: a trained advisor's confidence as the win rate."""
 
 import pytest
+from routellm_fit.router import FitRouter
 
 from routellm.routers.base import Router
-from routellm_fit.router import FitRouter
 
 
 class _Advice:
@@ -54,9 +54,7 @@ def test_the_domain_is_ignored():
     assert FitRouter(advisor=advisor).calculate_strong_win_rate("x") == pytest.approx(0.4)
 
 
-@pytest.mark.parametrize(
-    "confidence, expected", [(-0.5, 0.0), (0.0, 0.0), (1.0, 1.0), (4.2, 1.0)]
-)
+@pytest.mark.parametrize("confidence, expected", [(-0.5, 0.0), (0.0, 0.0), (1.0, 1.0), (4.2, 1.0)])
 def test_a_confidence_outside_the_range_is_clamped(confidence, expected):
     """A win rate is compared against a threshold in [0, 1]."""
     router = FitRouter(advisor=_Advisor(confidence=confidence))

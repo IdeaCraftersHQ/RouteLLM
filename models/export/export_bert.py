@@ -21,7 +21,6 @@ import onnxruntime as ort
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -29,9 +28,7 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 def load_model(checkpoint: str):
     """Load BERT model and tokenizer from checkpoint."""
-    model = AutoModelForSequenceClassification.from_pretrained(
-        checkpoint, num_labels=3
-    )
+    model = AutoModelForSequenceClassification.from_pretrained(checkpoint, num_labels=3)
     tokenizer = AutoTokenizer.from_pretrained(checkpoint)
     model.eval()
     return model, tokenizer
@@ -103,9 +100,7 @@ def validate(
     diff = np.abs(pt_out - ort_out).max()
     print(f"Max absolute diff (PyTorch vs ONNX): {diff:.2e}")
     if diff > atol:
-        raise ValueError(
-            f"Validation FAILED: max diff {diff:.2e} > tolerance {atol:.2e}"
-        )
+        raise ValueError(f"Validation FAILED: max diff {diff:.2e} > tolerance {atol:.2e}")
     print("Validation PASSED")
 
 

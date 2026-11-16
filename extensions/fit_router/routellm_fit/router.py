@@ -12,7 +12,7 @@ this package's pyproject does that at discovery time.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from routellm.routers.base import Router
 
@@ -45,7 +45,7 @@ class FitRouter(Router):
 
     def __init__(
         self,
-        endpoint: Optional[str] = None,
+        endpoint: str | None = None,
         timeout_ms: int = 5000,
         advisor: Any = None,
     ):
@@ -73,9 +73,7 @@ class FitRouter(Router):
                     f"'routellm-fit' with its dependencies ({exc})"
                 ) from exc
 
-            self._advisor = RemoteAdvisor(
-                endpoint=self.endpoint, timeout_ms=self._timeout_ms
-            )
+            self._advisor = RemoteAdvisor(endpoint=self.endpoint, timeout_ms=self._timeout_ms)
         return self._advisor
 
     def calculate_strong_win_rate(self, prompt):
@@ -109,14 +107,12 @@ class FitRouter(Router):
             confidence = float(advice.confidence)
         except Exception as exc:
             raise RuntimeError(
-                f"fit advisor at {self.endpoint} gave no usable "
-                f"confidence: {exc}"
+                f"fit advisor at {self.endpoint} gave no usable confidence: {exc}"
             ) from exc
 
         if confidence < 0.0 or confidence > 1.0:
             logger.warning(
-                "fit advisor at %s returned confidence %s outside "
-                "[0, 1]; clamping",
+                "fit advisor at %s returned confidence %s outside [0, 1]; clamping",
                 self.endpoint,
                 confidence,
             )

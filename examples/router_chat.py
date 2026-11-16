@@ -10,21 +10,15 @@ from openai import OpenAI
 
 # Argument parser setup
 parser = argparse.ArgumentParser(description="Chatbot Interface for RouteLLM")
-parser.add_argument(
-    "--model-url", type=str, default="http://localhost:6060/v1", help="Model URL"
-)
+parser.add_argument("--model-url", type=str, default="http://localhost:6060/v1", help="Model URL")
 parser.add_argument(
     "-r", "--router", type=str, required=True, help="Router name to use for the chatbot"
 )
 parser.add_argument(
     "--threshold", type=float, required=True, help="Cost threshold to use for routing"
 )
-parser.add_argument(
-    "--temp", type=float, default=0.8, help="Temperature for text generation"
-)
-parser.add_argument(
-    "--stop-token-ids", type=str, default="", help="Comma-separated stop token IDs"
-)
+parser.add_argument("--temp", type=float, default=0.8, help="Temperature for text generation")
+parser.add_argument("--stop-token-ids", type=str, default="", help="Comma-separated stop token IDs")
 parser.add_argument("--host", type=str, default=None)
 parser.add_argument("--port", type=int, default=8001)
 
@@ -44,9 +38,7 @@ client = OpenAI(
 
 def predict(message, history, threshold, router, temperature):
     # Convert chat history to OpenAI format
-    history_openai_format = [
-        {"role": "system", "content": "You are a helpful AI assistant."}
-    ]
+    history_openai_format = [{"role": "system", "content": "You are a helpful AI assistant."}]
     for human, assistant in history:
         history_openai_format.append({"role": "user", "content": human})
         history_openai_format.append(

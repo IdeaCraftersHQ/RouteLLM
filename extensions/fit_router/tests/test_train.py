@@ -9,7 +9,6 @@ break, and the rows the builder is allowed to ignore.
 import json
 
 import pytest
-
 from routellm_fit.train import (
     _means_per_prompt,
     best_endpoint_per_prompt,
@@ -193,7 +192,7 @@ def test_cli_no_comparable_prompts_exits_nonzero(tmp_path, capsys):
 
 
 def test_missing_training_modules_reports_what_is_absent(monkeypatch):
-    import routellm_fit.train as train
+    from routellm_fit import train
 
     monkeypatch.setattr(train, "TRAINING_MODULES", ("json", "no_such_module_xyz"))
 
@@ -207,21 +206,21 @@ def test_training_refuses_up_front_when_a_dep_is_missing(tmp_path, monkeypatch):
     loop that trains no model, so a check that relied on fit raising
     would produce an empty advisor and report success.
     """
-    import routellm_fit.train as train
+    from routellm_fit import train
 
     monkeypatch.setattr(train, "TRAINING_MODULES", ("no_such_module_xyz",))
 
     with pytest.raises(ImportError) as excinfo:
-        train._train_advisor([{"prompt_hash": "p1", "best_endpoint": "a",
-                               "reward": 0.9, "candidates": {}}], str(tmp_path))
+        train._train_advisor(
+            [{"prompt_hash": "p1", "best_endpoint": "a", "reward": 0.9, "candidates": {}}],
+            str(tmp_path),
+        )
 
     assert "no_such_module_xyz" in str(excinfo.value)
 
 
-def test_cli_missing_training_deps_names_them_and_the_extra(
-    tmp_path, capsys, monkeypatch
-):
-    import routellm_fit.train as train
+def test_cli_missing_training_deps_names_them_and_the_extra(tmp_path, capsys, monkeypatch):
+    from routellm_fit import train
 
     monkeypatch.setattr(train, "TRAINING_MODULES", ("no_such_module_xyz",))
 
