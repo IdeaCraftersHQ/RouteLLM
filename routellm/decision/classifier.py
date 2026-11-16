@@ -175,7 +175,7 @@ class DecisionClassifier:
             raise
         except Exception as exc:
             raise DecisionError("transport", f"{type(exc).__name__}: {exc}") from exc
-        if decision.data_class not in cfg.data_classes:
+        if decision.data_class not in cfg.selectable:
             raise DecisionError("invalid_answer", f"data_class {decision.data_class!r}")
         if decision.confidence is None or decision.confidence < cfg.min_confidence:
             raise DecisionError(
@@ -195,6 +195,8 @@ class DecisionClassifier:
         )
 
     def _remember(self, key: str | None, decision: Decision) -> Decision:
-        if self.sticky is not None:
+        # A declarable class is consent only its caller gave: never carried
+        # into a later turn that did not declare it.
+        if self.sticky is not None and decision.data_class not in self.config.declarable:
             self.sticky.record(key, self.config.rank(decision.data_class))
         return decision

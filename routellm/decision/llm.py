@@ -19,7 +19,7 @@ Transport = Callable[[str, list[dict[str, Any]], dict[str, Any], int], Awaitable
 def answer_schema(config: DecisionConfig) -> dict[str, Any]:
     """Return the JSON schema the answer must satisfy."""
     props: dict[str, Any] = {
-        "data_class": {"type": "string", "enum": list(config.data_classes)},
+        "data_class": {"type": "string", "enum": list(config.selectable)},
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
     }
     if config.intents:
@@ -40,7 +40,7 @@ def _labels(title: str, labels: dict[str, str]) -> str:
 
 def build_prompt(config: DecisionConfig, text: str) -> list[dict[str, Any]]:
     """Return the messages asking the model to label `text`."""
-    sections = [_labels("data_class (pick the most restrictive that applies)", config.data_classes)]
+    sections = [_labels("data_class (pick the most restrictive that applies)", config.selectable)]
     if config.intents:
         sections.append(_labels("intent", config.intents))
     if config.areas:
@@ -98,7 +98,7 @@ class LLMProvider:
                 raise DecisionError("invalid_answer", f"{key} {value!r} is not a configured label")
             return value
 
-        data_class = label("data_class", cfg.data_classes, True)
+        data_class = label("data_class", cfg.selectable, True)
         intent = label("intent", cfg.intents, True) if cfg.intents else None
         area = label("area", cfg.areas, True) if cfg.areas else None
         confidence = data.get("confidence")
