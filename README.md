@@ -998,6 +998,7 @@ decision:
   data_classes:              # ordered, least to most restrictive; the last is the fail-closed class
     general: nothing sensitive
     private: personal or secret data
+  declarable: []             # optional: data_classes only a caller may declare (see below)
   intents:
     code: writing or debugging software
     chat: small talk
@@ -1014,6 +1015,8 @@ decision:
 ```
 
 Effective class is the most restrictive of the caller's `declared_class`, the sticky floor, a recognizer hit and the model's answer; no source lowers it. A recognizer hit, or a declared or sticky class already at the strictest level, answers without a model call. The model is asked for a typed answer (a JSON schema whose fields are enums of the configured labels) and any label outside the sets is an error. A timeout, a transport failure, an invalid answer or a confidence under `min_confidence` resolves through `on_error` and is recorded as `error` on the Decision; failure-derived classes are not made sticky. The decision call goes through the endpoint's own resilience and timeout like any leaf, and is awaited, so a slow decision model holds up only its own request.
+
+`declarable` names classes (a subset of `data_classes`, which stays the one ordered list) that only a caller can give, such as consent to training use that no model should infer. The model is never offered them (not in the schema enum or the prompt) and an answer naming one is an `invalid_answer`, resolved through `on_error`. A request may declare one: it is accepted, the model still runs, and it can raise the class to a stricter selectable one but never lower it; the Decision's source is `declared`. An undeclared request never resolves to one, so startup fails when a recognizer, the policy file's `default_class` or a routing policy's `data_class` floor names one, or when the last class (the fail-closed one) is declarable. A declarable class is not made sticky: a later turn that does not declare it is classified afresh.
 
 Sticky keeps a conversation's class from dropping below the strictest seen for `ttl_s`; the key is the `conversation_id` the caller passes, else a hash of the opening message and `user`. A heavier recognizer plugs in as any object with `recognize(text, language=None)`; `routellm.decision.SpanRecognizer` adapts an analyzer exposing `analyze(text, language)` that returns spans.
 

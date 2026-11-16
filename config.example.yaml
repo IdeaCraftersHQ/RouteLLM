@@ -350,6 +350,12 @@ endpoints:
 #   data_classes:
 #     general: nothing sensitive
 #     private: personal or secret data
+#   # Optional subset of data_classes that only a caller may declare (e.g.
+#   # consent to training use). Never offered to or accepted from the model;
+#   # cannot be the last class, a recognizer class, a policy default_class
+#   # or a routing-policy floor; not carried sticky. Keeps its place in the
+#   # order, so a declared one can be raised, never lowered.
+#   declarable: []
 #   intents:
 #     code: writing or debugging software
 #     chat: small talk

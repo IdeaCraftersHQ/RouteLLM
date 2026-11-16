@@ -62,6 +62,17 @@ def test_the_class_comes_from_its_source_and_the_model_is_asked_only_when_needed
         assert obs["decider"] == calls, name
 
 
+def test_a_model_answering_a_declarable_class_is_an_error_not_the_class(direct):
+    obs = direct["decision_a_model_answering_a_declarable_class_is_an_error_to_the_strictest"][
+        "obs"
+    ]
+    assert (obs["class"], obs["source"], obs["error"]) == ("private", "error", "invalid_answer")
+    assert (
+        direct["decision_control_a_declared_declarable_class_reaches_its_leaf"]["obs"]["class"]
+        == "leaky"
+    )
+
+
 def test_a_recognizer_hit_below_the_strictest_class_skips_the_model(direct):
     obs = direct["decision_a_recognizer_hit_settles_the_class_without_the_model"]["obs"]
     assert (obs["class"], obs["source"], obs["decider"]) == ("internal", "recognizer", 0)

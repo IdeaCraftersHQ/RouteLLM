@@ -533,6 +533,15 @@ class PolicyRouter:
                 problems.append(
                     f"policies.{pname}.data_class: {rp.data_class!r} is not a policy class"
                 )
+            if (
+                rp.data_class is not None
+                and decision_config is not None
+                and rp.data_class in getattr(decision_config, "declarable", ())
+            ):
+                problems.append(
+                    f"policies.{pname}.data_class: {rp.data_class!r} is a decision.declarable "
+                    "class; a floor would give it to a request that did not declare it"
+                )
         for who, spec in class_policy.principals.items():
             for project in spec.projects:
                 if project not in cfg.policies:

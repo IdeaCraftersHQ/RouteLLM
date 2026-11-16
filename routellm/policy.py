@@ -318,14 +318,16 @@ def build_policy(file_config: dict | None, resolve_path=None) -> Policy | None:
     return policy
 
 
-def check_decision_classes(policy: Policy, decision_classes) -> None:
+def check_decision_classes(policy: Policy, decision_classes, declarable=()) -> None:
     """Refuse a classifier that can emit a class the policy does not list.
 
     The policy is the source of truth for class names. A label the
     classifier could return that the policy lacks would be refused as an
     unknown class on every request it labels, so it fails at startup.
     The policy may list more classes than the classifier emits: callers
-    can declare their own.
+    can declare their own. A `default_class` naming a `declarable`
+    class is refused too: a request that declared nothing would resolve
+    to a class only a caller may give.
 
     Raises
     ------
@@ -337,4 +339,9 @@ def check_decision_classes(policy: Policy, decision_classes) -> None:
         raise PolicyError(
             f"policy {policy.source}: decision.data_classes {', '.join(map(repr, missing))} "
             f"not in policy classes (known: {', '.join(policy.classes)})"
+        )
+    if policy.default_class is not None and policy.default_class in declarable:
+        raise PolicyError(
+            f"policy {policy.source}: default_class {policy.default_class!r} is a "
+            "decision.declarable class; an undeclared request would be given it by default"
         )

@@ -549,7 +549,7 @@ async def lifespan(app):
     intents = build_intents(file_config, endpoints)
     decision = build_decision(file_config, endpoints)
     if POLICY is not None and decision is not None:
-        check_decision_classes(POLICY, decision.config.data_classes)
+        check_decision_classes(POLICY, decision.config.data_classes, decision.config.declarable)
     router_config = build_router_config(file_config)
 
     # Neither flag and no tier to route into leaves the legacy flat form

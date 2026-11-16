@@ -23,6 +23,8 @@ DECIDER_SELECTOR = f"{SELECTOR} !tag:decider"
 def decision_section(route: bool) -> dict:
     classes = {"general": "nothing sensitive"}
     if not route:
+        # `leaky` is declaration-only: a caller can name it, the model never.
+        classes["leaky"] = "owner accepts off-host use"
         classes["internal"] = "company-internal material"
     classes["private"] = "personal or secret data"
     return {
@@ -30,6 +32,7 @@ def decision_section(route: bool) -> dict:
         "endpoint": "decider",
         "require_tags": ["local"],
         "data_classes": classes,
+        **({} if route else {"declarable": ["leaky"]}),
         "timeout_ms": 400,
         "min_confidence": 0.5,
         "on_error": "most_restrictive",

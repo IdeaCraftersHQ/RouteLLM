@@ -116,6 +116,44 @@ def control(w):
     return _obs(w, w.post("general", BENIGN))
 
 
+# -- a declaration-only class: the caller may give it, the model never ------------------
+# `leaky` is the only class that may enter `leaky_both` (a cloud leaf).
+
+
+@case(
+    "decision_control_a_declared_declarable_class_reaches_its_leaf",
+    200,
+    reaches_off_host=True,
+    decision=True,
+)
+def declared_declarable(w):
+    _say(w, "general")
+    return _obs(w, w.post("leaky_both", BENIGN, data_class="leaky"))
+
+
+@case(
+    "decision_a_model_answering_a_declarable_class_never_reaches_its_leaf",
+    403,
+    total=0,
+    decision=True,
+)
+def model_names_declarable(w):
+    _say(w, "leaky")
+    obs = _obs(w, w.post("leaky_both", BENIGN))
+    return {**obs, "decider": len(w.fakes["decider"].hits)}
+
+
+@case(
+    "decision_a_model_answering_a_declarable_class_is_an_error_to_the_strictest",
+    200,
+    total=1,
+    decision=True,
+)
+def model_names_declarable_on_private(w):
+    _say(w, "leaky")
+    return _obs(w, w.post("private", BENIGN))
+
+
 # -- the classifier down ------------------------------------------------------------------
 
 
