@@ -108,9 +108,8 @@ class ClassPolicy(_Strict):
     def _rules(self) -> "ClassPolicy":
         for value in self.reach:
             if value not in REACH_TAGS:
-                raise ValueError(
-                    f"reach: {value!r} is not a reach label (known: {', '.join(sorted(REACH_TAGS))})"
-                )
+                known = ", ".join(sorted(REACH_TAGS))
+                raise ValueError(f"reach: {value!r} is not a reach label (known: {known})")
         for value in self.jur:
             if not _JUR.match(value):
                 raise ValueError(

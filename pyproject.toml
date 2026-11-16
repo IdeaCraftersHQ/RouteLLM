@@ -217,6 +217,3 @@ ignore = [
 # The classifier prompts are sent verbatim; re-wrapping them would change
 # what the model reads.
 "routellm/middleware/intent_model_selector.py" = ["E501"]
-# DEBT, deferred: one long f-string, left alone while another branch edits
-# the file. Remove this entry with the line fix.
-"routellm/policy.py" = ["E501"]
