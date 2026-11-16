@@ -175,7 +175,6 @@ ignore = [
 	# Correctness-adjacent, small, and worth doing next.
 	"RUF059",   # 8 unused unpacked variable
 	"F811",     # 2 redefinition -- pytest fixture params, false positive
-	"RUF043",   # 1 pattern passed to re without raw string
 ]
 
 [tool.ruff.lint.per-file-ignores]

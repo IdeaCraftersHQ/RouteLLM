@@ -378,7 +378,7 @@ def test_intents_section_builds_a_litellm_backed_selector(registry, server_confi
 def test_a_mapping_to_a_missing_tier_is_rejected(registry, server_config):
     config = {"intents": {"detector": "litellm", "tiers": {"legal": "ghost"}}}
 
-    with pytest.raises(ValueError, match="legal.*ghost"):
+    with pytest.raises(ValueError, match=r"legal.*ghost"):
         server_config.build_intents(config, registry)
 
 

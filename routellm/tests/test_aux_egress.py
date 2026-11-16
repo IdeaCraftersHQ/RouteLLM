@@ -334,7 +334,7 @@ def decision_for(world, endpoint):
 
 def test_a_cloud_decision_endpoint_is_refused_under_a_class_that_may_not_reach_it(world):
     # The classifier reads every request before its class is known.
-    with pytest.raises(PolicyError, match="decision endpoint 'cld'.*sealed"):
+    with pytest.raises(PolicyError, match=r"decision endpoint 'cld'.*sealed"):
         build(world, decision=decision_for(world, "cld"))
 
 

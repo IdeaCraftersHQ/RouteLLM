@@ -48,7 +48,7 @@ def controller(strict=True, **kwargs):
 
 
 def test_resolve_unknown_name_raises_when_strict():
-    with pytest.raises(ValueError, match="gpt-4o.*strict_registry"):
+    with pytest.raises(ValueError, match=r"gpt-4o.*strict_registry"):
         registry(True).resolve("gpt-4o")
 
 
@@ -80,9 +80,9 @@ def test_controller_flag_turns_registry_strict():
 
 
 def test_raw_flat_pair_refused():
-    with pytest.raises(ValueError, match="strong_model.*gpt-4o"):
+    with pytest.raises(ValueError, match=r"strong_model.*gpt-4o"):
         controller(strong_model="gpt-4o", weak_model="small")
-    with pytest.raises(ValueError, match="weak_model.*gpt-3.5"):
+    with pytest.raises(ValueError, match=r"weak_model.*gpt-3.5"):
         controller(strong_model="big", weak_model="gpt-3.5")
 
 
@@ -104,7 +104,7 @@ def test_legacy_pair_without_registry_refused():
 
 def test_traffic_rule_raw_model_refused():
     tm = TrafficManager(rules=[TrafficRule(pattern="x", strong_model="big", weak_model="gpt-4o")])
-    with pytest.raises(ValueError, match="traffic rule 0 weak model.*gpt-4o"):
+    with pytest.raises(ValueError, match=r"traffic rule 0 weak model.*gpt-4o"):
         controller(traffic_manager=tm)
 
 
@@ -115,7 +115,7 @@ def test_traffic_rule_endpoints_accepted():
 
 def test_canary_raw_model_refused():
     qm = QualityManager(canary_config=CanaryConfig(enabled=True, canary_model="gpt-4o", weight=1.0))
-    with pytest.raises(ValueError, match="canary_model.*gpt-4o"):
+    with pytest.raises(ValueError, match=r"canary_model.*gpt-4o"):
         controller(quality_manager=qm)
 
 
@@ -133,12 +133,12 @@ def _lb(key, *targets):
 
 
 def test_load_balancer_raw_key_refused():
-    with pytest.raises(ValueError, match="load balancer key.*gpt-4o"):
+    with pytest.raises(ValueError, match=r"load balancer key.*gpt-4o"):
         controller(traffic_manager=TrafficManager(load_balancers=_lb("gpt-4o", "alt")))
 
 
 def test_load_balancer_raw_target_refused():
-    with pytest.raises(ValueError, match="load balancer 'big' target.*gpt-4o"):
+    with pytest.raises(ValueError, match=r"load balancer 'big' target.*gpt-4o"):
         controller(traffic_manager=TrafficManager(load_balancers=_lb("big", "alt", "gpt-4o")))
 
 
@@ -165,7 +165,7 @@ def test_middleware_default_pair_raw_refused():
     from routellm.middleware.intent_model_selector import IntentModelSelector
 
     selector = IntentModelSelector([], default_model_pair=ModelPair(strong="big", weak="gpt-4o"))
-    with pytest.raises(ValueError, match="default pair weak model.*gpt-4o"):
+    with pytest.raises(ValueError, match=r"default pair weak model.*gpt-4o"):
         controller(middleware=[selector])
 
 
@@ -178,7 +178,7 @@ def test_middleware_intent_pair_raw_refused():
     mapping = IntentModelMapping(
         intent="code", model_pair=ModelPair(strong="gpt-4o", weak="small"), description="c"
     )
-    with pytest.raises(ValueError, match="intent 'code' pair strong model.*gpt-4o"):
+    with pytest.raises(ValueError, match=r"intent 'code' pair strong model.*gpt-4o"):
         controller(middleware=[IntentModelSelector([mapping])])
 
 
@@ -186,7 +186,7 @@ def test_intent_detection_raw_model_refused():
     from routellm.middleware.intent_model_selector import IntentModelSelector
 
     selector = IntentModelSelector([], intent_detection_model="gpt-3.5-turbo")
-    with pytest.raises(ValueError, match="detection model.*gpt-3.5-turbo"):
+    with pytest.raises(ValueError, match=r"detection model.*gpt-3.5-turbo"):
         controller(middleware=[selector])
 
 

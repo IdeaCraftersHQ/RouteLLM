@@ -103,7 +103,7 @@ def test_bare_dollar_name_is_untouched(env, monkeypatch):
 
 def test_malformed_reference_is_an_error(env):
     _endpoint_file(env, "http://${unterminated")
-    with pytest.raises(ConfigError, match="endpoints.a.api_base"):
+    with pytest.raises(ConfigError, match=r"endpoints.a.api_base"):
         cfg.load_config()
 
 

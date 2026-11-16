@@ -120,7 +120,7 @@ def test_named_endpoint_must_be_in_the_registry():
 def test_the_environment_alone_never_supplies_an_endpoint(embedding_router, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-env")
 
-    with pytest.raises(ValueError, match="embeddings.endpoint"):
+    with pytest.raises(ValueError, match=r"embeddings.endpoint"):
         _controller(_registry(), routers=["emb"])
 
 
@@ -130,7 +130,7 @@ def test_embed_without_an_endpoint_raises():
 
 
 def test_cache_config_refuses_the_removed_model_setting():
-    with pytest.raises(ValueError, match="embeddings.endpoint"):
+    with pytest.raises(ValueError, match=r"embeddings.endpoint"):
         CacheConfig(embedding_model="text-embedding-3-small")
 
 

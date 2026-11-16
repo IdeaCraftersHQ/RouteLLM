@@ -323,7 +323,7 @@ def test_the_decided_class_is_the_one_checked(world):
     # `secret`, which may not.
     controller, fakes = world
     controller.decision = Decider("secret")
-    with pytest.raises(PolicyDenied, match="'secret'.*'general'"):
+    with pytest.raises(PolicyDenied, match=r"'secret'.*'general'"):
         ask(controller, "general", declared="open")
     assert total(fakes) == 0
 
