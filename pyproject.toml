@@ -165,7 +165,6 @@ ignore = [
 	"BLE001",
 
 	# Structural. Real but each is a refactor, not an edit.
-	"E402",     # 9 module import not at top of file
 	"PLW0603",  # 8 global statement
 	"PLR0912",  # 3 too many branches
 	"PLR0915",  # 3 too many statements
@@ -189,3 +188,7 @@ ignore = [
 # The fallback loop defines a closure and calls it in the same
 # iteration, so late binding never bites; B023 cannot see that. (9)
 "routellm/controller.py" = ["B023"]
+# The example scripts put the repo root on sys.path, or check for optional
+# packages and exit with a hint, before importing routellm. The imports
+# have to come after that.
+"routellm/examples/*" = ["E402"]

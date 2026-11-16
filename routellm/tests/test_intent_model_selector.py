@@ -1,12 +1,7 @@
 import os
-import sys
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
-
-# Add the repository root to the Python path
-repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-sys.path.insert(0, repo_root)
 
 from routellm.controller import ModelPair
 from routellm.middleware.intent_model_selector import IntentModelMapping, IntentModelSelector
@@ -239,33 +234,5 @@ def test_save_intent_config_accepts_a_bare_filename(monkeypatch, tmp_path):
     assert [m.intent for m in loaded.intent_mappings] == ["legal"]
 
 
-# Import sys and os at the top of the file to ensure they're available
-import os
-import sys
-
-# Add the repository root to the Python path at import time
-repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-sys.path.insert(0, repo_root)
-
 if __name__ == "__main__":
-    # Print helpful information
-    print(f"Python path: {sys.path[0]}")
-    print(f"Current directory: {os.getcwd()}")
-
-    # Try to import the module to verify it works
-    try:
-        from routellm.controller import ModelPair
-        from routellm.middleware.intent_model_selector import (
-            IntentModelMapping,
-            IntentModelSelector,
-        )
-
-        print("Successfully imported routellm modules")
-    except ImportError as e:
-        print(f"Import error: {e}")
-        print(
-            f"Available files in middleware directory: {os.listdir(os.path.join(repo_root, 'routellm', 'middleware'))}"
-        )
-
-    # Run the tests
     unittest.main()
