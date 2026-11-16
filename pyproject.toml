@@ -146,30 +146,36 @@ ignore = [
 	# them, deliberately, so importing routellm stays cheap. (65)
 	"PLC0415",
 
+	# The literals this flags are HTTP status codes (402, 429, 504),
+	# fixed key and header lengths (32, 16, 12) and calendar bounds
+	# (12, 31). Naming each would add indirection without clarity, and
+	# tests compare against expected numbers by design. (433)
+	"PLR2004",
+
 	# ---- Debt: not yet worked through ------------------------------
 	# Listed explicitly so `make lint` is green and a NEW violation is
 	# visible rather than buried. Each should be retired deliberately.
+	# Counts are for routellm/, tests included where the rule is not
+	# already ignored there.
 
-	# Volume rules. PLR2004 alone is 138 findings and churning them
-	# buys nothing; these go last, if ever.
-	"PLR2004",  # 138 magic value in comparison
-	"PLR0913",  # 15 too many arguments
-	"PLR0917",  # 12 too many positional arguments
+	# Signature shape. Fixing means changing public signatures, or
+	# introducing parameter objects; neither is a lint edit.
+	"PLR0913",  # 51 too many arguments
+	"PLR0917",  # 33 too many positional arguments
 
-	# Blind except. 30 sites, and most are deliberate: documented
-	# best-effort boundaries in the payment, trace-recording, cache,
-	# plugin-discovery and provider-fallback paths, where the contract
-	# is that they never fail the caller. Retiring this rule means
-	# making each of those explicit, not narrowing them wholesale.
+	# Blind except. 45 sites outside tests, and most are deliberate:
+	# documented best-effort boundaries in the payment, trace-recording,
+	# cache, plugin-discovery and provider-fallback paths, where the
+	# contract is that they never fail the caller. Retiring this rule
+	# means making each of those explicit, not narrowing them wholesale.
 	"BLE001",
 
-	# Structural. Real but each is a refactor, not an edit.
-	"PLW0603",  # 8 global statement
-	"PLR0912",  # 3 too many branches
-	"PLR0915",  # 3 too many statements
-	"PLR0911",  # 2 too many return statements
-
-	# Correctness-adjacent, small, and worth doing next.
+	# Structural. Each is a refactor, not an edit.
+	"PLW0603",  # 11 global statement: module-level singletons in the server,
+	#             embeddings router and request requirements
+	"PLR0912",  # 12 too many branches
+	"PLR0915",  # 5 too many statements
+	"PLR0911",  # 6 too many return statements
 ]
 
 [tool.ruff.lint.per-file-ignores]
