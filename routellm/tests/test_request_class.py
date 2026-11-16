@@ -450,7 +450,7 @@ emit({{"status": r.status_code, "declared": declared}})
 
 
 @pytest.mark.slow
-def test_policy_wins_over_keys_file_allowed_classes(tmp_path):
+def test_policy_wins_over_keys_file_allowed_classes_end_to_end(tmp_path):
     # team-a's keys-file entry lists `public` (not a policy class); the policy grants `open`.
     out = _run(
         tmp_path,

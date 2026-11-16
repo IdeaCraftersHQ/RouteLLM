@@ -174,7 +174,6 @@ ignore = [
 
 	# Correctness-adjacent, small, and worth doing next.
 	"RUF059",   # 8 unused unpacked variable
-	"F811",     # 2 redefinition -- pytest fixture params, false positive
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -184,9 +183,11 @@ ignore = [
 #   PLC0415  tests import heavy deps inside the test that needs them
 #   BLE001   a test that asserts on failure catches broadly on purpose
 #   PLW1510  subprocess.run in a test whose returncode is the assertion
+#   F811     tests import shared pytest fixtures from sibling modules and
+#            take them as parameters, which ruff reads as a redefinition
 #   B018     `controller.model_pair` inside pytest.raises is a property
 #            access that must raise; it only looks useless (1 site)
-"routellm/tests/*" = ["PLC0415", "BLE001", "PLW1510", "B018"]
+"routellm/tests/*" = ["PLC0415", "BLE001", "PLW1510", "B018", "F811"]
 # The fallback loop defines a closure and calls it in the same
 # iteration, so late binding never bites; B023 cannot see that. (9)
 "routellm/controller.py" = ["B023"]
