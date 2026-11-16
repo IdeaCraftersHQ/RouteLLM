@@ -278,11 +278,9 @@ def evaluator(net, test_iter, device):
     correct = 0
     num_samples = 0
     with torch.no_grad():
-        for models_a, models_b, prompts in test_iter:
+        for batch in test_iter:
             # Assuming devices refer to potential GPU usage
-            models_a = models_a.to(device)
-            models_b = models_b.to(device)
-            prompts = prompts.to(device)
+            models_a, models_b, prompts = (tensor.to(device) for tensor in batch)
 
             logits = net(models_a, models_b, prompts)
             labels = torch.ones_like(logits)
@@ -346,11 +344,9 @@ def train_loops(
     def train_epoch():  # Inner function for one epoch of training
         net.train()  # Set the model to training mode
         train_loss_sum, n = 0.0, 0
-        for models_a, models_b, prompts in train_iter:
+        for batch in train_iter:
             # Assuming devices refer to potential GPU usage
-            models_a = models_a.to(device)
-            models_b = models_b.to(device)
-            prompts = prompts.to(device)
+            models_a, models_b, prompts = (tensor.to(device) for tensor in batch)
 
             output = net(models_a, models_b, prompts, alpha=alpha)
             ls = loss(output, torch.ones_like(output))

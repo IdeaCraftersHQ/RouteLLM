@@ -166,7 +166,6 @@ ignore = [
 
 	# Structural. Real but each is a refactor, not an edit.
 	"E402",     # 9 module import not at top of file
-	"PLW2901",  # 9 loop variable overwritten
 	"PLW0603",  # 8 global statement
 	"PLR0912",  # 3 too many branches
 	"PLR0915",  # 3 too many statements

@@ -378,7 +378,8 @@ def _without_audio(messages: Any) -> Any:
         return messages
 
     cleaned = []
-    for message in messages:
+    for original in messages:
+        message = original
         content = message.get("content") if isinstance(message, dict) else None
         if isinstance(content, list):
             kept = [

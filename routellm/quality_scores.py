@@ -393,8 +393,8 @@ def _scored_ids(out_path: str) -> set:
         return set()
     ids = set()
     with open(out_path) as handle:
-        for line in handle:
-            line = line.strip()
+        for raw_line in handle:
+            line = raw_line.strip()
             if not line:
                 continue
             try:
@@ -694,8 +694,8 @@ def load_scores(path: str) -> list:
 
     rows = []
     with open(path) as handle:
-        for number, line in enumerate(handle, start=1):
-            line = line.strip()
+        for number, raw_line in enumerate(handle, start=1):
+            line = raw_line.strip()
             if not line:
                 continue
             try:

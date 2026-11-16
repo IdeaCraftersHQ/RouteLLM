@@ -507,10 +507,9 @@ def load_transforms(spec: Any) -> list[Any]:
     if not isinstance(spec, list):
         raise ConfigError(f"`transforms:` must be a list, got {type(spec).__name__}")
     built = []
-    for index, entry in enumerate(spec):
+    for index, raw_entry in enumerate(spec):
         where = f"transforms[{index}]"
-        if isinstance(entry, str):
-            entry = {"use": entry}
+        entry = {"use": raw_entry} if isinstance(raw_entry, str) else raw_entry
         if not isinstance(entry, dict) or not isinstance(entry.get("use"), str):
             raise ConfigError(f"`{where}` needs `use:` (a module:attr path or an entry point name)")
         unknown = sorted(set(entry) - {"use", "options"})
