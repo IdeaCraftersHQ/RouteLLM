@@ -173,7 +173,6 @@ ignore = [
 	"PLR0911",  # 2 too many return statements
 
 	# Correctness-adjacent, small, and worth doing next.
-	"B017",     # 6 assert on bare Exception, all in the payment suite
 	"RUF059",   # 8 unused unpacked variable
 	"F811",     # 2 redefinition -- pytest fixture params, false positive
 	"RUF043",   # 1 pattern passed to re without raw string
