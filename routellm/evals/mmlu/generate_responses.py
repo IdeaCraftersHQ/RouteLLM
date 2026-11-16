@@ -59,7 +59,10 @@ def format_example(df, idx, include_answer=True):
 
 
 def gen_prompt(train_df, subject, k=-1):
-    prompt = f"The following are multiple choice questions (with answers) about{format_subject(subject)}.\n\n"
+    prompt = (
+        "The following are multiple choice questions (with answers) about"
+        f"{format_subject(subject)}.\n\n"
+    )
     if k == -1:
         k = train_df.shape[0]
     for i in range(k):

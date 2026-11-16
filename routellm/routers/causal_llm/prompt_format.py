@@ -114,7 +114,8 @@ class PromptFormat(BaseModel):
             [msg["role"] == "assistant" for msg in messages[1::2]]
         ):
             raise ValueError(
-                "only supports 'system','user' and 'assistant' roles, starting with user and alternating (u/a/u/a/u...)"
+                "only supports 'system','user' and 'assistant' roles, starting with user "
+                "and alternating (u/a/u/a/u...)"
             )
 
         if any([msg["content"] is None for msg in messages]):

@@ -160,11 +160,9 @@ class MFModel_Train(torch.nn.Module):
         super().__init__()
         self.use_proj = use_proj
         self.P = torch.nn.Embedding(num_models, dim)
-        self.Q = torch.nn.Embedding(
-            num_prompts, text_dim
-        ).requires_grad_(
-            False
-        )  # When loading the trained ckpt, delete Q, since during test time the prompt embedding is calculated using the OpenAI API
+        self.Q = torch.nn.Embedding(num_prompts, text_dim).requires_grad_(False)
+        # When loading the trained ckpt, delete Q, since during test time the prompt
+        # embedding is calculated using the OpenAI API
         embeddings = np.load(npy_path)
         self.Q.weight.data.copy_(torch.tensor(embeddings))
 

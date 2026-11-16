@@ -554,8 +554,9 @@ def _free_term(select: str) -> bool | None:
 def _is_free(record: ModelRecord | None, endpoint: Endpoint | None = None) -> bool:
     """Return whether input and output are priced at zero.
 
-    An endpoint's own `price` / `free` wins over the catalog. An uncatalogued endpoint, or one whose record leaves either price
-    unstated, is not free: absence of a price is not a price of zero.
+    An endpoint's own `price` / `free` wins over the catalog. An uncatalogued
+    endpoint, or one whose record leaves either price unstated, is not free:
+    absence of a price is not a price of zero.
     """
     override = endpoint.price_override if endpoint is not None else None
     if override is not None:

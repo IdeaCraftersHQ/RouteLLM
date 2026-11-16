@@ -153,7 +153,6 @@ ignore = [
 	# Volume rules. PLR2004 alone is 138 findings and churning them
 	# buys nothing; these go last, if ever.
 	"PLR2004",  # 138 magic value in comparison
-	"E501",     # 21 line too long
 	"PLR0913",  # 15 too many arguments
 	"PLR0917",  # 12 too many positional arguments
 
@@ -182,9 +181,12 @@ ignore = [
 #   PLW1510  subprocess.run in a test whose returncode is the assertion
 #   F811     tests import shared pytest fixtures from sibling modules and
 #            take them as parameters, which ruff reads as a redefinition
+#   E501     many tests build a script or YAML as a string and run it in a
+#            subprocess; the formatter cannot wrap those and wrapping them
+#            hurts readability
 #   B018     `controller.model_pair` inside pytest.raises is a property
 #            access that must raise; it only looks useless (1 site)
-"routellm/tests/*" = ["PLC0415", "BLE001", "PLW1510", "B018", "F811"]
+"routellm/tests/*" = ["PLC0415", "BLE001", "PLW1510", "B018", "F811", "E501"]
 # The fallback loop defines a closure and calls it in the same
 # iteration, so late binding never bites; B023 cannot see that. (9)
 "routellm/controller.py" = ["B023"]
@@ -192,3 +194,9 @@ ignore = [
 # packages and exit with a hint, before importing routellm. The imports
 # have to come after that.
 "routellm/examples/*" = ["E402"]
+# The classifier prompts are sent verbatim; re-wrapping them would change
+# what the model reads.
+"routellm/middleware/intent_model_selector.py" = ["E501"]
+# DEBT, deferred: one long f-string, left alone while another branch edits
+# the file. Remove this entry with the line fix.
+"routellm/policy.py" = ["E501"]

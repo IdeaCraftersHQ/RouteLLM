@@ -148,7 +148,8 @@ class CircuitBreaker:
         if self.state == CircuitState.CLOSED:
             if self.failures >= self.fail_max or self._get_fail_rate() >= self.fail_rate:
                 logger.warning(
-                    f"Circuit Breaker: state changed to OPEN (failures: {self.failures}, rate: {self._get_fail_rate():.2f})"
+                    f"Circuit Breaker: state changed to OPEN (failures: {self.failures}, "
+                    f"rate: {self._get_fail_rate():.2f})"
                 )
                 self.state = CircuitState.OPEN
         elif self.state == CircuitState.HALF_OPEN:
@@ -461,7 +462,8 @@ class Resilience:
                     self.config.backoff_factor ** (attempt - 1)
                 )
                 logger.info(
-                    f"Retrying {model_name} (attempt {attempt}/{self.config.max_retries}) in {wait:.2f}s..."
+                    f"Retrying {model_name} "
+                    f"(attempt {attempt}/{self.config.max_retries}) in {wait:.2f}s..."
                 )
                 await asyncio.sleep(wait)
 
@@ -508,7 +510,8 @@ class Resilience:
                     self.config.backoff_factor ** (attempt - 1)
                 )
                 logger.info(
-                    f"Retrying {model_name} (attempt {attempt}/{self.config.max_retries}) in {wait:.2f}s..."
+                    f"Retrying {model_name} "
+                    f"(attempt {attempt}/{self.config.max_retries}) in {wait:.2f}s..."
                 )
                 time.sleep(wait)
 
