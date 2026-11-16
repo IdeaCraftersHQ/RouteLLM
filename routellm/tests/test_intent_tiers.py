@@ -168,7 +168,7 @@ def test_middleware_tier_is_entered_from_the_default_tier(hi_router):
 def test_an_explicit_tier_ignores_the_middleware_tier(hi_router):
     controller = _controller([_TierMiddleware("legal")], hi_router)
 
-    picked, path, _ = controller._route("hi", {}, "premium", None, None)
+    _picked, path, _ = controller._route("hi", {}, "premium", None, None)
 
     assert [entry["tier"] for entry in path] == ["premium"]
     assert path[0].get("tier_from") is None
@@ -178,7 +178,7 @@ def test_an_explicit_tier_ignores_the_middleware_tier(hi_router):
 def test_a_tier_declaring_intent_routing_honours_the_middleware(hi_router):
     controller = _controller([_TierMiddleware("legal")], hi_router)
 
-    picked, path, _ = controller._route("hi", {}, "legal", None, None)
+    _picked, path, _ = controller._route("hi", {}, "legal", None, None)
 
     assert [entry["tier"] for entry in path] == ["legal"]
     assert path[0]["tier_from"] == "intent"
@@ -187,7 +187,7 @@ def test_a_tier_declaring_intent_routing_honours_the_middleware(hi_router):
 def test_no_tier_from_the_middleware_leaves_the_request_where_it_was(hi_router):
     controller = _controller([_TierMiddleware(None)], hi_router)
 
-    picked, path, _ = controller._route("hi", {}, "default", None, None)
+    _picked, path, _ = controller._route("hi", {}, "default", None, None)
 
     assert [entry["tier"] for entry in path] == ["default", "premium"]
     assert path[0].get("tier_from") is None
@@ -221,7 +221,7 @@ def test_a_traffic_rule_skips_the_classifier_entirely(hi_router):
         progress_bar=False,
     )
 
-    picked, path, pair = controller._route("this is special", {}, "default", None, None)
+    _picked, path, _pair = controller._route("this is special", {}, "default", None, None)
 
     assert path[0]["pair_from"] == "traffic_rule"
     assert middleware.calls == 0
@@ -234,7 +234,7 @@ def test_a_middleware_pair_still_bypasses_the_tree(hi_router):
 
     controller = _controller([_PairMiddleware()], hi_router)
 
-    picked, path, pair = controller._route("hi", {}, "default", None, None)
+    _picked, path, pair = controller._route("hi", {}, "default", None, None)
 
     assert path[0]["pair_from"] == "middleware"
     assert path[0]["tier"] is None

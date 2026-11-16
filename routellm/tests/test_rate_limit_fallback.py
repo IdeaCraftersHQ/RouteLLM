@@ -170,7 +170,7 @@ def _pair(a_mode="429", **a_attrs):
 
 
 def test_429_with_retry_after_is_one_call_then_skipped_then_retried():
-    a, b, config = _pair(retry_after="30")
+    a, _b, config = _pair(retry_after="30")
     clock = Clock()
     controller = _controller(config, clock)
 
@@ -193,7 +193,7 @@ def test_429_with_retry_after_is_one_call_then_skipped_then_retried():
 
 
 def test_daily_limit_429_cools_until_the_stated_reset():
-    a, b, config = _pair("429_daily", reset_ms=int((NOW + 3600) * 1000))
+    a, _b, config = _pair("429_daily", reset_ms=int((NOW + 3600) * 1000))
     clock = Clock()
     controller = _controller(config, clock)
 
@@ -210,7 +210,7 @@ def test_daily_limit_429_cools_until_the_stated_reset():
 
 
 def test_429_without_a_stated_reset_cools_for_the_default():
-    a, b, config = _pair()
+    a, _b, config = _pair()
     clock = Clock()
     controller = _controller(config, clock, rate_limit_default_cooldown_s=45)
 
@@ -224,14 +224,14 @@ def test_429_without_a_stated_reset_cools_for_the_default():
 
 
 def test_429_does_not_count_toward_the_breaker_when_cooling_is_on():
-    a, b, config = _pair(retry_after="5")
+    _a, _b, config = _pair(retry_after="5")
     controller = _controller(config, Clock())
     _ask(controller)
     assert controller.resilience.get_cb("a").failures == 0
 
 
 def test_cooldown_is_off_by_default_and_429_retries_in_place():
-    a, b, config = _pair()
+    a, _b, config = _pair()
     controller = _controller(config, rate_limit_cooldown=False)
     _ask(controller)
     first = len(a.hits)
@@ -242,7 +242,7 @@ def test_cooldown_is_off_by_default_and_429_retries_in_place():
 
 
 def test_sync_completion_skips_a_cooling_endpoint_too():
-    a, b, config = _pair(retry_after="30")
+    a, _b, config = _pair(retry_after="30")
     clock = Clock()
     controller = _controller(config, clock)
     controller.completion(model="default", messages=MESSAGES)
@@ -296,7 +296,7 @@ def test_pool_walks_candidates_before_leaving_the_side():
 
 
 def test_pool_of_one_is_todays_behaviour():
-    fakes, weak, config = _pool(["500", "ok", "ok"], pool=1)
+    fakes, _weak, config = _pool(["500", "ok", "ok"], pool=1)
     controller = _controller(config, Clock(), max_retries=0)
     res = _ask(controller)
     assert res.choices[0].message.content == "hello from W"  # sibling, not p2
@@ -304,7 +304,7 @@ def test_pool_of_one_is_todays_behaviour():
 
 
 def test_pool_then_sibling_when_the_whole_pool_fails():
-    fakes, weak, config = _pool(["429", "429", "429"])
+    _fakes, _weak, config = _pool(["429", "429", "429"])
     controller = _controller(config, Clock())
     res = _ask(controller)
     assert res.choices[0].message.content == "hello from W"
@@ -330,7 +330,7 @@ def test_all_cooling_error_names_every_endpoint():
 
 def test_pool_member_that_cannot_serve_the_request_is_skipped():
     """Every pool candidate passes the same serve check as a sibling."""
-    fakes, weak, config = _pool(["429", "ok", "ok"])
+    fakes, _weak, config = _pool(["429", "ok", "ok"])
     config["endpoints"]["p2"]["capabilities"] = {"vision": False}
     image = [
         {
@@ -390,7 +390,7 @@ def _consume(controller):
 
 @pytest.mark.parametrize(("mode", "cooldown"), [("die_after", True), ("stream_error_after", False)])
 def test_failure_after_the_first_chunk_counts_against_the_breaker(mode, cooldown):
-    a, b, config = _pair(mode)
+    _a, _b, config = _pair(mode)
     controller = _controller(config, Clock(), rate_limit_cooldown=cooldown)
     cb = controller.resilience.get_cb("a")
     cb.failures = 2
@@ -400,17 +400,17 @@ def test_failure_after_the_first_chunk_counts_against_the_breaker(mode, cooldown
 
 
 def test_clean_stream_still_counts_as_success():
-    a, b, config = _pair("ok")
+    _a, _b, config = _pair("ok")
     controller = _controller(config, Clock())
     cb = controller.resilience.get_cb("a")
     cb.failures = 2
-    chunks, err = _consume(controller)
+    _chunks, err = _consume(controller)
     assert err is None
     assert cb.failures == 0
 
 
 def test_in_stream_rate_limit_event_cools_the_endpoint():
-    a, b, config = _pair("stream_error_after")
+    a, _b, config = _pair("stream_error_after")
     clock = Clock()
     controller = _controller(config, clock)
     _consume(controller)
@@ -423,7 +423,7 @@ def test_in_stream_rate_limit_event_cools_the_endpoint():
 
 
 def test_in_stream_rate_limit_before_the_first_chunk_falls_to_the_sibling():
-    a, b, config = _pair("stream_error_first")
+    _a, _b, config = _pair("stream_error_first")
     controller = _controller(config, Clock())
     chunks, err = _consume(controller)
     assert err is None

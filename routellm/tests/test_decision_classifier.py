@@ -252,7 +252,7 @@ def test_sticky_turn_two_stays_restrictive():
 
 def test_sticky_floor_lifts_a_lower_model_answer():
     replies = iter([answer("internal"), answer("general", "code")])
-    clf, transport = make_classifier(
+    clf, _transport = make_classifier(
         FakeTransport(lambda m: next(replies)), sticky={"enabled": True}
     )
     first = [{"role": "user", "content": "plan"}]

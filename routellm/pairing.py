@@ -509,7 +509,7 @@ def _split_terms(select: str) -> tuple[list[TagTerm], list[str], str]:
                 "Every term must be key:value, either tag:<label> or a "
                 "models.dev key."
             )
-        key, _, value = term.partition(":")
+        key = term.partition(":")[0]
         if key == "free":
             # Judged by `_free_term` and `rank_candidates`, never by aim.
             continue

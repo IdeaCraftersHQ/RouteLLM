@@ -99,7 +99,7 @@ def test_a_value_moved_to_another_placeholder_does_not_decrypt(tmp_path):
     path = tmp_path / "t.db"
     store = TokenStore(str(path), cipher=AesGcmCipher(key_bytes()))
     redactor = Redactor(store, analyze=person)
-    text, mid = redactor.redact(f"{VALUE}", CTX)
+    _text, mid = redactor.redact(f"{VALUE}", CTX)
     with sqlite3.connect(path) as c:
         c.execute("UPDATE tokens SET placeholder='[[PERSON_9]]'")
     with pytest.raises(MappingError):

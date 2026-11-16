@@ -154,7 +154,7 @@ def test_a_text_request_routes_exactly_as_before(hi_router, tmp_path):
 def test_a_vision_request_is_forced_to_the_only_capable_side(hi_router, tmp_path):
     controller = _controller(CONFIG, tmp_path)
 
-    picked, path, _ = _route(controller, _vision())
+    picked, _path, _ = _route(controller, _vision())
 
     assert picked == "seeing"
     assert hi_router.calls == []

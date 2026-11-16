@@ -1032,7 +1032,7 @@ def test_real_fallback_is_still_labelled(registry, tmp_path, lo_router, monkeypa
         default_router="lo",
         resilience_config=ResilienceConfig(max_retries=0),
     )
-    _, res = _failing_completion(monkeypatch, "ollama_chat/qwen3:8b")
+    _, _res = _failing_completion(monkeypatch, "ollama_chat/qwen3:8b")
 
     out = controller.completion(model="default", messages=[{"role": "user", "content": "easy"}])
 

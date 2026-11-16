@@ -327,7 +327,7 @@ def test_the_judge_runs_for_a_class_it_passes(world, monkeypatch):
 
 
 def decision_for(world, endpoint):
-    chat, _ = world
+    _chat, _ = world
     registry = build(world).endpoints
     return build_decision({"decision": {"endpoint": endpoint, "data_classes": CLASSES}}, registry)
 

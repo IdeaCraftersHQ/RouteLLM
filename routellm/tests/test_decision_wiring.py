@@ -183,7 +183,7 @@ def test_decision_lands_on_path_and_context(patched):
 
 def test_context_var_visible_to_routing(patched, monkeypatch):
     seen = []
-    ctrl, calls, fake = controller(build(), answer("private", "code"))
+    ctrl, _calls, fake = controller(build(), answer("private", "code"))
     orig = ctrl._route
 
     def spy(*a, **k):
@@ -205,7 +205,7 @@ def test_no_decision_section_makes_no_decision_call(patched):
 
 
 def test_timeout_resolves_most_restrictive_in_path(patched):
-    ctrl, calls, fake = controller(build(timeout_ms=50), delay=1.0)
+    ctrl, _calls, fake = controller(build(timeout_ms=50), delay=1.0)
     patched(fake)
     res = asyncio.run(ctrl.acompletion(model="router-default", messages=MSG))
     rec = res._hidden_params["routellm_path"][0]["decision"]
@@ -213,7 +213,7 @@ def test_timeout_resolves_most_restrictive_in_path(patched):
 
 
 def test_transport_error_recorded(patched):
-    ctrl, calls, fake = controller(build(), ConnectionError("down"))
+    ctrl, _calls, fake = controller(build(), ConnectionError("down"))
     patched(fake)
     res = asyncio.run(ctrl.acompletion(model="router-default", messages=MSG))
     assert res._hidden_params["routellm_path"][0]["decision"]["error"] == "transport"
@@ -251,8 +251,8 @@ def test_declared_class_skips_model_and_is_not_sent_upstream(patched):
 
 def test_slow_decision_does_not_delay_unrelated_request(patched):
     clf = build(timeout_ms=3000)
-    ctrl, calls, fake = controller(clf, delay=0.4)
-    plain, plain_calls, _ = controller(None)
+    ctrl, _calls, fake = controller(clf, delay=0.4)
+    plain, _plain_calls, _ = controller(None)
     patched(fake)
 
     async def scenario():
@@ -268,7 +268,7 @@ def test_slow_decision_does_not_delay_unrelated_request(patched):
 
 
 def test_sync_completion_runs_the_decision_step(monkeypatch):
-    ctrl, calls, fake = controller(build(), answer("internal", "chat"))
+    ctrl, _calls, fake = controller(build(), answer("internal", "chat"))
     results = []
 
     def sync_fake(**kwargs):
