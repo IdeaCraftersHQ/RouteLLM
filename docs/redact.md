@@ -246,7 +246,7 @@ field added upstream never leaves the host unseen; an unset one (`null`,
 | `prediction` (prefill) | redacted |
 | `tool_choice`, `function_call` | kept (a keyword, or a function name checked as above) |
 | `stream_options` | kept (`include_usage` only) |
-| `model`, `stream`, `temperature`, `top_p`, `n`, `max_tokens`, `max_completion_tokens`, `seed`, `stop`, `presence_penalty`, `frequency_penalty`, `logit_bias`, `logprobs`, `top_logprobs`, `parallel_tool_calls`, `reasoning_effort`, `extra_headers`, `timeout` | allowed as sent |
+| `model`, `stream`, `temperature`, `top_p`, `n`, `max_tokens`, `max_completion_tokens`, `seed`, `stop`, `top_k`, `presence_penalty`, `frequency_penalty`, `logit_bias`, `logprobs`, `top_logprobs`, `parallel_tool_calls`, `reasoning_effort`, `extra_headers`, `timeout` | allowed as sent |
 | `audio`, `web_search_options`, a tool that is not a function, a `response_format` that is not text, `json_object` or `json_schema` | refused |
 | any other field | refused |
 

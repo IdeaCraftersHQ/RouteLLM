@@ -85,6 +85,21 @@ class TestLitellmContract:
         assert params(T.translate_anthropic_thinking_to_reasoning_effort) == {"thinking"}
         assert "usage" in params(T.translate_openai_usage_to_anthropic_usage_delta)
 
+    def test_translator_carries_top_k(self):
+        from litellm.llms.anthropic.pass_through.adapters.transformation import (
+            LiteLLMAnthropicMessagesAdapter as T,
+        )
+
+        out, _ = T().translate_anthropic_to_openai(
+            {
+                "model": "routellm",
+                "max_tokens": 10,
+                "top_k": 4,
+                "messages": [{"role": "user", "content": "hi"}],
+            }
+        )
+        assert out["top_k"] == 4
+
     def test_request_mapping(self):
         from litellm.llms.anthropic.pass_through.adapters.transformation import (
             LiteLLMAnthropicMessagesAdapter as T,
@@ -308,6 +323,12 @@ class TestDecode:
         request, _ = decode(base(thinking={"type": "adaptive"}, output_config={"effort": "high"}))
         assert request.reasoning_effort == "high"
 
+    def test_top_k_is_mapped(self):
+        request, _ = decode(base(top_k=5))
+        assert request.top_k == 5
+        assert decode(base(top_k=0))[0].top_k == 0
+        assert decode(base())[0].top_k is None
+
     def test_ignored_fields_are_accepted(self):
         decode(base(service_tier="auto"))
 
@@ -320,7 +341,9 @@ class TestDecode:
     @pytest.mark.parametrize(
         ("patch", "param"),
         [
-            ({"top_k": 5}, "top_k"),
+            ({"top_k": -1}, "top_k"),
+            ({"top_k": "5"}, "top_k"),
+            ({"top_k": True}, "top_k"),
             ({"mcp_servers": []}, "mcp_servers"),
             ({"container": "c"}, "container"),
             ({"metadata": {"user_id": "u", "tag": "x"}}, "metadata"),
@@ -763,7 +786,7 @@ class AnthropicDriver(Driver):
 
     def unsupported(self) -> Http:
         http = self.build(Scenario((HI,)))
-        http.json["top_k"] = 5
+        http.json["mcp_servers"] = []
         return http
 
 
@@ -813,6 +836,7 @@ class TestWire:
                 system="Be terse.",
                 stop_sequences=["END"],
                 temperature=0.25,
+                top_k=7,
                 messages=[
                     {
                         "role": "user",
@@ -826,6 +850,7 @@ class TestWire:
         sent = harness.upstream.hits[-1][2]
         assert sent["stop"] == ["END"]
         assert sent["max_tokens"] == 64 and sent["temperature"] == 0.25
+        assert sent["top_k"] == 7
         assert "cache_control" not in json.dumps(sent["messages"])
 
     def test_context_management_gets_a_200_and_stays_off_the_wire(self, harness):
@@ -958,6 +983,6 @@ class TestSdk:
             client.messages.create(
                 model="default",
                 max_tokens=8,
-                extra_body={"top_k": 3},
+                extra_body={"mcp_servers": []},
                 messages=[{"role": "user", "content": "hi"}],
             )

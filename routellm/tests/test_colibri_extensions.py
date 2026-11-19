@@ -19,7 +19,7 @@ import pytest
 from pydantic import ValidationError
 
 from routellm.endpoints import Endpoint
-from routellm.kv_slots import SlotMap
+from routellm.kv_slots import Extensions, SlotMap
 from routellm.tests.subproc import SUBPROCESS_TIMEOUT
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -82,6 +82,40 @@ def test_extensions_list_overrides_the_kind_preset():
 def test_a_malformed_extension_config_is_refused_at_load(fields):
     with pytest.raises(ValidationError):
         Endpoint(name="c", model="openai/m", **fields)
+
+
+def _colibri():
+    return Endpoint(name="c", model="openai/m", api_base="http://127.0.0.1:1/v1", kind="colibri")
+
+
+def test_extensions_body_carries_well_typed_hints():
+    body = Extensions().body(
+        _colibri(), {"cache_slot": 0, "x_colibri_ignore_leading_stop": False}, None
+    )
+    assert body == {"cache_slot": 0, "x_colibri_ignore_leading_stop": False}
+
+
+@pytest.mark.parametrize(
+    "hints",
+    [
+        {"cache_slot": "SECRET-PROMPT"},  # text must never ride extra_body
+        {"cache_slot": True},  # bool is not a slot
+        {"cache_slot": 1.5},
+        {"cache_slot": -1},
+        {"cache_slot": 16},
+        {"x_colibri_ignore_leading_stop": "yes"},
+        {"x_colibri_ignore_leading_stop": 1},
+    ],
+)
+def test_extensions_body_refuses_a_mistyped_hint(hints):
+    with pytest.raises(TypeError) as caught:
+        Extensions().body(_colibri(), hints, None)
+    assert "SECRET-PROMPT" not in str(caught.value)  # names the hint, never the value
+
+
+def test_a_mistyped_hint_for_an_endpoint_that_drops_it_is_not_inspected():
+    plain = Endpoint(name="p", model="openai/m", api_base="http://127.0.0.1:1/v1")
+    assert Extensions().body(plain, {"cache_slot": "x"}, None) == {}
 
 
 # ---- integration ----------------------------------------------------------

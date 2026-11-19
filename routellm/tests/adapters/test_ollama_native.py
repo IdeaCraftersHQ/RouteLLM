@@ -217,9 +217,21 @@ def test_runtime_knobs_are_accepted_and_ignored(harness):
     assert "num_ctx" not in sent(harness) and "keep_alive" not in sent(harness)
 
 
-@pytest.mark.parametrize("option", ["top_k", "min_p", "repeat_penalty", "mirostat", "bogus"])
+@pytest.mark.parametrize("option", ["min_p", "repeat_penalty", "mirostat", "bogus"])
 def test_sampling_options_without_an_equivalent_are_refused(harness, option):
     refused(chat(harness, options={option: 1}), harness, option)
+
+
+def test_top_k_option_is_mapped(harness):
+    assert chat(harness, options={"top_k": 5}).status_code == 200
+    assert sent(harness)["top_k"] == 5
+
+
+@pytest.mark.parametrize("value", [-1, 2.5, True, "5"])
+def test_top_k_option_must_be_a_whole_number_from_zero(harness, value):
+    response = chat(harness, options={"top_k": value})
+    assert response.status_code == 400, response.text
+    assert not harness.upstream.hits
 
 
 def test_options_must_be_an_object(harness):
@@ -577,6 +589,6 @@ def test_client_errors(client, harness):
     assert denied.value.status_code == 401
     with pytest.raises(ollama.ResponseError) as refused_:
         client.chat(
-            model="default", messages=[{"role": "user", "content": "hi"}], options={"top_k": 5}
+            model="default", messages=[{"role": "user", "content": "hi"}], options={"min_p": 0.1}
         )
     assert refused_.value.status_code == 400

@@ -39,7 +39,7 @@ Mapped
     inferenceConfig                     maxTokens, temperature, topP, stopSequences
     requestMetadata                     `metadata` (`data_class`, `operation`)
     route (`converse-stream`)           `stream`
-    additionalModelRequestFields        only when empty
+    additionalModelRequestFields        `top_k` when it is the only key, else only when empty
 
 Answer: `output.message` (text, reasoning, toolUse blocks), `stopReason`
 (stop -> end_turn, length -> max_tokens, tool_calls -> tool_use,
@@ -54,8 +54,9 @@ Ignored (no effect on the answer)
     performanceConfig
 
 Refused (400 ValidationException naming the field)
-    additionalModelRequestFields with content: no chat field carries
-        provider-specific request fields (top_k, thinking, ...)
+    additionalModelRequestFields with any key but `top_k`: no chat field
+        carries provider-specific request fields (thinking, ...), and `top_k`
+        beside another key would drop the other one
     additionalModelResponseFieldPaths, guardrailConfig, promptVariables,
         outputConfig, anything else unknown
     guardContent; video, audio, search and citation blocks; s3Location
@@ -90,6 +91,7 @@ from routellm.adapters import (
     refuse,
     refuse_unknown,
     register,
+    top_k_value,
 )
 from routellm.adapters.stream import (
     End,
@@ -364,15 +366,21 @@ class BedrockConverse(Adapter):
         if not isinstance(body, dict):
             refuse("Request body must be a JSON object")
         refuse_unknown(body, _REQUEST, ignored=_REQUEST_IGNORED, where="Converse request")
-        if body.get("additionalModelRequestFields"):
+        extra = body.get("additionalModelRequestFields")
+        if extra and (not isinstance(extra, dict) or set(extra) != {"top_k"}):
             refuse(
-                "additionalModelRequestFields has no equivalent here; send it empty",
+                "additionalModelRequestFields has no equivalent here; "
+                "send it empty or with top_k alone",
                 param="additionalModelRequestFields",
             )
         fields: dict[str, Any] = {
             "model": call.path_params["model_id"],
             "messages": [*_system(body.get("system")), *_messages(body.get("messages"))],
         }
+        if extra:
+            fields["top_k"] = top_k_value(
+                extra["top_k"], "additionalModelRequestFields", "additionalModelRequestFields.top_k"
+            )
         config = body.get("inferenceConfig") or {}
         refuse_unknown(config, _INFERENCE, where="inferenceConfig")
         for source, target in (

@@ -31,15 +31,14 @@ Mapped
     parts joined); tools[].functionDeclarations (name, description,
     parameters, parametersJsonSchema); toolConfig.functionCallingConfig
     (mode AUTO/ANY/NONE, one allowedFunctionNames); generationConfig:
-    temperature, topP, maxOutputTokens, stopSequences, responseMimeType
+    temperature, topP, topK, maxOutputTokens, stopSequences, responseMimeType
     (text/plain, application/json), responseSchema / responseJsonSchema
     (object), presencePenalty, frequencyPenalty, seed, candidateCount=1.
     Answers: finishReason (STOP, MAX_TOKENS, SAFETY), usageMetadata
     (prompt, candidates, total), modelVersion.
     snake_case spellings of the structural names are accepted.
 Accepted, no effect
-    safetySettings, generationConfig.topK (chat has no top-k),
-    generationConfig.thinkingConfig, generationConfig.mediaResolution,
+    safetySettings, generationConfig.thinkingConfig, generationConfig.mediaResolution,
     parts' thoughtSignature, `thought: true` parts (reasoning the model
     produced earlier is not sent back).
 Refused (400 INVALID_ARGUMENT)
@@ -79,6 +78,7 @@ from routellm.adapters import (
     refuse,
     refuse_unknown,
     register,
+    top_k_value,
 )
 
 __all__ = ["GeminiAdapter"]
@@ -93,6 +93,7 @@ _BODY_IGNORED = {"safetySettings"}
 _GENERATION = {
     "temperature",
     "topP",
+    "topK",
     "maxOutputTokens",
     "stopSequences",
     "responseMimeType",
@@ -103,7 +104,7 @@ _GENERATION = {
     "seed",
     "candidateCount",
 }
-_GENERATION_IGNORED = {"topK", "thinkingConfig", "mediaResolution"}
+_GENERATION_IGNORED = {"thinkingConfig", "mediaResolution"}
 _PART = {"text", "inlineData", "functionCall", "functionResponse"}
 _PART_IGNORED = {"thought", "thoughtSignature"}
 _ROLES = {None: "user", "user": "user", "function": "user", "model": "model"}
@@ -334,6 +335,10 @@ def _chat_request(model: str, body: Any) -> ChatCompletionRequest:
         model=model, contents=contents.items, config=config, **extra
     )
     _link_tool_ids(request["messages"], contents)
+
+    # litellm's translator drops topK, so it is mapped here.
+    if config.get("topK") is not None:
+        request["top_k"] = top_k_value(config["topK"], "topK")
 
     for source, target in (
         ("presencePenalty", "presence_penalty"),

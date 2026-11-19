@@ -318,7 +318,18 @@ def test_assistant_text_blocks_and_reasoning_history():
     "body, param",
     [
         (
-            {"messages": [USER], "additionalModelRequestFields": {"top_k": 5}},
+            {"messages": [USER], "additionalModelRequestFields": {"thinking": {"type": "x"}}},
+            "additionalModelRequestFields",
+        ),
+        (
+            {
+                "messages": [USER],
+                "additionalModelRequestFields": {"top_k": 5, "thinking": {"type": "x"}},
+            },
+            "additionalModelRequestFields",
+        ),
+        (
+            {"messages": [USER], "additionalModelRequestFields": {"top_k": -1}},
             "additionalModelRequestFields",
         ),
         ({"messages": [USER], "guardrailConfig": {}}, "guardrailConfig"),
@@ -743,6 +754,18 @@ def test_boto3_stream_tool_use(harness, runtime):
     assert json.loads(pieces) == {"p": "a.txt"}
 
 
+def test_additional_model_request_fields_top_k_is_mapped():
+    request, _ = decode({"messages": [USER], "additionalModelRequestFields": {"top_k": 5}})
+    assert request.top_k == 5
+    assert decode({"messages": [USER], "additionalModelRequestFields": {}})[0].top_k is None
+
+
+def test_top_k_reaches_the_upstream(harness):
+    response = converse(harness, {"messages": [USER], "additionalModelRequestFields": {"top_k": 5}})
+    assert response.status_code == 200
+    assert harness.upstream.hits[-1][2]["top_k"] == 5
+
+
 def test_boto3_error_codes(harness, runtime):
     from botocore.exceptions import ClientError
 
@@ -750,7 +773,7 @@ def test_boto3_error_codes(harness, runtime):
         runtime.converse(
             modelId="default",
             messages=[{"role": "user", "content": [{"text": "hi"}]}],
-            additionalModelRequestFields={"top_k": 1},
+            additionalModelRequestFields={"thinking": {"type": "enabled"}},
         )
     assert info.value.response["Error"]["Code"] == "ValidationException"
     assert info.value.response["ResponseMetadata"]["HTTPStatusCode"] == 400

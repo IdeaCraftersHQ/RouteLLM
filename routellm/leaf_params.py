@@ -17,6 +17,13 @@ An endpoint's `drop_params:` picks the policy:
 - a list of names: drop those names for this endpoint, supported or not,
   on top of the unset-policy default.
 
+`top_k` is the one sampling value dropped by default, and only for a leaf
+whose API rejects a field it does not know (OpenAI itself, Azure OpenAI,
+under any policy but `false`): litellm maps it for Anthropic, Gemini,
+Ollama and Bedrock, and sends it as a top-level field to an
+OpenAI-compatible server on its own `api_base` (vLLM, llama.cpp,
+colibri), which takes it. It never reaches a leaf that would answer 400.
+
 litellm applies the result: `additional_drop_params` removes the named
 params before its support check, and `drop_params` relaxes the check.
 """
@@ -24,6 +31,7 @@ params before its support check, and `drop_params` relaxes the check.
 import logging
 from collections.abc import Iterable, Mapping
 from typing import Any
+from urllib.parse import urlsplit
 
 import litellm
 
@@ -32,6 +40,30 @@ logger = logging.getLogger(__name__)
 #: Flags that tune how a provider answers without changing what it is
 #: asked, so a provider that lacks one can serve the request without it.
 ADVISORY_PARAMS = ("parallel_tool_calls", "reasoning_effort", "stream_options")
+
+
+#: Sampling extras litellm sends as a top-level body field to a provider it
+#: has no mapping for, which an API that rejects unknown fields answers 400.
+UNKNOWN_FIELD_PARAMS = ("top_k",)
+
+_OPENAI_HOSTS = frozenset({"api.openai.com"})
+
+
+def rejects_unknown_fields(model: str, api_base: str | None) -> bool:
+    """Whether the leaf is OpenAI itself or Azure OpenAI, which 400 an unknown field.
+
+    An `openai/` model on any other `api_base` is an OpenAI-compatible
+    server, which is not held to that. Unknown is not rejecting.
+    """
+    try:
+        _, provider, _, _ = litellm.get_llm_provider(model=model, api_base=api_base)
+    except Exception:
+        return False
+    if provider == "azure":
+        return True
+    if provider != "openai":
+        return False
+    return api_base is None or (urlsplit(api_base).hostname or "") in _OPENAI_HOSTS
 
 
 def unsupported_by(model: str, api_base: str | None, names: Iterable[str]) -> list[str]:
@@ -80,13 +112,17 @@ def drop_kwargs(
         return {}
 
     out: dict[str, Any] = {}
+    names: list[str] = []
     if drop_params is True:
         out["drop_params"] = True
     else:
         names = list(drop_params or [])
         names += [n for n in unsupported_by(model, api_base, ADVISORY_PARAMS) if n not in names]
-        if names:
-            out["additional_drop_params"] = names
+    # litellm's own `drop_params` does not cover a field it has no mapping for.
+    if rejects_unknown_fields(model, api_base):
+        names += [n for n in UNKNOWN_FIELD_PARAMS if n not in names]
+    if names:
+        out["additional_drop_params"] = names
 
     # An `extra:` naming litellm's own drop settings is explicit: its
     # `drop_params` wins, its `additional_drop_params` is merged.
