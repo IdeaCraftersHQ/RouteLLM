@@ -765,6 +765,135 @@ class TestStreamingIteratorPin:
         assert created.response.id != "resp_chatcmpl-1"
 
 
+def wire_events(chunks, request=None):
+    """The adapter's own SSE events for a chunk stream, as dicts."""
+    adapter = OpenAIResponsesAdapter()
+    request = request or {"model": "default", "input": "hi"}
+    call = Call(adapter, adapter.routes[0], None, None, state={"responses_request": request})
+
+    async def go():
+        return b"".join([f async for f in adapter.encode_stream(Wrapper(chunks), call)])
+
+    return sse(asyncio.run(go()).decode())
+
+
+def reasoning_chunks(then):
+    return [
+        chunk(choices=[{"index": 0, "delta": {"role": "assistant", "reasoning_content": "Th"}}]),
+        chunk(choices=[{"index": 0, "delta": {"reasoning_content": "ink"}}]),
+        *then,
+    ]
+
+
+class TestReasoningStreamLifecycle:
+    """Codex tracks one active reasoning summary part: a delta with none is
+    logged "ReasoningSummaryDelta without active item" and lost."""
+
+    def events(self, then=None):
+        then = then or chunks_text()[1:]
+        return wire_events(reasoning_chunks(then))
+
+    def test_part_opens_before_the_first_delta(self):
+        events = self.events()
+        types = [e["type"] for e in events]
+        added = types.index("response.reasoning_summary_part.added")
+        assert types.index("response.output_item.added") < added
+        assert added < types.index("response.reasoning_summary_text.delta")
+        assert types.count("response.reasoning_summary_part.added") == 1
+
+    def test_full_reasoning_lifecycle_in_order(self):
+        events = self.events()
+        reasoning = [
+            e["type"]
+            for e in events
+            if e["type"].startswith("response.reasoning_summary")
+            or (e["type"].startswith("response.output_item") and e["item"]["type"] == "reasoning")
+        ]
+        assert reasoning == [
+            "response.output_item.added",
+            "response.reasoning_summary_part.added",
+            "response.reasoning_summary_text.delta",
+            "response.reasoning_summary_text.delta",
+            "response.reasoning_summary_text.done",
+            "response.reasoning_summary_part.done",
+            "response.output_item.done",
+        ]
+
+    def test_indexes_ids_and_text(self):
+        events = self.events()
+        item_added = next(e for e in events if e["type"] == "response.output_item.added")["item"]
+        assert item_added["type"] == "reasoning" and item_added["summary"] == []
+        added = next(e for e in events if e["type"] == "response.reasoning_summary_part.added")
+        assert added["item_id"] == item_added["id"]
+        assert (added["output_index"], added["summary_index"]) == (0, 0)
+        assert added["part"] == {"type": "summary_text", "text": ""}
+        done = next(e for e in events if e["type"] == "response.reasoning_summary_text.done")
+        assert done["text"] == "Think" and done["item_id"] == item_added["id"]
+        item_done = next(
+            e["item"]
+            for e in events
+            if e["type"] == "response.output_item.done" and e["item"]["type"] == "reasoning"
+        )
+        assert item_done["summary"] == [{"type": "summary_text", "text": "Think"}]
+
+    def test_closed_before_the_next_item_opens(self):
+        events = self.events()
+        types = [e["type"] for e in events]
+        reasoning_done = next(
+            i
+            for i, e in enumerate(events)
+            if e["type"] == "response.output_item.done" and e["item"]["type"] == "reasoning"
+        )
+        message_added = next(
+            i
+            for i, e in enumerate(events)
+            if e["type"] == "response.output_item.added" and e["item"]["type"] == "message"
+        )
+        assert reasoning_done < message_added
+        assert events[message_added]["output_index"] == 1
+        assert types[-1] == "response.completed"
+
+    def test_sequence_numbers_increase_across_inserted_events(self):
+        numbers = [e["sequence_number"] for e in self.events()]
+        assert numbers == list(range(1, len(numbers) + 1))
+
+    def test_reasoning_then_tool_call(self):
+        call = {"index": 0, "id": "call_1", "type": "function"}
+        then = [
+            chunk(
+                choices=[
+                    {
+                        "index": 0,
+                        "delta": {
+                            "tool_calls": [{**call, "function": {"name": "f", "arguments": "{}"}}]
+                        },
+                    }
+                ]
+            ),
+            chunk(choices=[{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]),
+        ]
+        events = self.events(then)
+        types = [e["type"] for e in events]
+        assert types.index("response.reasoning_summary_part.added") < types.index(
+            "response.reasoning_summary_text.delta"
+        )
+        reasoning_done = next(
+            i
+            for i, e in enumerate(events)
+            if e["type"] == "response.output_item.done" and e["item"]["type"] == "reasoning"
+        )
+        tool_added = next(
+            i
+            for i, e in enumerate(events)
+            if e["type"] == "response.output_item.added" and e["item"]["type"] == "function_call"
+        )
+        assert reasoning_done < tool_added
+
+    def test_plain_text_stream_has_no_reasoning_events(self):
+        types = {e["type"] for e in wire_events(chunks_text())}
+        assert not {t for t in types if "reasoning" in t}
+
+
 def test_adapter_declares_the_responses_route():
     adapter = OpenAIResponsesAdapter()
     assert adapter.name == "openai_responses"

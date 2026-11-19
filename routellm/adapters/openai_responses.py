@@ -19,6 +19,10 @@ drop without a word:
 - stable `resp_<chat id>` response ids, the same streamed or not (litellm
   encodes routing hints into streamed ids), and `sequence_number` on every
   event;
+- the reasoning item's full stream lifecycle: litellm sends summary deltas with
+  no `response.reasoning_summary_part.added` before the first one, which Codex
+  logs as "ReasoningSummaryDelta without active item"; the adapter opens the
+  part (and gives the item an empty `summary`);
 - SSE framing, `response.failed` for a stream that dies after it started, the
   OpenAI error envelope.
 
@@ -317,14 +321,39 @@ class OpenAIResponsesAdapter(Adapter):
             request_input=body["input"],
             responses_api_request=body,
         )
+        opened: set[str] = set()
         async for event in iterator:
-            state["sequence"] += 1
             data = event.model_dump(mode="json", exclude_none=True)
             if getattr(event, "response", None) is not None:
                 data["response"] = event.response.model_dump(mode="json")
                 data["response"]["id"] = _response_id(state.get("chat_id"))
-            data["sequence_number"] = state["sequence"]
-            yield _frame(data)
+            kind = data.get("type")
+            if kind == "response.output_item.added" and data["item"].get("type") == "reasoning":
+                # The reasoning item opens with an empty `summary` list.
+                data["item"].setdefault("summary", [])
+            elif kind == "response.reasoning_summary_text.delta" and (
+                data["item_id"] not in opened
+            ):
+                # litellm streams summary deltas with no `part.added` before
+                # them; Codex ignores a delta with no open part.
+                opened.add(data["item_id"])
+                yield self._numbered(
+                    state,
+                    {
+                        "type": "response.reasoning_summary_part.added",
+                        "item_id": data["item_id"],
+                        "output_index": data["output_index"],
+                        "summary_index": data.get("summary_index", 0),
+                        "part": {"type": "summary_text", "text": ""},
+                    },
+                )
+            yield self._numbered(state, data)
+
+    @staticmethod
+    def _numbered(state: dict, data: dict) -> bytes:
+        state["sequence"] += 1
+        data["sequence_number"] = state["sequence"]
+        return _frame(data)
 
     # -- errors -------------------------------------------------------------
 
