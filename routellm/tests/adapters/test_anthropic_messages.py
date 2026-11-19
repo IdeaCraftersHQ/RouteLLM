@@ -332,6 +332,30 @@ class TestDecode:
     def test_ignored_fields_are_accepted(self):
         decode(base(service_tier="auto"))
 
+    def test_defer_loading_on_a_tool_is_accepted_and_not_forwarded(self):
+        # Claude Code marks tools it would load lazily with `defer_loading`.
+        request, _ = decode(
+            base(tools=[{"name": "f", "input_schema": {"type": "object"}, "defer_loading": True}])
+        )
+        assert request.tools[0]["function"]["name"] == "f"
+        assert "defer_loading" not in json.dumps(request.tools)
+
+    def test_mid_conversation_system_message_is_accepted(self):
+        # Claude Code sends its environment note as a `role: system` message
+        # after the first user turn, text blocks with cache_control.
+        note = {"type": "text", "text": "env note", "cache_control": {"type": "ephemeral"}}
+        for content in ("env note", [note]):
+            request, _ = decode(
+                base(
+                    messages=[
+                        {"role": "user", "content": "hi"},
+                        {"role": "system", "content": content},
+                    ]
+                )
+            )
+            dumped = json.dumps(request.model_dump(exclude_none=True))
+            assert "env note" in dumped
+
     def test_context_management_is_accepted_and_nothing_of_it_is_forwarded(self):
         edits = {"edits": [{"type": "clear_tool_uses_20250919", "trigger": {"value": 9}}]}
         request, _ = decode(base(context_management=edits))
@@ -354,7 +378,16 @@ class TestDecode:
             ({"output_config": {"mystery": 1}}, "output_config"),
             ({"system": [{"type": "image", "source": {}}]}, "system"),
             ({"messages": "hi"}, "messages"),
-            ({"messages": [{"role": "system", "content": "x"}]}, "messages"),
+            ({"messages": [{"role": "tool", "content": "x"}]}, "messages"),
+            (
+                {
+                    "messages": [
+                        {"role": "user", "content": "hi"},
+                        {"role": "system", "content": [{"type": "image", "source": {}}]},
+                    ]
+                },
+                "messages",
+            ),
             ({"messages": [{"role": "user", "content": [{"type": "mystery"}]}]}, "messages"),
             (
                 {
