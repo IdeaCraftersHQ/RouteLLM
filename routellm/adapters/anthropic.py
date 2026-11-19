@@ -43,6 +43,9 @@ Accepted and ignored (no effect on the answer):
 - `cache_control` on any block, tool or system part: the routed model is not
   known when the request is translated, so it is dropped. Cached tokens a
   provider reports still appear as `cache_read_input_tokens`.
+- `context_management` (any shape; logged at debug): server-side context
+  editing is not available through chat completions, and clients keep their
+  own compaction, which Claude Code sends this field alongside.
 - `service_tier`; `thinking.display`; `tool_result.is_error` (the result text
   still reaches the model); `eager_input_streaming` on a tool.
 - `output_config.effort` without adaptive thinking.
@@ -50,8 +53,7 @@ Accepted and ignored (no effect on the answer):
 
 Refused with a 400 `invalid_request_error`, naming the field:
 
-- any other top-level field, among them `top_k`, `mcp_servers`, `container`,
-  `context_management`;
+- any other top-level field, among them `top_k`, `mcp_servers`, `container`;
 - a missing `max_tokens`; `metadata` keys other than `user_id`;
 - block types other than those mapped (`server_tool_use`, `search_result`,
   `web_search_tool_result`, `tool_reference`, ...), unknown keys in a block,
@@ -96,6 +98,7 @@ own tokenizer is not used; expect a few percent of drift. Authenticated like
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
@@ -123,6 +126,8 @@ from routellm.adapters import (
 __all__ = ["AnthropicAdapter"]
 
 #: The model name the translator sees, whatever the client asked for.
+logger = logging.getLogger(__name__)
+
 _NEUTRAL_MODEL = "routellm"
 
 _TRANSLATOR = LiteLLMAnthropicMessagesAdapter()
@@ -145,7 +150,7 @@ _SUPPORTED = frozenset(
         "output_format",
     }
 )
-_IGNORED = frozenset({"service_tier"})
+_IGNORED = frozenset({"service_tier", "context_management"})
 #: What `count_tokens` accepts: the fields that change the token count, and
 #: the ones a client sends alongside them.
 _COUNTED = frozenset(
@@ -300,6 +305,8 @@ def _validate(body: Mapping[str, Any]) -> None:
 def _translate(body: Mapping[str, Any]) -> tuple[dict, dict[str, str]]:
     """Validate, run litellm's translator, return (chat request fields, tool name map)."""
     _validate(body)
+    if "context_management" in body:
+        logger.debug("anthropic adapter: context_management ignored")
     wire = {k: v for k, v in body.items() if k not in _IGNORED}
     wire["model"] = _NEUTRAL_MODEL
     out, names = _TRANSLATOR.translate_anthropic_to_openai(wire)
