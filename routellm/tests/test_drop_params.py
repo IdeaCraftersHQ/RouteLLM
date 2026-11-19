@@ -105,7 +105,10 @@ r = client.post("/v1/chat/completions", json={{
     "model": {model!r}, "messages": [{{"role": "user", "content": "SECRET-PROMPT"}}],
     "tools": TOOLS, {extra}}})
 fake = {fake}
-print(json.dumps({{"status": r.status_code, "seen": fake.hits[-1][2] if fake.hits else None,
+# litellm probes `/api/show` around the chat call and its hit can land last, so
+# select the chat call itself (`/api/chat`, `/chat/completions`).
+chat = [h for h in fake.hits if h[0].rstrip("/").endswith(("/chat", "/chat/completions"))]
+print(json.dumps({{"status": r.status_code, "seen": chat[-1][2] if chat else None,
                   "logs": logs.lines}}))
 """
 
