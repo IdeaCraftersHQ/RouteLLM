@@ -370,6 +370,7 @@ def test_config_example_loads_into_the_registry():
         "embedding",
         "local_audio",
         "local_box",
+        "local_colibri",
         "local_glm",
         "ollama_qwen",
     ]

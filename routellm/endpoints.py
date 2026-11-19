@@ -90,6 +90,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictBool,
+    StrictInt,
     StringConstraints,
     ValidationError,
     field_validator,
@@ -103,6 +104,7 @@ from routellm.governance import (
     parse_jur,
     parse_reach,
 )
+from routellm.kv_slots import EXTENSION_PARAMS, KIND_EXTENSIONS, MAX_KV_SLOTS
 from routellm.requirements import DEFAULT_AUDIO_TOKENS_PER_SECOND
 from routellm.transcription import LOCAL_TAG, TranscriberConfig
 from routellm.video import VideoConfig
@@ -277,6 +279,19 @@ class Endpoint(BaseModel):
         and fails on anything else; `true` drops anything the provider
         rejects; `false` drops nothing; a list of names drops those
         for this endpoint as well. See `routellm.leaf_params`.
+    kind : str, optional
+        An upstream preset. `colibri` forwards the colibri request
+        extensions (`cache_slot`, `x_colibri_ignore_leading_stop`) to
+        this endpoint. See `routellm.kv_slots`.
+    extensions : list[str], optional
+        The request extension hints this endpoint receives, replacing
+        the `kind` preset's. Every other endpoint drops them.
+    kv_slots : int, optional
+        How many KV slots (1..16, `coli serve --kv-slots`) this endpoint
+        serves. Set, a request that names a session
+        (`x-routellm-session` header or `metadata.session_id`) and no
+        `cache_slot` is pinned to one of them. Unset, no slot is chosen.
+        Requires `cache_slot` among the forwarded extensions.
     allow_public_base : bool
         Opt-out of the host check on a `local` endpoint's `api_base`.
         Default False. Dangerous: with it a `local` endpoint may point
@@ -321,6 +336,9 @@ class Endpoint(BaseModel):
     free: Literal[True] | None = None
     timeout_ms: int | None = Field(default=None, gt=0)
     drop_params: StrictBool | list[Annotated[str, StringConstraints(min_length=1)]] | None = None
+    kind: str | None = None
+    extensions: list[str] | None = None
+    kv_slots: StrictInt | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -385,6 +403,40 @@ class Endpoint(BaseModel):
         """Refuse a malformed or repeated `jur:` tag at construction."""
         parse_jur(self.name, self.tags)
         return self
+
+    @model_validator(mode="after")
+    def _validate_extensions(self) -> "Endpoint":
+        """Refuse an unknown preset or hint, and a slot budget nothing uses."""
+        if self.kind is not None and self.kind not in KIND_EXTENSIONS:
+            raise ValueError(
+                f"endpoint {self.name!r}: unknown kind {self.kind!r}; "
+                f"allowed: {', '.join(sorted(KIND_EXTENSIONS))}"
+            )
+        for name in self.extensions or ():
+            if name not in EXTENSION_PARAMS:
+                raise ValueError(
+                    f"endpoint {self.name!r}: unknown extension {name!r}; "
+                    f"allowed: {', '.join(EXTENSION_PARAMS)}"
+                )
+        if self.kv_slots is not None:
+            if not 1 <= self.kv_slots <= MAX_KV_SLOTS:
+                raise ValueError(
+                    f"endpoint {self.name!r}: kv_slots must be 1..{MAX_KV_SLOTS}, "
+                    f"got {self.kv_slots}"
+                )
+            if "cache_slot" not in self.forwarded_extensions:
+                raise ValueError(
+                    f"endpoint {self.name!r}: kv_slots needs `cache_slot` forwarded; "
+                    "set `kind: colibri` or list it under `extensions:`"
+                )
+        return self
+
+    @property
+    def forwarded_extensions(self) -> tuple[str, ...]:
+        """The request extension hints this endpoint receives."""
+        if self.extensions is not None:
+            return tuple(self.extensions)
+        return KIND_EXTENSIONS.get(self.kind or "", ())
 
     @cached_property
     def reach(self) -> frozenset[str]:

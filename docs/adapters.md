@@ -28,6 +28,13 @@ Every adapter response carries the routing decision in the
 `x-routellm-path` header (JSON list), streamed or not. A dialect whose body
 can carry extra fields may also copy `response["routellm"]` into it.
 
+Upstream hints ride on the same request: `decode` may set `cache_slot` and
+`x_colibri_ignore_leading_stop` on the `ChatCompletionRequest`, and a caller's
+session comes from the `X-RouteLLM-Session` header or `metadata.session_id`.
+Only an endpoint that lists them (`kind: colibri`, `extensions:`) receives
+them; any other drops them. An adapter that does nothing leaves them unset.
+The upstream's `x-colibri-queue-wait-ms` is added to the response headers.
+
 ## Contract
 
 `routellm/adapters/base.py`. Import everything from `routellm.adapters`.

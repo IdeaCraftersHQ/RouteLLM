@@ -6,7 +6,7 @@ importing the server (which parses `sys.argv` at import).
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 __all__ = ["ChatCompletionRequest"]
 
@@ -56,3 +56,8 @@ class ChatCompletionRequest(BaseModel):
     user: str | None = None
     # Read for `data_class` and `operation` only, then dropped: never forwarded.
     metadata: dict[str, Any] | None = None
+    # Upstream hints (see `routellm.kv_slots`). Accepted here, then sent
+    # only to an endpoint whose `extensions:` lists them; every other
+    # endpoint drops them. `cache_slot` is a colibri KV context, 0..15.
+    cache_slot: int | None = Field(default=None, strict=True, ge=0, le=15)
+    x_colibri_ignore_leading_stop: bool | None = None
