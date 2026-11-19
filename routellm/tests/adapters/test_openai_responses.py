@@ -306,8 +306,6 @@ class TestRefusals:
         "tool",
         [
             {"type": "local_shell"},
-            {"type": "web_search"},
-            {"type": "web_search_preview"},
             {"type": "mcp", "server_label": "s", "server_url": "http://x"},
             {"type": "file_search", "vector_store_ids": []},
             {"type": "computer_use_preview"},
@@ -317,6 +315,34 @@ class TestRefusals:
     def test_hosted_tools_are_refused_not_dropped(self, tool):
         error = refused(codex_request(tools=[tool]))
         assert error.param == "tools" and tool["type"] in error.message
+
+    @pytest.mark.parametrize("kind", ["web_search", "web_search_preview"])
+    def test_hosted_web_search_is_accepted_and_ignored(self, kind):
+        search = {"type": kind, "external_web_access": True}
+        request, call = decode(codex_request(tools=[search, *codex_request()["tools"]]))
+        assert [t["function"]["name"] for t in request.tools] == ["shell", "apply_patch"]
+        assert not request.model_extra, "no litellm web_search_options carried upstream"
+        assert call.state["ignored_tools"] == [kind]
+        assert OpenAIResponsesAdapter().stream_headers(call) == {"x-routellm-ignored": kind}
+
+    def test_web_search_alone_leaves_a_request_with_no_tools(self):
+        request, call = decode(codex_request(tools=[{"type": "web_search"}]))
+        assert not request.tools
+        assert call.state["ignored_tools"] == ["web_search"]
+
+    def test_ignored_tool_types_are_listed_once_in_order(self):
+        tools = [{"type": "web_search_preview"}, {"type": "web_search"}, {"type": "web_search"}]
+        _, call = decode(codex_request(tools=tools))
+        header = OpenAIResponsesAdapter().stream_headers(call)
+        assert header == {"x-routellm-ignored": "web_search_preview,web_search"}
+
+    def test_no_ignored_tools_no_header(self):
+        _, call = decode(codex_request())
+        assert OpenAIResponsesAdapter().stream_headers(call) == {}
+
+    def test_a_refused_hosted_tool_next_to_web_search_is_still_refused(self):
+        error = refused(codex_request(tools=[{"type": "web_search"}, {"type": "local_shell"}]))
+        assert error.param == "tools" and "local_shell" in error.message
 
     @pytest.mark.parametrize(
         "item",
@@ -405,6 +431,19 @@ class TestWire:
         assert body["id"].startswith("resp_")
         assert body["output"][0]["content"][0]["text"] == ECHO
         assert body["usage"]["total_tokens"] == 6
+
+    def test_ignored_hosted_tool_is_reported_on_stream_and_non_stream(self, harness):
+        harness.upstream.mode = "echo"
+        tools = [{"type": "web_search", "external_web_access": False}]
+        streamed = post(harness, codex_request(tools=tools))
+        plain = post(harness, codex_request(tools=tools, stream=False))
+        for response in (streamed, plain):
+            assert response.status_code == 200
+            assert response.headers["x-routellm-ignored"] == "web_search"
+        assert sse(streamed.text)[-1]["type"] == "response.completed"
+        assert plain.json()["status"] == "completed"
+        assert "tools" not in harness.upstream.hits[-1][2]
+        assert "x-routellm-ignored" not in post(harness, codex_request()).headers
 
     def test_refusal_is_the_responses_400_and_never_reaches_upstream(self, harness):
         response = post(harness, codex_request(previous_response_id="resp_abc"))

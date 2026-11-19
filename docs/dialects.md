@@ -193,8 +193,11 @@ codex
 - Codex always streams with `store: false`, and sends developer messages, prior
   reasoning items, `include: ["reasoning.encrypted_content"]`, `prompt_cache_key`
   and `text.verbosity`: all accepted.
-- A Codex model setup that uses the `local_shell` or hosted `web_search` tool is
-  refused; with the default function `shell` tool it works.
+- Codex's hosted `web_search` tool is accepted and ignored: the model is not
+  offered it, no need to set `web_search = "disabled"`. Every ignored hosted
+  tool is listed in the `x-routellm-ignored` response header (comma-separated
+  types, e.g. `web_search`), streamed or not. A Codex setup that uses the
+  `local_shell` tool is refused; with the default function `shell` tool it works.
 
 ### gemini-cli (Gemini) — variable names verified, end-to-end run unverified
 
@@ -285,7 +288,7 @@ all three OpenAI routes.
 | Anthropic 400 `max_tokens` | Messages requires `max_tokens` | set it client-side |
 | Bedrock 401 `UnrecognizedClientException` | SigV4 request without bearer token | send the bearer key (`AWS_BEARER_TOKEN_BEDROCK`) |
 | 400 `previous_response_id` | server keeps no response state | send the whole conversation in `input` |
-| Codex refused on `local_shell` / `web_search` | hosted tool unsupported | use the default function `shell` tool |
+| Codex refused on `local_shell` | hosted tool unsupported | use the default function `shell` tool |
 | Gemini model listing fails with `api_version: v1` | `GET /v1/models` is the OpenAI list | use `v1beta` |
 | Token count differs from provider's | counts are estimates | do not use for billing or hard limits |
 | 508 | request carried `X-RouteLLM-Hop`: a leaf fronts this server | remove the loop |
@@ -329,11 +332,11 @@ source of truth.
 - **Refused:** `previous_response_id`, `conversation`, `background: true`,
   `max_tool_calls`, `top_logprobs`, `truncation: "auto"`, `prompt`,
   `context_management`, any other `include`, any other field; hosted tools
-  (`web_search`, `file_search`, `mcp`, `local_shell`, `computer_use`,
-  `image_generation`); input items `local_shell_call`, `item_reference`,
+  (`file_search`, `mcp`, `local_shell`, `computer_use`, `image_generation`); input items `local_shell_call`, `item_reference`,
   `web_search_call`, `computer_call`.
 - **Tools carried:** `function`, `custom` (Codex `apply_patch`), `namespace` of
-  those.
+  those. **Ignored:** hosted `web_search` (and `web_search_preview` variants),
+  reported in the `x-routellm-ignored` response header.
 - **Answers:** ids are `resp_<chat id>`, the same streamed or not; every event
   carries `sequence_number`; a stream failing after it began ends with
   `response.failed`.

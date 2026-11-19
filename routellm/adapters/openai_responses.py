@@ -50,9 +50,12 @@ no response state: send the whole conversation in `input`), `conversation`,
 `prompt`, `context_management`, any other `include`, any other field.
 
 Tools: `function`, `custom` (Codex's freeform `apply_patch`; answered as a
-`custom_tool_call`) and `namespace` of those. Refused: hosted tools
-(`web_search`, `file_search`, `mcp`, `local_shell`, `computer_use`,
-`image_generation`, ...).
+`custom_tool_call`) and `namespace` of those. Accepted and ignored: hosted
+`web_search` (and its `web_search_preview` variants): the model is not offered
+them, and the response (streamed or not) names every ignored type in an
+`x-routellm-ignored` header, comma-separated. Refused: other hosted tools
+(`file_search`, `mcp`, `local_shell`, `computer_use`, `image_generation`,
+...).
 
 Input items: messages (roles `user`, `assistant`, `system`, `developer`) with
 `input_text`, `output_text`, `text`, `input_image` and `input_file` parts,
@@ -66,10 +69,10 @@ Codex CLI
 Codex always streams with `store: false`, sends developer messages, prior
 reasoning items, function and custom tool calls in `input`, `include:
 ["reasoning.encrypted_content"]`, `prompt_cache_key` and `text.verbosity`:
-all accepted. A model Codex runs with its `local_shell` or hosted
-`web_search` tool is refused explicitly; with the default function `shell`
-tool it works. Point `base_url` at `<server>/v1` with `wire_api =
-"responses"`.
+all accepted. Its hosted `web_search` tool is accepted and ignored (see
+`x-routellm-ignored`). A model Codex runs with its `local_shell` tool is
+refused explicitly; with the default function `shell` tool it works.
+Point `base_url` at `<server>/v1` with `wire_api = "responses"`.
 """
 
 from __future__ import annotations
@@ -88,7 +91,7 @@ from litellm.responses.litellm_completion_transformation.transformation import (
 )
 from litellm.types.utils import ModelResponseStream
 
-from routellm.adapters.base import Adapter, Call, Route, refuse, refuse_unknown
+from routellm.adapters.base import Adapter, Call, Reply, Route, refuse, refuse_unknown
 from routellm.adapters.registry import register
 from routellm.chat_request import ChatCompletionRequest
 
@@ -138,6 +141,17 @@ REFUSED = {
 }
 INCLUDE = frozenset({"reasoning.encrypted_content"})
 TOOL_TYPES = frozenset({"function", "custom", "namespace"})
+#: Hosted tools accepted and dropped: the model never sees them. Each one
+#: present is reported in the `x-routellm-ignored` response header.
+IGNORED_TOOLS = frozenset(
+    {
+        "web_search",
+        "web_search_preview",
+        "web_search_preview_2025_03_11",
+        "web_search_2025_08_26",
+    }
+)
+IGNORED_HEADER = "x-routellm-ignored"
 ITEM_TYPES = frozenset(
     {
         "message",
@@ -164,7 +178,7 @@ def _check_tools(tools: Any, where: str = "tools") -> None:
         refuse("tools must be a list of tool objects", param="tools")
     for tool in tools:
         kind = tool.get("type")
-        if kind not in TOOL_TYPES:
+        if kind not in TOOL_TYPES and kind not in IGNORED_TOOLS:
             refuse(
                 f"Tool type '{kind}' is not supported (function and custom tools only)",
                 param="tools",
@@ -173,6 +187,19 @@ def _check_tools(tools: Any, where: str = "tools") -> None:
             for nested in tool.get("tools") or []:
                 if not isinstance(nested, dict) or nested.get("type") not in {"function", "custom"}:
                     refuse("A namespace tool holds function and custom tools only", param="tools")
+
+
+def _split_tools(body: dict) -> tuple[dict, list[str]]:
+    """The body without its ignorable hosted tools, and their types (once each, in order)."""
+    tools = body.get("tools")
+    if not tools:
+        return body, []
+    ignored = list(dict.fromkeys(t["type"] for t in tools if t["type"] in IGNORED_TOOLS))
+    if not ignored:
+        return body, []
+    kept = [t for t in tools if t["type"] not in IGNORED_TOOLS]
+    rest = {k: v for k, v in body.items() if k != "tools"}
+    return ({**rest, "tools": kept} if kept else rest), ignored
 
 
 def _check_content(content: Any) -> None:
@@ -283,6 +310,8 @@ class OpenAIResponsesAdapter(Adapter):
         if not isinstance(body, dict):
             refuse("Request body must be a JSON object")
         _check_fields(body)
+        body, ignored = _split_tools(body)
+        call.state["ignored_tools"] = ignored
 
         translated = Translator.transform_responses_api_request_to_chat_completion_request(
             model=body["model"],
@@ -310,7 +339,11 @@ class OpenAIResponsesAdapter(Adapter):
         )
         data = result.model_dump(mode="json")
         data["id"] = _response_id(response.get("id"))
-        return data
+        return Reply(data, headers=self.stream_headers(call))
+
+    def stream_headers(self, call: Call) -> dict[str, str]:
+        ignored = call.state.get("ignored_tools")
+        return {IGNORED_HEADER: ",".join(ignored)} if ignored else {}
 
     async def encode_stream(self, chunks: AsyncIterator, call: Call) -> AsyncIterator[bytes]:
         body = call.state["responses_request"]

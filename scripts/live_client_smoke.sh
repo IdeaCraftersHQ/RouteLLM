@@ -82,7 +82,6 @@ model = "$MODEL"
 model_provider = "routellm"
 approval_policy = "never"
 sandbox_mode = "workspace-write"
-web_search = "disabled"
 [model_providers.routellm]
 name = "routellm"
 base_url = "$BASE/v1"
