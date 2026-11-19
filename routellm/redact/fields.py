@@ -32,6 +32,7 @@ Redact = Callable[[str], str]
 
 ALLOWED = frozenset(
     {
+        "cache_slot",
         "extra_headers",
         "frequency_penalty",
         "function_call",
@@ -52,6 +53,7 @@ ALLOWED = frozenset(
         "tool_choice",
         "top_logprobs",
         "top_p",
+        "x_colibri_ignore_leading_stop",
     }
 )
 REDACTED = frozenset({"functions", "metadata", "prediction", "response_format", "tools", "user"})

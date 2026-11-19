@@ -190,7 +190,9 @@ def provider(monkeypatch, tmp_path):
     return fake
 
 
-def build(transforms, tmp_path, *, cache=False, tags=None, tiers=None, **kwargs):
+def build(
+    transforms, tmp_path, *, cache=False, tags=None, tiers=None, endpoint_fields=None, **kwargs
+):
     tags = tags or {}
     endpoints = {
         name: {
@@ -199,6 +201,7 @@ def build(transforms, tmp_path, *, cache=False, tags=None, tiers=None, **kwargs)
             "api_key_env": "FAKE_KEY",
             "tags": tags.get(name, ["cloud"]),
             "quality": {"cld": 90, "cld2": 80, "loc": 10}[name],
+            **(endpoint_fields or {}).get(name, {}),
         }
         for name in ("cld", "cld2", "loc")
     }
