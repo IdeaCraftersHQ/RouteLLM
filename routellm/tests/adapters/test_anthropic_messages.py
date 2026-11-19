@@ -384,6 +384,123 @@ class TestDecode:
         assert messages[5]["content"] == "late note"
         assert "Operator note" not in json.dumps(messages)
 
+    # -- tool search (Claude Code): ToolSearch returns `tool_reference` blocks,
+    # the referenced tools come back in `tools` marked `defer_loading` --
+
+    @staticmethod
+    def tool_search_turn(referenced="mcp__srv__f", declared=("mcp__srv__f",), extra=()):
+        tools = [
+            {"name": "ToolSearch", "input_schema": {"type": "object"}},
+            {
+                "name": "DeferredToolPlaceholder",
+                "description": "Reserved placeholder",
+                "input_schema": {"type": "object", "properties": {}},
+                "defer_loading": True,
+            },
+            *(
+                {
+                    "name": n,
+                    "description": "the f tool",
+                    "input_schema": {"type": "object", "properties": {"v": {"type": "string"}}},
+                    "defer_loading": True,
+                }
+                for n in declared
+            ),
+        ]
+        return base(
+            tools=tools,
+            messages=[
+                {"role": "user", "content": "go"},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_1",
+                            "name": "ToolSearch",
+                            "input": {"query": f"select:{referenced}"},
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_1",
+                            "content": [
+                                {"type": "tool_reference", "tool_name": referenced},
+                                *extra,
+                            ],
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ],
+                },
+            ],
+        )
+
+    def test_tool_reference_becomes_text_naming_the_tool(self):
+        request, _ = decode(self.tool_search_turn())
+        tool_message = request.messages[-1]
+        assert tool_message["role"] == "tool"
+        assert tool_message["tool_call_id"] == "toolu_1"
+        text = tool_message["content"]
+        # The shape ToolSearch's own description promises: a <functions> block
+        # with one <function> line carrying the tool's name and schema.
+        line = text.split("<function>", 1)[1].split("</function>", 1)[0]
+        assert json.loads(line) == {
+            "name": "mcp__srv__f",
+            "description": "the f tool",
+            "parameters": {"type": "object", "properties": {"v": {"type": "string"}}},
+        }
+        assert text.startswith("<functions>") and text.endswith("</functions>")
+        assert "tool_reference" not in json.dumps(request.model_dump())
+
+    def test_tool_reference_beside_text_keeps_both(self):
+        extra = ({"type": "text", "text": "more info"},)
+        request, _ = decode(self.tool_search_turn(extra=extra))
+        content = json.dumps(request.messages[-1]["content"])
+        assert "mcp__srv__f" in content and "more info" in content
+
+    def test_referenced_tool_is_sent_up_front_without_the_placeholder(self):
+        request, _ = decode(self.tool_search_turn())
+        names = [t["function"]["name"] for t in request.tools]
+        assert names == ["ToolSearch", "mcp__srv__f"]
+        assert "defer_loading" not in json.dumps(request.tools)
+
+    def test_a_request_of_only_the_placeholder_sends_no_tools(self):
+        request, _ = decode(
+            base(
+                tools=[
+                    {
+                        "name": "DeferredToolPlaceholder",
+                        "input_schema": {"type": "object", "properties": {}},
+                        "defer_loading": True,
+                    }
+                ]
+            )
+        )
+        assert not request.tools
+
+    def test_a_deferred_tool_named_like_the_placeholder_but_not_deferred_is_kept(self):
+        request, _ = decode(
+            base(tools=[{"name": "DeferredToolPlaceholder", "input_schema": {"type": "object"}}])
+        )
+        assert [t["function"]["name"] for t in request.tools] == ["DeferredToolPlaceholder"]
+
+    def test_tool_reference_to_a_tool_not_declared_is_refused(self):
+        # Claude Code answers a refusal by sending every tool up front.
+        with pytest.raises(AdapterRefusal) as caught:
+            decode(self.tool_search_turn(referenced="mcp__srv__gone", declared=("mcp__srv__f",)))
+        assert caught.value.status == 400
+        assert "mcp__srv__gone" in str(caught.value)
+
+    def test_tool_reference_with_unknown_keys_is_refused(self):
+        body = self.tool_search_turn()
+        body["messages"][-1]["content"][0]["content"][0]["extra"] = 1
+        with pytest.raises(AdapterRefusal):
+            decode(body)
+
     def test_context_management_is_accepted_and_nothing_of_it_is_forwarded(self):
         edits = {"edits": [{"type": "clear_tool_uses_20250919", "trigger": {"value": 9}}]}
         request, _ = decode(base(context_management=edits))
@@ -926,6 +1043,22 @@ class TestWire:
         assert [m["role"] for m in sent] == ["user", "system"]
         assert "env note" in json.dumps(sent[1])
         assert "Operator note" not in json.dumps(sent)
+
+    def test_tool_search_turn_reaches_the_upstream_with_the_tool_loaded(self, harness):
+        body = TestDecode.tool_search_turn()
+        assert post(harness, "/v1/messages", body).status_code == 200
+        sent = harness.upstream.hits[-1][2]
+        assert [t["function"]["name"] for t in sent["tools"]] == ["ToolSearch", "mcp__srv__f"]
+        assert "mcp__srv__f" in json.dumps(sent["messages"][-1])
+        assert "tool_reference" not in json.dumps(sent)
+        assert (
+            post(
+                harness,
+                "/v1/messages/count_tokens",
+                {k: v for k, v in body.items() if k != "max_tokens"},
+            ).status_code
+            == 200
+        )
 
     def test_context_management_gets_a_200_and_stays_off_the_wire(self, harness):
         body = base(context_management={"edits": [{"type": "clear_tool_uses_20250919"}]})
