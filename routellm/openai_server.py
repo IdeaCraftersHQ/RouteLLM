@@ -8,6 +8,7 @@ import json
 import logging
 import math
 import os
+import sys
 import time
 from collections.abc import AsyncGenerator
 from typing import Any, Literal
@@ -21,6 +22,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from routellm.adapters import mount_adapters
 from routellm.audit import Auditor, build_audit
 from routellm.audit_http import Trail, settle
 from routellm.auth import (
@@ -31,6 +33,7 @@ from routellm.auth import (
     current_principal,
 )
 from routellm.capabilities import Capabilities, side_capabilities, union
+from routellm.chat_request import ChatCompletionRequest
 from routellm.comparison import COMPARE_HEADER
 from routellm.config import layer_summary, load_config
 from routellm.controller import HOP_HEADER, Controller, RoutingError
@@ -62,6 +65,7 @@ from routellm.server_config import (
     build_resilience_config,
     build_transforms,
 )
+from routellm.stream_guard import StreamFrame, StreamGuard
 from routellm.transcription import TranscriptionError
 from routellm.transform import TransformError
 from routellm.video import VideoError, has_video
@@ -657,11 +661,21 @@ def require_principal(http_request: Request):
     it does nothing and `request.state.principal` is None. The 401 is the
     same for a missing and an unknown key, and never echoes the key.
     """
+    return authenticate(http_request, bearer_token(http_request.headers.get("authorization")))
+
+
+def authenticate(http_request: Request, token: str | None):
+    """Resolve `token` to a principal and attach it to the request.
+
+    `require_principal` passes the bearer token; a dialect adapter passes
+    whatever credential its dialect carries (an `x-api-key` header, a
+    `?key=` parameter). Raises `Unauthorized` when auth is on and the
+    token is missing or unknown.
+    """
     http_request.state.principal = None
     resolver = AUTH
     if resolver is None:
         return None
-    token = bearer_token(http_request.headers.get("authorization"))
     principal = resolver.resolve(token, http_request.headers) if token else None
     if principal is None:
         raise Unauthorized
@@ -723,53 +737,6 @@ class UsageInfo(BaseModel):
     prompt_tokens: int = 0
     total_tokens: int = 0
     completion_tokens: int | None = 0
-
-
-class ChatCompletionRequest(BaseModel):
-    """The chat completion body this server accepts.
-
-    Agent clients send the full OpenAI chat shapes: nested `tools`,
-    `tool_choice` as a string or an object, messages with `tool_calls`,
-    `role: "tool"` turns, null or absent `content`, content parts
-    (text, image_url, input_audio) and `response_format` of type `json_schema`. The
-    nested shapes belong to the provider, so they are typed as open
-    dicts and forwarded untouched.
-
-    Only the fields named here are forwarded. Anything else in a body is
-    dropped, which is deliberate: a parameter this server does not know
-    may be one a routed provider rejects. The allowlist is this class.
-    """
-
-    # OpenAI fields: https://platform.openai.com/docs/api-reference/chat/create
-    model: str
-    messages: str | list[dict[str, Any]]
-    # Every optional field defaults to None so an unset one stays unset.
-    # A default value here would be manufactured into the litellm call,
-    # and a provider that does not accept the parameter rejects the whole
-    # request over a value the client never sent.
-    frequency_penalty: float | None = None
-    logit_bias: dict[int, float] | None = None
-    logprobs: bool | None = None
-    top_logprobs: int | None = None
-    max_tokens: int | None = None
-    max_completion_tokens: int | None = None
-    n: int | None = None
-    presence_penalty: float | None = None
-    # { "type": "json_object" } for json mode, or a `json_schema` object.
-    response_format: dict[str, Any] | None = None
-    seed: int | None = None
-    stop: str | list[str] | None = None
-    stream: bool | None = None
-    stream_options: dict[str, Any] | None = None
-    temperature: float | None = None
-    top_p: float | None = None
-    tools: list[dict[str, Any]] | None = None
-    tool_choice: str | dict[str, Any] | None = None
-    parallel_tool_calls: bool | None = None
-    reasoning_effort: str | None = None
-    user: str | None = None
-    # Read for `data_class` and `operation` only, then dropped: never forwarded.
-    metadata: dict[str, Any] | None = None
 
 
 class ChatMessage(BaseModel):
@@ -925,37 +892,24 @@ async def stream_response(response, request_id: str | None = None, done=None) ->
     or a caller that went away.
     """
     request_id = request_id or shortuuid.uuid()
-    outcome, reason, usage = "failed", "client_disconnect", None
+    guard = StreamGuard(response, request_id, done)
     try:
         async for chunk in response:
-            usage = getattr(chunk, "usage", None) or usage
+            guard.saw(chunk)
             yield f"data: {chunk.model_dump_json()}\n\n"
-        outcome, reason = "served", None
+        guard.ok()
     except Exception as e:
-        outcome, reason = "failed", "stream_error"
-        logging.getLogger(__name__).error(
-            f"Stream failed after its first chunk (request id {request_id}): "
-            f"{type(e).__name__}: {e!s}"
-        )
+        guard.failed(e)
         yield f"data: {json.dumps({'error': _error_body(request_id)})}\n\n"
         return
     finally:
-        # A client that disconnects cancels this generator mid-stream;
-        # without this the upstream connection (and the provider's
-        # generation) would run on until garbage collection.
-        try:
-            closer = getattr(response, "aclose", None)
-            if closer is not None:
-                await closer()
-        finally:
-            if done is not None:
-                done(
-                    outcome,
-                    reason,
-                    getattr(usage, "prompt_tokens", None),
-                    getattr(usage, "completion_tokens", None),
-                )
+        await guard.finish()
     yield "data: [DONE]\n\n"
+
+
+def sse_framing(response, request_id, done, path) -> StreamFrame:
+    """The stream framing of `/v1/chat/completions`: server-sent events."""
+    return StreamFrame(stream_response(response, request_id, done), "text/event-stream", {})
 
 
 class LoopDetected(Exception):
@@ -1034,6 +988,23 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
     `routellm` key, which OpenAI clients ignore. A streamed response
     carries it in the server logs only, since its chunks follow the SSE
     shape the client parses.
+    """
+    return await run_chat_completion(request, http_request)
+
+
+async def run_chat_completion(request: ChatCompletionRequest, http_request: Request, framing=None):
+    """The pipeline behind `/v1/chat/completions`, callable in process.
+
+    The caller has already authenticated (`request.state.principal` is
+    set) and refused loops. Everything else happens here: request class,
+    routing, transforms, cache, resilience and the audit trail. Returns an
+    OpenAI-shaped response; a refusal or failure is a JSON error body with
+    its status.
+
+    `framing(res, request_id, done, path)` frames a streamed answer and
+    returns a `StreamFrame`; the default is server-sent events. A dialect
+    adapter passes its own, so the stream is built from the same chunks
+    and closed and audited the same way.
     """
     request_id = shortuuid.uuid()
     logging.info(f"{request_summary(request)} request_id={request_id}")
@@ -1127,11 +1098,11 @@ async def create_chat_completion(request: ChatCompletionRequest, http_request: R
     logging.info(f"Routing path: {path}")
 
     if request.stream:
+        frame = (framing or sse_framing)(
+            res, request_id, trail.stream_done(res) if trail is not None else None, path
+        )
         stream = StreamingResponse(
-            content=stream_response(
-                res, request_id, trail.stream_done(res) if trail is not None else None
-            ),
-            media_type="text/event-stream",
+            content=frame.content, media_type=frame.media_type, headers=frame.headers
         )
         # The route is final once the stream is open. The decision is
         # written before the first byte; a failed write refuses the stream.
@@ -1342,6 +1313,10 @@ def _routellm_extension(model_id: str, tier_names: set) -> dict:
 async def health_check():
     """Health check endpoint."""
     return JSONResponse(content={"status": "online"})
+
+
+# Every module of `routellm/adapters/` mounts its dialect's routes here.
+mount_adapters(app, sys.modules[__name__])
 
 
 parser = argparse.ArgumentParser(description="An OpenAI-compatible API server for LLM routing.")
