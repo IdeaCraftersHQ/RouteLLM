@@ -23,10 +23,13 @@ Request fields
 
 Mapped (litellm translator):
 
-- `messages`: `text`, `image` (base64 or url), `document` (base64 or url, as
-  a data/url part), `tool_use` (assistant `tool_calls`), `tool_result`
-  (`role: tool`), `thinking` and `redacted_thinking` (kept with their
-  signatures as `thinking_blocks` on the assistant turn).
+- `messages`: a `role: system` message (text blocks only; litellm carries it
+  as a user turn marked as an operator note, which is how Claude Code sends
+  its environment note after the first user turn); `text`, `image` (base64 or
+  url), `document` (base64 or url, as a data/url part), `tool_use` (assistant
+  `tool_calls`), `tool_result` (`role: tool`), `thinking` and
+  `redacted_thinking` (kept with their signatures as `thinking_blocks` on the
+  assistant turn).
 - `system` (string or text blocks), `max_tokens`, `temperature`, `top_p`, `top_k`,
   `stream`, `stop_sequences` (-> `stop`), `metadata.user_id` (-> `user`).
 - `tools` (custom tools; names over 64 characters are shortened and restored
@@ -47,7 +50,8 @@ Accepted and ignored (no effect on the answer):
   editing is not available through chat completions, and clients keep their
   own compaction, which Claude Code sends this field alongside.
 - `service_tier`; `thinking.display`; `tool_result.is_error` (the result text
-  still reaches the model); `eager_input_streaming` on a tool.
+  still reaches the model); `eager_input_streaming` and `defer_loading` on a
+  tool (every tool is sent up front: nothing is loaded lazily).
 - `output_config.effort` without adaptive thinking.
 - Headers `anthropic-version` and `anthropic-beta` (any value).
 
@@ -60,7 +64,7 @@ Refused with a 400 `invalid_request_error`, naming the field:
   `document` sources other than base64/url (`text`, `content`, `file`);
 - hosted tools (`web_search_*`, `bash_*`, `computer_*`, `text_editor_*`,
   ...): only custom tools (name and `input_schema`) are carried;
-- a `role` other than `user` / `assistant`; an unknown `tool_choice` or
+- a `role` other than `user` / `assistant` / `system`; an unknown `tool_choice` or
   `thinking` type.
 
 Answers
@@ -178,7 +182,16 @@ _ASSISTANT_BLOCKS: dict[str, frozenset[str]] = {
 }
 _RESULT_BLOCKS = ("text", "image", "document")
 _TOOL_KEYS = frozenset(
-    {"name", "description", "input_schema", "type", _CACHE, "strict", "eager_input_streaming"}
+    {
+        "name",
+        "description",
+        "input_schema",
+        "type",
+        _CACHE,
+        "strict",
+        "eager_input_streaming",
+        "defer_loading",
+    }
 )
 _CHOICES = ("auto", "any", "tool", "none")
 _THINKING = ("enabled", "disabled", "adaptive")
@@ -228,15 +241,20 @@ def _messages(messages: Any) -> None:
     for i, message in enumerate(messages):
         path = f"messages[{i}]"
         role = message.get("role") if isinstance(message, dict) else None
-        if role not in ("user", "assistant"):
-            refuse(f"{path}.role must be 'user' or 'assistant'", param=f"{path}.role")
+        if role not in ("user", "assistant", "system"):
+            refuse(f"{path}.role must be 'user', 'assistant' or 'system'", param=f"{path}.role")
         _keys(message, frozenset({"role", "content"}), path)
         content = message.get("content")
         if isinstance(content, str):
             continue
         if not isinstance(content, list):
             refuse(f"{path}.content must be a string or a list of blocks", param=f"{path}.content")
-        allowed = _USER_BLOCKS if role == "user" else _ASSISTANT_BLOCKS
+        if role == "user":
+            allowed = _USER_BLOCKS
+        elif role == "system":
+            allowed = {"text": _USER_BLOCKS["text"]}
+        else:
+            allowed = _ASSISTANT_BLOCKS
         for j, block in enumerate(content):
             kind = _block(block, allowed, f"{path}.content[{j}]")
             if kind == "tool_result":
@@ -313,6 +331,11 @@ def _translate(body: Mapping[str, Any]) -> tuple[dict, dict[str, str]]:
         logger.debug("anthropic adapter: context_management ignored")
     wire = {k: v for k, v in body.items() if k not in _IGNORED}
     wire["model"] = _NEUTRAL_MODEL
+    if wire.get("tools"):
+        # litellm would copy `defer_loading` into the tool's JSON schema.
+        wire["tools"] = [
+            {k: v for k, v in tool.items() if k != "defer_loading"} for tool in wire["tools"]
+        ]
     out, names = _TRANSLATOR.translate_anthropic_to_openai(wire)
     out = dict(out)
     out["model"] = body["model"]
