@@ -41,6 +41,7 @@ from routellm.decision import build_decision
 from routellm.egress_gate import build_egress_gates
 from routellm.endpoints import Endpoint, EndpointRegistry, Tier
 from routellm.hints import TYPESAFE_INSTALL_HINT
+from routellm.kv_slots import EXTENSION_PARAMS, QUEUE_WAIT_HEADER, queue_wait_ms, session_of
 from routellm.middleware.intent_model_selector import (
     IntentModelMapping,
     IntentModelSelector,
@@ -1028,6 +1029,9 @@ async def run_chat_completion(request: ChatCompletionRequest, http_request: Requ
     forwarded = request.model_dump(exclude_unset=True, exclude_none=True)
     for handled in ("model", "messages", "metadata"):
         forwarded.pop(handled, None)
+    # Upstream hints are not request params: the controller sends each
+    # to the endpoints that take it and drops it for the rest.
+    hints = {name: forwarded.pop(name) for name in EXTENSION_PARAMS if name in forwarded}
 
     try:
         declared = _declare(request, http_request)
@@ -1048,6 +1052,8 @@ async def run_chat_completion(request: ChatCompletionRequest, http_request: Requ
             declared_class=declared.data_class,
             attributes=_attributes(http_request),
             compare=http_request.headers.get(COMPARE_HEADER),
+            hints=hints,
+            session=session_of(http_request.headers, request.metadata),
             **forwarded,
         )
     except PolicyDenied as e:
@@ -1097,12 +1103,21 @@ async def run_chat_completion(request: ChatCompletionRequest, http_request: Requ
     path = hidden.get("routellm_path") if isinstance(hidden, dict) else None
     logging.info(f"Routing path: {path}")
 
+    # The upstream's own queue wait, when it reports one: back to the
+    # caller as a header and onto the audit record.
+    wait = queue_wait_ms(res)
+    wait_headers = {} if wait is None else {QUEUE_WAIT_HEADER: str(wait)}
+    if trail is not None:
+        trail.record.queue_wait_ms = wait
+
     if request.stream:
         frame = (framing or sse_framing)(
             res, request_id, trail.stream_done(res) if trail is not None else None, path
         )
         stream = StreamingResponse(
-            content=frame.content, media_type=frame.media_type, headers=frame.headers
+            content=frame.content,
+            media_type=frame.media_type,
+            headers={**frame.headers, **wait_headers},
         )
         # The route is final once the stream is open. The decision is
         # written before the first byte; a failed write refuses the stream.
@@ -1114,7 +1129,7 @@ async def run_chat_completion(request: ChatCompletionRequest, http_request: Requ
     body = res.model_dump()
     if path is not None:
         body["routellm"] = {"path": path}
-    return settle(trail, JSONResponse(content=body), "served", 200, res=res)
+    return settle(trail, JSONResponse(content=body, headers=wait_headers), "served", 200, res=res)
 
 
 def _compare_prompt(request: "ChatCompletionRequest") -> str | None:
@@ -1180,7 +1195,7 @@ async def create_comparison(request: CompareRequest, http_request: Request):
         )
 
     forwarded = request.model_dump(exclude_unset=True, exclude_none=True)
-    for handled in ("model", "models", "tier", "measure_ttft", "metadata"):
+    for handled in ("model", "models", "tier", "measure_ttft", "metadata", *EXTENSION_PARAMS):
         forwarded.pop(handled, None)
 
     try:

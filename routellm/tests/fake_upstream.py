@@ -20,6 +20,7 @@ which is either a string or a callable taking the parsed body:
 
 `reply` replaces the default answer text of `ok`.
 `delay` holds every answer back, before the first byte.
+`headers` adds response headers to every successful answer.
 
 Nothing here leaves the loopback interface.
 """
@@ -46,6 +47,7 @@ class FakeUpstream:
         self.retry_after = None  # `Retry-After` value on a 429, as sent
         self.reset_ms = None  # `X-RateLimit-Reset` (epoch ms) on a 429_daily
         self.reply = None  # answer text (or callable(body) -> text) in place of the default
+        self.headers = {}  # extra response headers on a 200
         self.hits = []  # (path, headers, body)
         fake = self
 
@@ -108,6 +110,8 @@ class FakeUpstream:
                     self.send_response(200)
                     self.send_header("content-type", "text/event-stream")
                     self.send_header("transfer-encoding", "chunked")
+                    for key, value in fake.headers.items():
+                        self.send_header(key, value)
                     self.end_headers()
                     if mode == "die_first":
                         self.close_connection = True
@@ -225,6 +229,8 @@ class FakeUpstream:
                 self.send_response(200)
                 self.send_header("content-type", "application/json")
                 self.send_header("content-length", str(len(data)))
+                for key, value in fake.headers.items():
+                    self.send_header(key, value)
                 self.end_headers()
                 self.wfile.write(data)
 
