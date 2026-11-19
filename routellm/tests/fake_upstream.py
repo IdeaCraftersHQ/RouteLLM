@@ -205,7 +205,10 @@ class FakeUpstream:
                             {
                                 "id": "call_1",
                                 "type": "function",
-                                "function": {"name": "read_file", "arguments": "{}"},
+                                "function": {
+                                    "name": "read_file",
+                                    "arguments": '{"p": "a.txt"}',
+                                },
                             }
                         ],
                     }
