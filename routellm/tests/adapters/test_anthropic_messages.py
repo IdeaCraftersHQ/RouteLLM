@@ -311,13 +311,18 @@ class TestDecode:
     def test_ignored_fields_are_accepted(self):
         decode(base(service_tier="auto"))
 
+    def test_context_management_is_accepted_and_nothing_of_it_is_forwarded(self):
+        edits = {"edits": [{"type": "clear_tool_uses_20250919", "trigger": {"value": 9}}]}
+        request, _ = decode(base(context_management=edits))
+        assert "context_management" not in request.model_dump(exclude_none=True)
+        assert "clear_tool_uses" not in json.dumps(request.model_dump())
+
     @pytest.mark.parametrize(
         ("patch", "param"),
         [
             ({"top_k": 5}, "top_k"),
             ({"mcp_servers": []}, "mcp_servers"),
             ({"container": "c"}, "container"),
-            ({"context_management": {"edits": []}}, "context_management"),
             ({"metadata": {"user_id": "u", "tag": "x"}}, "metadata"),
             ({"tool_choice": {"type": "mystery"}}, "tool_choice"),
             ({"thinking": {"type": "mystery"}}, "thinking"),
@@ -822,6 +827,11 @@ class TestWire:
         assert sent["stop"] == ["END"]
         assert sent["max_tokens"] == 64 and sent["temperature"] == 0.25
         assert "cache_control" not in json.dumps(sent["messages"])
+
+    def test_context_management_gets_a_200_and_stays_off_the_wire(self, harness):
+        body = base(context_management={"edits": [{"type": "clear_tool_uses_20250919"}]})
+        assert post(harness, "/v1/messages", body).status_code == 200
+        assert "context_management" not in json.dumps(harness.upstream.hits[-1][2])
 
     def test_invalid_json_is_a_typed_400(self, harness):
         response = httpx.post(
