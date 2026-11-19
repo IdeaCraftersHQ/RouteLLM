@@ -91,12 +91,7 @@ def test_openai_compatible_server_on_its_own_base_receives_top_k(tmp_path):
 
 @pytest.mark.slow
 def test_ollama_leaf_receives_top_k_as_an_option(tmp_path):
-    # The last hit can be litellm's `/api/show` model lookup, not the chat call.
-    call = _call("to_o", "O", '"top_k": 5').replace(
-        "fake.hits[-1][2] if fake.hits else None",
-        "next((h[2] for h in reversed(fake.hits) if h[0].endswith('/chat')), None)",
-    )
-    out = _run(tmp_path, call)
+    out = _run(tmp_path, _call("to_o", "O", '"top_k": 5'))
 
     assert out["status"] == 200, out
     assert out["seen"] is not None
