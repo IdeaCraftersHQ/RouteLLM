@@ -51,6 +51,7 @@ ALLOWED = frozenset(
         "temperature",
         "timeout",
         "tool_choice",
+        "top_k",
         "top_logprobs",
         "top_p",
         "x_colibri_ignore_leading_stop",

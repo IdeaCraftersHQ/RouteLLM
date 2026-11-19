@@ -99,6 +99,18 @@ class SlotMap:
             return slot
 
 
+def _check_hint(name: str, value: Any) -> None:
+    """Raise TypeError unless `value` is what the hint `name` carries."""
+    if name == "cache_slot":
+        ok = isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 15
+        expected = "an int from 0 to 15"
+    else:
+        ok = isinstance(value, bool)
+        expected = "a bool"
+    if not ok:
+        raise TypeError(f"extension hint {name} must be {expected}, got {type(value).__name__}")
+
+
 class Extensions:
     """Decide, per call, which extension hints an endpoint receives."""
 
@@ -134,9 +146,20 @@ class Extensions:
             Fields to add to the body: the hints the endpoint lists, and
             a session-pinned `cache_slot`. A hint the endpoint does not
             list is dropped and its name logged at DEBUG, never its value.
+
+        Raises
+        ------
+        TypeError
+            If a hint the endpoint takes is not of its type (`cache_slot`
+            an int 0..15, not a bool; `x_colibri_ignore_leading_stop` a
+            bool). The hints ride `extra_body`, so a caller that bypasses
+            the request model cannot send text through them. The message
+            names the hint, never the value.
         """
         allowed = endpoint.forwarded_extensions
         out = {k: v for k, v in (hints or {}).items() if k in allowed}
+        for name, value in out.items():
+            _check_hint(name, value)
         lost = [k for k in (hints or {}) if k not in allowed]
         if lost:
             logger.debug(

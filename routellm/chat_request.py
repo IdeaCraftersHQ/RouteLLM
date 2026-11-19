@@ -49,6 +49,15 @@ class ChatCompletionRequest(BaseModel):
     stream_options: dict[str, Any] | None = None
     temperature: float | None = None
     top_p: float | None = None
+    # Not an OpenAI field: a sampling extra that Anthropic, Gemini, Ollama,
+    # Bedrock and OpenAI-compatible local runtimes (vLLM, llama.cpp, colibri)
+    # take. A whole number from 0 (0 turns it off on the runtimes that
+    # accept it; Gemini wants 1 or more and says so itself). litellm maps it
+    # per provider, and `routellm.leaf_params` drops it for the leaves that
+    # reject unknown fields (OpenAI, Azure). `min_p` and `repeat_penalty`
+    # are not carried: litellm maps them for Ollama only and sends them
+    # raw, and so wrongly, to every other provider.
+    top_k: int | None = Field(default=None, strict=True, ge=0)
     tools: list[dict[str, Any]] | None = None
     tool_choice: str | dict[str, Any] | None = None
     parallel_tool_calls: bool | None = None

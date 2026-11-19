@@ -141,6 +141,18 @@ def refuse(message: str, param: str | None = None, *, code: str = "unsupported_f
     raise AdapterRefusal(message, param=param, code=code)
 
 
+def top_k_value(value: Any, param: str, label: str | None = None) -> int:
+    """Return a dialect's `top_k` as the whole number from 0 chat completions takes.
+
+    Refuses anything else (a bool, a float, a string, a negative) naming
+    `param`, rather than leaving a malformed value to fail inside the
+    pipeline.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        refuse(f"{label or param} must be a whole number of 0 or more", param=param)
+    return value
+
+
 def refuse_unknown(
     body: Mapping[str, Any],
     supported: set[str] | frozenset[str],

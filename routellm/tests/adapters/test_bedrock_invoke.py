@@ -122,7 +122,7 @@ class InvokeDriver(Driver):
 
     def unsupported(self) -> Http:
         http = self.build(Scenario((HI,)))
-        http.json["top_k"] = 5
+        http.json["mcp_servers"] = []
         return http
 
 
@@ -182,7 +182,7 @@ def test_version_and_beta_are_accepted_and_ignored():
         ({"anthropic_version": 2}, "anthropic_version"),
         ({"model": "other"}, "model"),
         ({"stream": True}, "stream"),
-        ({"top_k": 5}, "top_k"),
+        ({"top_k": -1}, "top_k"),
         ({"mcp_servers": []}, "mcp_servers"),
     ],
 )
@@ -236,6 +236,11 @@ def test_bearer_token_authenticates(harness):
 
 def invoke(harness, body, verb="invoke", model="default"):
     return httpx.post(f"{harness.base}/model/{model}/{verb}", json=body, headers=AUTH, timeout=60)
+
+
+def test_invoke_maps_top_k(harness):
+    assert invoke(harness, anthropic_body(top_k=3)).status_code == 200
+    assert harness.upstream.hits[-1][2]["top_k"] == 3
 
 
 def test_invoke_body_and_headers(harness):
@@ -292,10 +297,10 @@ def test_stream_failure_is_an_exception_frame_without_terminator(harness):
 
 
 def test_refusal_is_a_validation_exception(harness):
-    response = invoke(harness, anthropic_body(top_k=3))
+    response = invoke(harness, anthropic_body(mcp_servers=[]))
     assert response.status_code == 400
     assert response.headers["x-amzn-errortype"] == "ValidationException"
-    assert "top_k" in response.json()["message"]
+    assert "mcp_servers" in response.json()["message"]
     assert not harness.upstream.hits
 
 
@@ -344,7 +349,7 @@ def test_count_tokens_grows_with_the_input(harness):
         {"input": {"invokeModel": {"body": "!!not base64!!"}}},
         {"input": {"invokeModel": {"body": base64.b64encode(b"[1]").decode()}}},
         {"input": {"invokeModel": {"body": {"model": "x", "messages": []}}}},
-        {"input": {"invokeModel": {"body": anthropic_body(top_k=1)}}},
+        {"input": {"invokeModel": {"body": anthropic_body(mcp_servers=[])}}},
         {"other": 1},
     ],
 )
@@ -434,7 +439,7 @@ def test_boto3_error_code(harness, runtime):
     from botocore.exceptions import ClientError
 
     with pytest.raises(ClientError) as info:
-        runtime.invoke_model(modelId="default", body=json.dumps(anthropic_body(top_k=1)))
+        runtime.invoke_model(modelId="default", body=json.dumps(anthropic_body(mcp_servers=[])))
     assert info.value.response["Error"]["Code"] == "ValidationException"
     assert info.value.response["ResponseMetadata"]["HTTPStatusCode"] == 400
 

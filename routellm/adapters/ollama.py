@@ -26,14 +26,16 @@ Requests
   ignored   keep_alive
 Both: `stream` defaults to true, as in Ollama.
 `options`:
-  mapped    temperature, top_p, seed, stop (string or list), num_predict
-            (> 0 is `max_tokens`; -1 and -2 mean no limit), plus
-            frequency_penalty and presence_penalty
+  mapped    temperature, top_p, top_k, seed, stop (string or list),
+            num_predict (> 0 is `max_tokens`; -1 and -2 mean no limit),
+            plus frequency_penalty and presence_penalty
   ignored   resource knobs with no effect on the answer: num_ctx, num_batch,
             num_gpu, main_gpu, num_thread, num_keep, use_mmap, use_mlock,
             numa, low_vram, f16_kv, vocab_only
-  refused   every other option, top_k included: chat completions has no
-            such field, and dropping a sampling parameter changes the answer
+  refused   every other option, min_p and repeat_penalty included: chat
+            completions has no such field, litellm maps them for Ollama
+            leaves only, and dropping a sampling parameter changes the
+            answer
 `format`: "json" is `response_format` json_object; a JSON schema object is
   `response_format` json_schema. Anything else is refused.
 `think`: true is `reasoning_effort: medium`, "low"/"medium"/"high" pass
@@ -90,6 +92,7 @@ from routellm.adapters import (
     refuse,
     refuse_unknown,
     register,
+    top_k_value,
 )
 from routellm.adapters.stream import (
     End,
@@ -307,6 +310,9 @@ def _options(raw: Any) -> dict:
         if key in _OPTIONS:
             if value is not None:
                 out[_OPTIONS[key]] = value
+        elif key == "top_k":
+            if value is not None:
+                out["top_k"] = top_k_value(value, "options.top_k")
         elif key == "num_predict":
             if isinstance(value, bool) or not isinstance(value, int) or value == 0:
                 refuse("options.num_predict must be a non-zero integer", "options.num_predict")

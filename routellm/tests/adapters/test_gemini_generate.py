@@ -485,6 +485,17 @@ def test_generation_config_maps_to_chat_fields():
     assert (request.temperature, request.top_p, request.max_tokens) == (0.3, 0.8, 99)
     assert request.stop == ["END"]
     assert (request.presence_penalty, request.frequency_penalty, request.seed) == (0.5, 0.25, 7)
+    assert request.top_k == 40
+
+
+@pytest.mark.parametrize("value", [-1, 2.5, True, "3"])
+def test_top_k_must_be_a_whole_number_from_zero(value):
+    refused({"contents": [HI], "generationConfig": {"topK": value}}, "topK")
+
+
+def test_snake_case_top_k_is_mapped():
+    request, _ = decode({"contents": [HI], "generation_config": {"top_k": 9}})
+    assert request.top_k == 9
 
 
 def test_snake_case_names_are_accepted_like_camel_case():
@@ -758,6 +769,7 @@ def test_pin_litellm_drops_what_the_adapter_refuses_or_maps_itself():
         config={"topK": 3, "presencePenalty": 1.0, "seed": 1, "candidateCount": 2},
         toolConfig={"functionCallingConfig": {"mode": "ANY", "allowedFunctionNames": ["f"]}},
     )
+    # the adapter maps topK itself, whatever litellm does with it
     for key in ("top_k", "presence_penalty", "seed", "n"):
         assert key not in out
     assert out["tool_choice"] == "required"

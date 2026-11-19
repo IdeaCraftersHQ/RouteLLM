@@ -16,6 +16,7 @@ from routellm.adapters.base import (
     bearer,
     refuse,
     refuse_unknown,
+    top_k_value,
 )
 from routellm.adapters.registry import adapters, discover, mount_adapters, register
 from routellm.adapters.stream import stream_events
@@ -37,4 +38,5 @@ __all__ = [
     "refuse_unknown",
     "register",
     "stream_events",
+    "top_k_value",
 ]

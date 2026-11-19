@@ -27,7 +27,7 @@ Mapped (litellm translator):
   a data/url part), `tool_use` (assistant `tool_calls`), `tool_result`
   (`role: tool`), `thinking` and `redacted_thinking` (kept with their
   signatures as `thinking_blocks` on the assistant turn).
-- `system` (string or text blocks), `max_tokens`, `temperature`, `top_p`,
+- `system` (string or text blocks), `max_tokens`, `temperature`, `top_p`, `top_k`,
   `stream`, `stop_sequences` (-> `stop`), `metadata.user_id` (-> `user`).
 - `tools` (custom tools; names over 64 characters are shortened and restored
   in answers), `tool_choice` (`auto`, `any` -> required, `tool`, `none`).
@@ -53,7 +53,7 @@ Accepted and ignored (no effect on the answer):
 
 Refused with a 400 `invalid_request_error`, naming the field:
 
-- any other top-level field, among them `top_k`, `mcp_servers`, `container`;
+- any other top-level field, among them `mcp_servers`, `container`;
 - a missing `max_tokens`; `metadata` keys other than `user_id`;
 - block types other than those mapped (`server_tool_use`, `search_result`,
   `web_search_tool_result`, `tool_reference`, ...), unknown keys in a block,
@@ -121,6 +121,7 @@ from routellm.adapters import (
     refuse,
     refuse_unknown,
     register,
+    top_k_value,
 )
 
 __all__ = ["AnthropicAdapter", "message_events"]
@@ -143,6 +144,7 @@ _SUPPORTED = frozenset(
         "stream",
         "temperature",
         "top_p",
+        "top_k",
         "tools",
         "tool_choice",
         "thinking",
@@ -305,6 +307,8 @@ def _validate(body: Mapping[str, Any]) -> None:
 def _translate(body: Mapping[str, Any]) -> tuple[dict, dict[str, str]]:
     """Validate, run litellm's translator, return (chat request fields, tool name map)."""
     _validate(body)
+    if body.get("top_k") is not None:
+        top_k_value(body["top_k"], "top_k")
     if "context_management" in body:
         logger.debug("anthropic adapter: context_management ignored")
     wire = {k: v for k, v in body.items() if k not in _IGNORED}
