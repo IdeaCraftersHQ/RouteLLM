@@ -75,9 +75,11 @@ class TestLitellmContract:
         def params(fn):
             return set(inspect.signature(fn).parameters)
 
-        assert {"anthropic_message_request", "custom_llm_provider"} <= params(
-            T.translate_anthropic_to_openai
-        )
+        assert {
+            "anthropic_message_request",
+            "custom_llm_provider",
+            "preserve_midturn_system",
+        } <= params(T.translate_anthropic_to_openai)
         assert {"response", "tool_name_mapping"} <= params(T.translate_openai_response_to_anthropic)
         assert {"completion_stream", "model", "tool_name_mapping"} <= params(
             AnthropicStreamWrapper.__init__
@@ -355,6 +357,32 @@ class TestDecode:
             )
             dumped = json.dumps(request.model_dump(exclude_none=True))
             assert "env note" in dumped
+
+    def test_mid_conversation_system_message_stays_a_system_message_in_place(self):
+        note = {"type": "text", "text": "env note", "cache_control": {"type": "ephemeral"}}
+        body = base(
+            system="top",
+            messages=[
+                {"role": "user", "content": "hi"},
+                {"role": "system", "content": [note]},
+                {"role": "assistant", "content": "ok"},
+                {"role": "user", "content": "more"},
+                {"role": "system", "content": "late note"},
+            ],
+        )
+        request, _ = decode(body)
+        messages = request.model_dump(exclude_none=True)["messages"]
+        assert [m["role"] for m in messages] == [
+            "system",
+            "user",
+            "system",
+            "assistant",
+            "user",
+            "system",
+        ]
+        assert "env note" in json.dumps(messages[2])
+        assert messages[5]["content"] == "late note"
+        assert "Operator note" not in json.dumps(messages)
 
     def test_context_management_is_accepted_and_nothing_of_it_is_forwarded(self):
         edits = {"edits": [{"type": "clear_tool_uses_20250919", "trigger": {"value": 9}}]}
@@ -885,6 +913,19 @@ class TestWire:
         assert sent["max_tokens"] == 64 and sent["temperature"] == 0.25
         assert sent["top_k"] == 7
         assert "cache_control" not in json.dumps(sent["messages"])
+
+    def test_mid_conversation_system_message_reaches_the_upstream_in_place(self, harness):
+        body = base(
+            messages=[
+                {"role": "user", "content": "hi"},
+                {"role": "system", "content": [{"type": "text", "text": "env note"}]},
+            ]
+        )
+        assert post(harness, "/v1/messages", body).status_code == 200
+        sent = harness.upstream.hits[-1][2]["messages"]
+        assert [m["role"] for m in sent] == ["user", "system"]
+        assert "env note" in json.dumps(sent[1])
+        assert "Operator note" not in json.dumps(sent)
 
     def test_context_management_gets_a_200_and_stays_off_the_wire(self, harness):
         body = base(context_management={"edits": [{"type": "clear_tool_uses_20250919"}]})

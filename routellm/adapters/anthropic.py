@@ -23,9 +23,10 @@ Request fields
 
 Mapped (litellm translator):
 
-- `messages`: a `role: system` message (text blocks only; litellm carries it
-  as a user turn marked as an operator note, which is how Claude Code sends
-  its environment note after the first user turn); `text`, `image` (base64 or
+- `messages`: a `role: system` message (text blocks only; Claude Code sends
+  its environment note this way after the first user turn) stays a system
+  message in its place in the chat request; see "Mid-conversation system
+  messages" below for what each upstream does with it; `text`, `image` (base64 or
   url), `document` (base64 or url, as a data/url part), `tool_use` (assistant
   `tool_calls`), `tool_result` (`role: tool`), `thinking` and
   `redacted_thinking` (kept with their signatures as `thinking_blocks` on the
@@ -66,6 +67,25 @@ Refused with a 400 `invalid_request_error`, naming the field:
   ...): only custom tools (name and `input_schema`) are carried;
 - a `role` other than `user` / `assistant` / `system`; an unknown `tool_choice` or
   `thinking` type.
+
+Mid-conversation system messages
+================================
+
+A `role: system` message after the first turn is sent on as a chat
+`role: system` message at the same position. What the routed upstream does
+with it is litellm's provider code; none of them drops the text:
+
+- OpenAI and compatible servers: kept in place (text parts only;
+  `cache_control` dropped).
+- Ollama (chat): kept in place. Ollama's legacy completion path renders it
+  as a `### System:` section of the prompt at the same position.
+- Gemini: every system message, the leading one and later ones, is merged
+  in order into `systemInstruction`; the position is lost.
+- Anthropic and Bedrock Converse: only the leading run of system messages
+  goes to the top-level `system`. A later one becomes a user turn in place,
+  preceded by a text part marking it as an operator note, merged into the
+  adjacent user turn. Models flagged `supports_mid_conversation_system` in
+  litellm's cost map keep the system role inside `messages`.
 
 Answers
 =======
@@ -336,7 +356,9 @@ def _translate(body: Mapping[str, Any]) -> tuple[dict, dict[str, str]]:
         wire["tools"] = [
             {k: v for k, v in tool.items() if k != "defer_loading"} for tool in wire["tools"]
         ]
-    out, names = _TRANSLATOR.translate_anthropic_to_openai(wire)
+    # Mid-conversation `role: system` stays a system message in place; the
+    # default would turn it into a user turn marked as an operator note.
+    out, names = _TRANSLATOR.translate_anthropic_to_openai(wire, preserve_midturn_system=True)
     out = dict(out)
     out["model"] = body["model"]
     choice = body.get("tool_choice") or {}
