@@ -244,6 +244,17 @@ class Adapter:
         """The streamed response's media type."""
         return "text/event-stream"
 
+    def stream_headers(self, call: Call) -> dict[str, str]:
+        """Extra response headers for a streamed reply (default none).
+
+        Called once after `decode`, before the first byte, so it can only
+        use what `decode` left in `call.state`. A non-streamed reply sets
+        its headers on a `Reply`. Names must be HTTP tokens, values printable
+        ASCII with no CR or LF; anything else is a server error, never sent.
+        `x-routellm-path` is the framework's and wins on a clash.
+        """
+        return {}
+
     def encode_events(self, events: AsyncIterator, call: Call) -> AsyncIterator[bytes]:
         """Map normalized events (`routellm.adapters.stream`) to wire bytes.
 

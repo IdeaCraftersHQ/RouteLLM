@@ -109,12 +109,17 @@ class Dialect(Adapter):
         body = call.body
         if body.get("explode"):
             return body["missing"]["key"]  # a client body the adapter cannot read
-        refuse_unknown(body, {"model", "messages", "stream", "stream_options", "explode"})
+        refuse_unknown(
+            body, {"model", "messages", "stream", "stream_options", "explode", "stream_headers"}
+        )
         if body.get("messages") == "bad":
             ChatCompletionRequest(model=1, messages=[])  # raises ValidationError
         if body.get("messages") == "nope":
             refuse("no such thing", param="messages")
-        return ChatCompletionRequest(**{k: v for k, v in body.items() if k != "explode"})
+        call.state["stream_headers"] = body.get("stream_headers")
+        return ChatCompletionRequest(
+            **{k: v for k, v in body.items() if k not in {"explode", "stream_headers"}}
+        )
 
     async def handle(self, call):
         if call.body.get("headers"):
@@ -126,6 +131,9 @@ class Dialect(Adapter):
 
     def stream_media_type(self, call):
         return "application/x-unit"
+
+    def stream_headers(self, call):
+        return call.state.get("stream_headers") or {}
 
     async def encode_events(self, events, call):
         async for event in events:
@@ -295,3 +303,49 @@ def test_call_models_reads_the_servers_model_list():
 
     call = Call(Dialect(), Route("GET", "/x"), http_request=None, pipeline=Pipeline())  # type: ignore[arg-type]
     assert asyncio.run(call.models()) == [{"id": "default"}]
+
+
+def test_stream_headers_reach_the_streaming_response(world):
+    client, pipeline = world
+    pipeline.source = Source([text_chunk("hi")])
+    body = {**CHAT, "stream": True, "stream_headers": {"x-ignored": "a,b"}}
+    r = client.post("/unit/chat", json=body, headers=GOOD)
+    assert r.status_code == 200 and r.text == "hi|end"
+    assert r.headers["x-ignored"] == "a,b"
+    assert json.loads(r.headers["x-routellm-path"]) == [{"e": "a"}]
+
+
+def test_the_decision_path_header_wins_over_a_stream_header(world):
+    client, pipeline = world
+    pipeline.source = Source([text_chunk("hi")])
+    body = {**CHAT, "stream": True, "stream_headers": {"X-Routellm-Path": "forged"}}
+    r = client.post("/unit/chat", json=body, headers=GOOD)
+    assert json.loads(r.headers["x-routellm-path"]) == [{"e": "a"}]
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"x-a": "b\r\nx-evil: 1"},
+        {"x-a": "b\nc"},
+        {"x-a\r\nx-evil": "1"},
+        {"bad name": "1"},
+        {"": "1"},
+        {"x-é": "1"},
+        {"x-a": "caf\u00e9"},
+    ],
+)
+def test_invalid_stream_headers_are_a_server_error_never_sent(world, headers, caplog):
+    client, pipeline = world
+    pipeline.source = Source([text_chunk("hi")])
+    body = {**CHAT, "stream": True, "stream_headers": headers}
+    r = client.post("/unit/chat", json=body, headers=GOOD)
+    assert r.status_code == 500
+    assert "x-evil" not in r.headers and pipeline.requests == []
+    assert "evil" not in caplog.text and "caf" not in caplog.text
+
+
+def test_stream_headers_are_not_asked_of_a_non_streamed_request(world):
+    client, _ = world
+    body = {**CHAT, "stream_headers": {"bad name": "1"}}
+    assert client.post("/unit/chat", json=body, headers=GOOD).status_code == 200

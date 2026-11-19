@@ -54,6 +54,7 @@ class MyDialect(Adapter):
     def encode(self, response: dict, call) -> body | Reply        # required
     def encode_events(self, events, call) -> AsyncIterator[bytes] # required to stream
     def stream_media_type(self, call) -> str                      # default text/event-stream
+    def stream_headers(self, call) -> dict[str, str]              # default {}
     def encode_error(self, status, error: dict, call) -> body | Reply
     def encode_stream_error(self, error: dict, call) -> bytes     # default b""
     async def handle(self, call) -> body | Reply                  # custom routes
@@ -71,6 +72,13 @@ class MyDialect(Adapter):
   carry things from `decode` to the encoders (the model name the client
   used, a mode chosen by the path). `await call.models()` returns the
   `/v1/models` entries.
+- Response headers: a non-streamed reply sets them on a `Reply`; a streamed
+  one through `stream_headers`, called once after `decode` and before the
+  first byte, so it can only use what `decode` left in `call.state`. Names
+  must be HTTP tokens and values printable ASCII with no CR or LF; anything
+  else answers a 500 in the dialect's error shape (logged by header name,
+  never value) and runs nothing. `x-routellm-path` is the framework's and
+  wins on a clash.
 - `decode` sets `stream` when the dialect asks for one (a body flag, or the
   route). For streams the framework adds `stream_options.include_usage` so
   usage arrives.
