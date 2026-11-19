@@ -7,9 +7,8 @@ and the `AWSEventStreamDecoder` of `invoke_handler`): litellm has no inbound
 translator. `modelId` is the model field, so routing parameters ride in it
 as on `/v1/chat/completions`.
 
-Not covered: Claude Code in Bedrock mode does not use Converse. It sends
-`/model/{id}/invoke-with-response-stream` (and `/invoke`, `/count-tokens`)
-with an Anthropic Messages body; those routes are not mounted here.
+Claude Code in Bedrock mode does not use Converse: it sends InvokeModel with
+an Anthropic Messages body, served by `bedrock_invoke`.
 
 Auth: bearer only by default. Send `Authorization: Bearer <token>` (the
 `AWS_BEARER_TOKEN_BEDROCK` value, which boto3 uses over TLS); the token is

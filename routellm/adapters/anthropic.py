@@ -123,7 +123,7 @@ from routellm.adapters import (
     register,
 )
 
-__all__ = ["AnthropicAdapter"]
+__all__ = ["AnthropicAdapter", "message_events"]
 
 #: The model name the translator sees, whatever the client asked for.
 logger = logging.getLogger(__name__)
@@ -339,6 +339,25 @@ def _chunks(source: AsyncIterator[Any]) -> AsyncIterator[ModelResponseStream]:
     return convert()
 
 
+async def message_events(chunks: AsyncIterator, call: Call) -> AsyncIterator[dict]:
+    """The Messages stream events of a chat chunk stream, as dicts.
+
+    Shared with dialects that carry the same events in another framing.
+    `call.state` holds `model` and `tool_names`, as `decode` left them.
+    """
+    wrapper = AnthropicStreamWrapper(
+        _chunks(chunks),
+        call.state["model"],
+        tool_name_mapping=call.state.get("tool_names") or None,
+    )
+    # Iterated directly, not through litellm's SSE wrapper: that one turns
+    # a failure into an event carrying the upstream's own message.
+    async for event in wrapper:
+        yield event
+        if event["type"] == "message_start":
+            yield {"type": "ping"}
+
+
 def _sse(event: Mapping[str, Any]) -> bytes:
     return f"event: {event['type']}\ndata: {json.dumps(event)}\n\n".encode()
 
@@ -392,17 +411,8 @@ class AnthropicAdapter(Adapter):
         return out
 
     async def encode_stream(self, chunks: AsyncIterator, call: Call) -> AsyncIterator[bytes]:
-        wrapper = AnthropicStreamWrapper(
-            _chunks(chunks),
-            call.state["model"],
-            tool_name_mapping=call.state.get("tool_names") or None,
-        )
-        # Iterated directly, not through litellm's SSE wrapper: that one turns
-        # a failure into an event carrying the upstream's own message.
-        async for event in wrapper:
+        async for event in message_events(chunks, call):
             yield _sse(event)
-            if event["type"] == "message_start":
-                yield _sse({"type": "ping"})
 
     def encode_error(self, status: int, error: dict, call: Call) -> Any:
         kind = 529 if status == 503 else status
