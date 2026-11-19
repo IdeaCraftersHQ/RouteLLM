@@ -48,6 +48,7 @@ from routellm.decision import DecisionRefused, set_decision
 from routellm.egress_gate import EgressGates
 from routellm.endpoints import EndpointRegistry, Selector
 from routellm.hints import TYPESAFE_INSTALL_HINT
+from routellm.kv_slots import Extensions
 from routellm.leaf_params import drop_kwargs, log_dropped
 from routellm.payment.gateway import PaymentGateway
 from routellm.payment.types import PaymentChallenge
@@ -353,6 +354,7 @@ class Controller:
         self.resilience = Resilience(resilience_config)
         self.cache = Cache(cache_config)
         self.traffic_manager = traffic_manager or TrafficManager()
+        self.extensions = Extensions()
         self.quality_manager = quality_manager or QualityManager()
 
         # Strict mode: every name handed in from outside the registry is
@@ -1533,7 +1535,11 @@ class Controller:
         return self.endpoints.area_of(path[-1].get("tier"))
 
     def _endpoint_call_params(
-        self, model_name: str, reqs=None
+        self,
+        model_name: str,
+        reqs=None,
+        hints: dict[str, Any] | None = None,
+        session: str | None = None,
     ) -> tuple[str, str | None, str | None, dict[str, Any]]:
         """Turn a model name into the parameters of one litellm call.
 
@@ -1549,6 +1555,12 @@ class Controller:
         reqs : Requirements, optional
             The request's. With a data class, a load balancer selects
             only among targets the class may use.
+        hints : dict, optional
+            The request's upstream extension hints, by name. Only an
+            endpoint that lists them receives them, in the body.
+        session : str, optional
+            The caller's session, pinned to a KV slot on an endpoint
+            that has a `kv_slots:` budget.
 
         Returns
         -------
@@ -1590,6 +1602,9 @@ class Controller:
             **endpoint.extra,
             **drop_kwargs(model, api_base, endpoint.drop_params, endpoint.extra),
         }
+        body = self.extensions.body(endpoint, hints, session)
+        if body:
+            extra["extra_body"] = {**extra.get("extra_body", {}), **body}
         return model, api_base, balanced_key or api_key, extra
 
     def _balancer_filter(self, reqs):
@@ -2348,6 +2363,8 @@ class Controller:
         conversation_id: str | None = None,
         principal: Principal | None = None,
         attributes: RequestAttributes | None = None,
+        hints: dict[str, Any] | None = None,
+        session: str | None = None,
         **kwargs,
     ):
         if principal is not None:
@@ -2510,7 +2527,9 @@ class Controller:
                 continue
 
             # 3. Resolve the endpoint, then apply load balancing
-            model, curr_api_base, curr_api_key, extra = self._endpoint_call_params(model_name, reqs)
+            model, curr_api_base, curr_api_key, extra = self._endpoint_call_params(
+                model_name, reqs, hints, session
+            )
 
             # Rewrite the messages for this candidate. A transform that
             # raises ends the request here: no call, no fallback.

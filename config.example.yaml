@@ -277,6 +277,25 @@ endpoints:
     tags: [local, tools]
     quality: 85
 
+  # colibri (`coli serve`, an OpenAI-compatible MoE engine). `kind: colibri`
+  # forwards its request extensions (`cache_slot`, `x_colibri_ignore_leading_stop`)
+  # to this endpoint only; every other endpoint drops them. To forward a
+  # subset, list names instead: `extensions: [cache_slot]`.
+  # `kv_slots` is how many KV slots the server runs (`coli serve --kv-slots`,
+  # 1..16). Set, a request that names a session (header `X-RouteLLM-Session`,
+  # else `metadata.session_id`) and no `cache_slot` is pinned to one slot,
+  # least recently used first, so its turns reuse one KV prefix. An explicit
+  # `cache_slot` in the request wins. Unset, no slot is chosen (slot 0).
+  # The upstream's `x-colibri-queue-wait-ms` is returned to the caller and
+  # recorded on the audit event.
+  local_colibri:
+    model: openai/qwen3.6-colibri
+    api_base: http://127.0.0.1:11800/v1
+    api_key_env: LOCAL_COLIBRI_API_KEY
+    tags: [local, tools]
+    kind: colibri
+    kv_slots: 4
+
   # An audio-capable local model. Requests carrying `input_audio` parts
   # are served only by an endpoint that declares audio, either directly
   # (`audio: true`) or by listing `audio` in `modalities_in`; undeclared

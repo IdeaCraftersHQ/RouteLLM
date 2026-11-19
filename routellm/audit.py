@@ -163,6 +163,7 @@ class AuditRecord:
     walk: list[dict[str, Any]] | None = None
     targets: list[str] | None = None
     video: dict[str, Any] | None = None
+    queue_wait_ms: int | None = None
     started: float = field(default_factory=time.monotonic)
 
 
@@ -279,6 +280,8 @@ class Auditor:
         walk = walk if walk is not None else _walk_view(record.walk)
         if walk:
             routing["walk"] = walk
+        if record.queue_wait_ms is not None:
+            routing["queue_wait_ms"] = record.queue_wait_ms
         if record.targets:
             routing["targets"] = list(record.targets)
         if record.video:

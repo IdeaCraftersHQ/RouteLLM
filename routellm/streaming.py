@@ -93,6 +93,11 @@ class RoutedStream:
         self._on_end = on_end
         self._ended = False
         self._hidden_params: dict[str, Any] = {}
+        # The upstream's response headers, as litellm records them on its
+        # own stream, so a header read off a stream reads the same way.
+        upstream = getattr(stream, "_hidden_params", None)
+        if isinstance(upstream, dict) and "additional_headers" in upstream:
+            self._hidden_params["additional_headers"] = upstream["additional_headers"]
 
     @classmethod
     async def open(cls, stream, on_end=None, restore=None) -> "RoutedStream":
