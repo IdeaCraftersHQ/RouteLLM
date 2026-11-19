@@ -308,6 +308,11 @@ source of truth.
   lost); Anthropic and Bedrock Converse upstreams turn it into a user turn in place
   marked as an operator note, unless litellm flags the model as accepting system
   messages inside `messages`. The text is never dropped.
+- **Tool search** (Claude Code, many MCP tools): `defer_loading` tools are sent
+  up front, the `DeferredToolPlaceholder` tool is dropped, and a `tool_reference`
+  in a tool result becomes a `<functions>` text block with the tool's name,
+  description and schema from `tools`. A reference to a tool not in `tools` is
+  refused (Claude Code then sends every tool up front on its own).
 - **Ignored:** `cache_control`, `context_management`, `service_tier`,
   `thinking.display`, `tool_result.is_error` (text still reaches the model),
   `eager_input_streaming`, `output_config.effort` without adaptive thinking;

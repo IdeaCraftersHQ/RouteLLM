@@ -42,6 +42,18 @@ Mapped (litellm translator):
 Mapped here: `tool_choice.disable_parallel_tool_use` ->
 `parallel_tool_calls: false`.
 
+Tool search (Claude Code with many MCP tools): the client declares a
+`ToolSearch` tool and a `DeferredToolPlaceholder` tool with `defer_loading`,
+lists the deferred names in a system message, and answers a `ToolSearch` call
+with `tool_reference` blocks in the `tool_result`, adding the referenced tools
+to `tools` marked `defer_loading`. Here: every declared tool is sent up front
+(`defer_loading` dropped), the placeholder (only when marked `defer_loading`)
+is dropped, and a `tool_reference` in a tool result becomes a text block in the
+shape ToolSearch's own description promises, `<functions>` with one
+`<function>{name, description, parameters}</function>` line per tool, taken
+from `tools`. A reference to a tool not in `tools` is refused; Claude Code
+answers a refusal by sending every tool up front.
+
 Accepted and ignored (no effect on the answer):
 
 - `cache_control` on any block, tool or system part: the routed model is not
@@ -61,10 +73,11 @@ Refused with a 400 `invalid_request_error`, naming the field:
 - any other top-level field, among them `mcp_servers`, `container`;
 - a missing `max_tokens`; `metadata` keys other than `user_id`;
 - block types other than those mapped (`server_tool_use`, `search_result`,
-  `web_search_tool_result`, `tool_reference`, ...), unknown keys in a block,
+  `web_search_tool_result`, ...), unknown keys in a block,
   `document` sources other than base64/url (`text`, `content`, `file`);
 - hosted tools (`web_search_*`, `bash_*`, `computer_*`, `text_editor_*`,
   ...): only custom tools (name and `input_schema`) are carried;
+- a `tool_reference` naming a tool that is not in `tools`;
 - a `role` other than `user` / `assistant` / `system`; an unknown `tool_choice` or
   `thinking` type.
 
@@ -201,6 +214,10 @@ _ASSISTANT_BLOCKS: dict[str, frozenset[str]] = {
     "redacted_thinking": frozenset({"type", "data"}),
 }
 _RESULT_BLOCKS = ("text", "image", "document")
+_REFERENCE = {"tool_reference": frozenset({"type", "tool_name", _CACHE})}
+#: Claude Code's tool search sends this with `defer_loading` to keep the
+#: feature switched on; it carries no schema and is never called.
+_PLACEHOLDER_TOOL = "DeferredToolPlaceholder"
 _TOOL_KEYS = frozenset(
     {
         "name",
@@ -244,18 +261,25 @@ def _block(block: Any, allowed: Mapping[str, frozenset[str]], path: str) -> str:
     return kind
 
 
-def _tool_result(block: dict, path: str) -> None:
+def _tool_result(block: dict, path: str, declared: frozenset[str]) -> None:
     content = block.get("content")
     if content is None or isinstance(content, str):
         return
     if not isinstance(content, list):
         refuse(f"{path}.content must be a string or a list of blocks", param=f"{path}.content")
-    allowed = {k: _USER_BLOCKS[k] for k in _RESULT_BLOCKS}
+    allowed = {**{k: _USER_BLOCKS[k] for k in _RESULT_BLOCKS}, **_REFERENCE}
     for j, part in enumerate(content):
-        _block(part, allowed, f"{path}.content[{j}]")
+        kind = _block(part, allowed, f"{path}.content[{j}]")
+        if kind == "tool_reference" and part.get("tool_name") not in declared:
+            # The tool's schema must be in `tools` for the model to call it.
+            # Claude Code answers this refusal by sending every tool up front.
+            refuse(
+                f"tool_reference names {part.get('tool_name')!r}, which is not in tools",
+                param=f"{path}.content[{j}].tool_name",
+            )
 
 
-def _messages(messages: Any) -> None:
+def _messages(messages: Any, declared: frozenset[str]) -> None:
     if not isinstance(messages, list) or not messages:
         refuse("messages must be a non-empty list", param="messages")
     for i, message in enumerate(messages):
@@ -278,7 +302,7 @@ def _messages(messages: Any) -> None:
         for j, block in enumerate(content):
             kind = _block(block, allowed, f"{path}.content[{j}]")
             if kind == "tool_result":
-                _tool_result(block, f"{path}.content[{j}]")
+                _tool_result(block, f"{path}.content[{j}]", declared)
 
 
 def _system(system: Any) -> None:
@@ -321,7 +345,15 @@ def _thinking(thinking: Any) -> None:
 def _validate(body: Mapping[str, Any]) -> None:
     if not isinstance(body.get("model"), str):
         refuse("model is required", param="model")
-    _messages(body.get("messages"))
+    tools = body.get("tools")
+    declared = (
+        frozenset(
+            t["name"] for t in tools if isinstance(t, dict) and isinstance(t.get("name"), str)
+        )
+        if isinstance(tools, list)
+        else frozenset()
+    )
+    _messages(body.get("messages"), declared)
     _system(body.get("system"))
     if "tools" in body:
         _tools(body["tools"])
@@ -342,6 +374,51 @@ def _validate(body: Mapping[str, Any]) -> None:
 # -- translation --------------------------------------------------------------
 
 
+def _function_block(tools: Mapping[str, Mapping[str, Any]], names: list[str]) -> str:
+    lines = []
+    for name in names:
+        tool = tools[name]
+        lines.append(
+            "<function>"
+            + json.dumps(
+                {
+                    "name": name,
+                    "description": tool.get("description", ""),
+                    "parameters": tool["input_schema"],
+                }
+            )
+            + "</function>"
+        )
+    return "<functions>\n" + "\n".join(lines) + "\n</functions>"
+
+
+def _expand_references(
+    message: Mapping[str, Any], tools: Mapping[str, Mapping[str, Any]]
+) -> Mapping[str, Any]:
+    """`tool_reference` blocks of a tool result as the schemas they name.
+
+    Tool search on Anthropic's side expands a reference into the tool's
+    schema. Here the schema is rendered as text in the shape the client's
+    own ToolSearch tool describes (a `<functions>` block of `<function>`
+    lines), since a model told only that a tool is loaded keeps searching.
+    The tool itself is already in `tools`, so it can be called.
+    """
+    content = message.get("content")
+    if not isinstance(content, list):
+        return message
+    blocks = []
+    for block in content:
+        inner = block.get("content") if block.get("type") == "tool_result" else None
+        if isinstance(inner, list) and any(p.get("type") == "tool_reference" for p in inner):
+            names = [p["tool_name"] for p in inner if p.get("type") == "tool_reference"]
+            rest = [p for p in inner if p.get("type") != "tool_reference"]
+            text = {"type": "text", "text": _function_block(tools, names)}
+            blocks.append({**block, "content": [text, *rest]})
+        else:
+            blocks.append(block)
+    return {**message, "content": blocks}
+
+
 def _translate(body: Mapping[str, Any]) -> tuple[dict, dict[str, str]]:
     """Validate, run litellm's translator, return (chat request fields, tool name map)."""
     _validate(body)
@@ -352,10 +429,19 @@ def _translate(body: Mapping[str, Any]) -> tuple[dict, dict[str, str]]:
     wire = {k: v for k, v in body.items() if k not in _IGNORED}
     wire["model"] = _NEUTRAL_MODEL
     if wire.get("tools"):
-        # litellm would copy `defer_loading` into the tool's JSON schema.
-        wire["tools"] = [
-            {k: v for k, v in tool.items() if k != "defer_loading"} for tool in wire["tools"]
+        # litellm would copy `defer_loading` into the tool's JSON schema. Every
+        # tool goes up front; the placeholder has nothing to offer the model.
+        tools = [
+            {k: v for k, v in tool.items() if k != "defer_loading"}
+            for tool in wire["tools"]
+            if not (tool["name"] == _PLACEHOLDER_TOOL and tool.get("defer_loading") is True)
         ]
+        if tools:
+            wire["tools"] = tools
+        else:
+            del wire["tools"]
+    by_name = {t["name"]: t for t in body.get("tools") or []}
+    wire["messages"] = [_expand_references(m, by_name) for m in wire["messages"]]
     # Mid-conversation `role: system` stays a system message in place; the
     # default would turn it into a user turn marked as an operator note.
     out, names = _TRANSLATOR.translate_anthropic_to_openai(wire, preserve_midturn_system=True)
