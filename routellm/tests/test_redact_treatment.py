@@ -319,3 +319,75 @@ def test_a_decision_endpoint_must_be_local_when_a_class_redacts(store, tmp_path)
     with pytest.raises(PolicyError, match="pii"):
         check_decision_endpoint(c.policy, c.endpoints, "cld")
     check_decision_endpoint(c.policy, c.endpoints, "loc")
+
+
+# --- upstream extension hints under a redact class -----------------------------------------
+#
+# The server pops the hints off the request before the call, so the redactor's field guard
+# never sees them; the controller adds them to the litellm `extra_body` after the transform.
+# They must reach the upstream, and nothing but allowlisted, non-text hints may ride there.
+
+COLIBRI = {"cld": {"kind": "colibri", "kv_slots": 3}}
+HINTS = {"cache_slot": 2, "x_colibri_ignore_leading_stop": True}
+
+
+@pytest.fixture
+def seen(provider, monkeypatch):
+    """Every kwargs dict the controller hands to litellm."""
+    from routellm import controller as controller_module
+
+    calls = []
+    inner = provider.acompletion
+
+    async def record(*args, **kwargs):
+        calls.append(kwargs)
+        return await inner(*args, **kwargs)
+
+    monkeypatch.setattr(controller_module, "acompletion", record)
+    return calls
+
+
+def test_hints_reach_a_colibri_endpoint_under_a_redact_class(provider, seen, store, tmp_path):
+    controller = make(tmp_path, store, endpoint_fields=COLIBRI)
+    res = say(controller, f"Write to {NAME}", hints=dict(HINTS))
+    assert res.choices[0].message.content == f"got: Write to {NAME}"
+    assert [c["extra_body"] for c in seen] == [HINTS]
+    assert leaked(json.dumps(seen[0]["messages"])) == []
+
+
+def test_a_session_pinned_slot_reaches_colibri_under_a_redact_class(
+    provider, seen, store, tmp_path
+):
+    controller = make(tmp_path, store, endpoint_fields=COLIBRI)
+    say(controller, f"Write to {NAME}", session="s1")
+    assert seen[0]["extra_body"]["cache_slot"] in (0, 1, 2)
+
+
+def test_no_text_rides_extra_body_past_the_redactor(provider, seen, store, tmp_path):
+    controller = make(tmp_path, store, endpoint_fields=COLIBRI)
+    hints = {**HINTS, "note": NAME, "prompt": f"Write to {NAME}"}
+    say(controller, f"Write to {NAME}", hints=hints, session=NAME)
+    body = seen[0]["extra_body"]
+    assert set(body) <= {"cache_slot", "x_colibri_ignore_leading_stop"}
+    assert all(isinstance(v, int | bool) for v in body.values())
+    assert leaked(json.dumps(seen[0], default=str)) == []
+
+
+def test_a_redact_class_still_refuses_an_unknown_field_next_to_hints(
+    provider, seen, store, tmp_path
+):
+    controller = make(tmp_path, store, endpoint_fields=COLIBRI)
+    with pytest.raises(TransformError):
+        say(controller, "hi", hints=dict(HINTS), shiny_new_field=NAME)
+    assert seen == []
+
+
+def test_a_hint_is_a_number_or_a_flag_at_the_door():
+    from pydantic import ValidationError
+
+    from routellm.chat_request import ChatCompletionRequest
+
+    base = {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
+    for bad in ({"cache_slot": NAME}, {"x_colibri_ignore_leading_stop": NAME}):
+        with pytest.raises(ValidationError):
+            ChatCompletionRequest(**base, **bad)

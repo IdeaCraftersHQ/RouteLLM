@@ -5,12 +5,11 @@ one the lists do not name is refused, so a field added later never goes
 upstream unseen.
 """
 
-import ast
 import json
-from pathlib import Path
 
 import pytest
 
+from routellm.chat_request import ChatCompletionRequest
 from routellm.redact.fields import ALLOWED, REDACTED, REFUSED
 from routellm.redact.placeholders import Redactor
 from routellm.redact.tokens import TokenStore
@@ -23,12 +22,8 @@ NAMES = ("Jean Tremblay", "Marie Gagnon", "Alice Smith", "jean.t@example.com", "
 
 
 def request_fields() -> set[str]:
-    """The fields of `ChatCompletionRequest`, read from source (the module parses argv on import)."""
-    source = Path(__file__).parents[1] / "openai_server.py"
-    for node in ast.parse(source.read_text()).body:
-        if isinstance(node, ast.ClassDef) and node.name == "ChatCompletionRequest":
-            return {n.target.id for n in node.body if isinstance(n, ast.AnnAssign)}
-    raise AssertionError("ChatCompletionRequest not found")
+    """The fields of `ChatCompletionRequest`, which is what the server forwards."""
+    return set(ChatCompletionRequest.model_fields)
 
 
 @pytest.fixture
