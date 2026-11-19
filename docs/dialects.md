@@ -305,6 +305,17 @@ source of truth.
   `temperature`, `top_p`, `top_k`, `stream`, `stop_sequences`, `metadata.user_id`,
   `tools` (custom), `tool_choice` (incl. `disable_parallel_tool_use`), `thinking`,
   `output_config.format`.
+- **Mid-conversation `role: system`** (Claude Code's environment note): sent as a
+  chat system message at the same position. OpenAI-compatible and Ollama chat
+  upstreams keep it in place; Gemini merges it into `systemInstruction` (position
+  lost); Anthropic and Bedrock Converse upstreams turn it into a user turn in place
+  marked as an operator note, unless litellm flags the model as accepting system
+  messages inside `messages`. The text is never dropped.
+- **Tool search** (Claude Code, many MCP tools): `defer_loading` tools are sent
+  up front, the `DeferredToolPlaceholder` tool is dropped, and a `tool_reference`
+  in a tool result becomes a `<functions>` text block with the tool's name,
+  description and schema from `tools`. A reference to a tool not in `tools` is
+  refused (Claude Code then sends every tool up front on its own).
 - **Ignored:** `cache_control`, `context_management`, `service_tier`,
   `thinking.display`, `tool_result.is_error` (text still reaches the model),
   `eager_input_streaming`, `output_config.effort` without adaptive thinking;
@@ -313,7 +324,7 @@ source of truth.
   missing `max_tokens`, `metadata` keys other than `user_id`, block types not
   mapped (`server_tool_use`, `search_result`, `web_search_tool_result`, ...),
   hosted tools, `document` sources other than base64/url, roles other than
-  `user`/`assistant`.
+  `user`/`assistant`/`system`.
 - **Answers:** `model` echoes the client's model field; `stop_sequence` is always
   null (the matched sequence is unknown); stream `message_start` reports zero
   input tokens (final usage arrives in `message_delta`); a stream failing after it
