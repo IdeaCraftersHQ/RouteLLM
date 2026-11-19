@@ -1,7 +1,7 @@
 # API dialects
 
 routellm serves more than the OpenAI chat API. A client that speaks Anthropic
-Messages, OpenAI Responses, Gemini, Ollama or AWS Bedrock points its base URL at
+Messages, OpenAI Responses, Gemini, Ollama, Cohere or AWS Bedrock points its base URL at
 routellm and keeps working: the request is translated to a chat completion, runs
 the same pipeline as `/v1/chat/completions` (routing, transforms, cache,
 resilience, audit), and the answer is translated back.
@@ -42,11 +42,13 @@ Contents: [Learn](#learn) · [Do](#do-client-setup) · [Fix](#fix) ·
 | OpenAI Completions (legacy) | `POST /v1/completions` | `Authorization: Bearer` | body `model` | SSE (`text_completion` chunks) |
 | Gemini | `POST /v1beta/models/{model}:generateContent`, `:streamGenerateContent`, `:countTokens`; `GET /v1beta/models[/{model}]`; also `/v1` (no listing) | `x-goog-api-key` or `?key=` | URL path `{model}` | `?alt=sse`: SSE; otherwise one JSON array |
 | Ollama | `POST /api/chat`, `POST /api/generate`, `GET /api/tags`, `POST /api/show`, `GET /api/version` | `Authorization: Bearer` | body `model` | NDJSON (default; `stream` defaults to true) |
+| Cohere v2 Chat | `POST /v2/chat` | `Authorization: Bearer` | body `model` | SSE (`message-start` ... `message-end`, no `[DONE]`; `stream` defaults to false) |
 | Bedrock Converse | `POST /model/{modelId}/converse`, `/converse-stream` | `Authorization: Bearer` (see [Bedrock auth](#bedrock-auth)) | URL path `{modelId}` | binary `application/vnd.amazon.eventstream` |
 | Bedrock InvokeModel (Anthropic body) | `POST /model/{modelId}/invoke`, `/invoke-with-response-stream`, `/count-tokens` | as Converse | URL path `{modelId}` | binary event stream; each frame wraps one Anthropic event |
 
 Error shapes follow the dialect: Anthropic `{"type":"error",...}`, Gemini
-`{"error":{"code","message","status"}}`, Ollama `{"error":"..."}`, Bedrock
+`{"error":{"code","message","status"}}`, Ollama `{"error":"..."}`, Cohere
+`{"message":"..."}`, Bedrock
 `{"message":...}` plus `x-amzn-ErrorType`, OpenAI-style for Responses and
 Completions.
 
@@ -64,7 +66,7 @@ Completions.
 ### Sampling: `top_k`
 
 `top_k` (a whole number from 0) is carried from every dialect that has it:
-Anthropic, Gemini (`topK`), Ollama (`options.top_k`), Bedrock
+Anthropic, Gemini (`topK`), Ollama (`options.top_k`), Cohere (`k`), Bedrock
 (`additionalModelRequestFields.top_k`). litellm maps it for Anthropic, Gemini,
 Ollama and Bedrock leaves, and an OpenAI-compatible server on its own `api_base`
 (vLLM, llama.cpp, colibri) takes it as a top-level field. It is dropped, under any
@@ -243,6 +245,21 @@ client must send `Authorization: Bearer <key>`: with the Python client,
 `ollama` CLI itself can send a bearer token to a custom host is unverified.
 A trailing `:latest` on a model name is dropped before routing.
 
+### Cohere SDK (`cohere`) — verified against the harness
+
+```python
+import cohere
+co = cohere.ClientV2(api_key=ROUTELLM_KEY, base_url="http://127.0.0.1:6060")
+r = co.chat(model="default", messages=[{"role": "user", "content": "hi"}])
+print(r.message.content[0].text)
+for event in co.chat_stream(model="default", messages=[{"role": "user", "content": "hi"}]):
+    ...
+```
+
+`base_url` is the server root: the SDK appends `/v2/chat`. `model` is a routellm
+tier or router. The key is sent as `Authorization: Bearer`; with auth off any value
+works. Only `ClientV2` is served: the v1 `Client` (`/v1/chat`) is not.
+
 ### boto3 (Bedrock Converse / InvokeModel) — unverified
 
 ```python
@@ -408,6 +425,34 @@ source of truth.
   an unlisted model is a 404. `/api/version` reports the Ollama API level followed,
   not routellm's version.
 
+### Cohere v2 Chat
+
+- **Mapped:** `model`, `messages` (system, user, assistant, tool roles; content as a
+  string or blocks: `text`, `image_url`; assistant `tool_calls`; tool messages by
+  `tool_call_id`), `tools` (function), `strict_tools`, `tool_choice` (`REQUIRED`,
+  `NONE`), `documents`, `response_format` (`json_object`, with or without
+  `json_schema`), `max_tokens`, `stop_sequences`, `temperature`, `p`, `k`, `seed`,
+  `frequency_penalty`, `presence_penalty`, `thinking`, `stream` (default false).
+- **Ignored:** `priority`; on assistant messages `citations` and `thinking` blocks.
+- **Accepted only when they change nothing:** `citation_options` `{"mode":
+  "disabled"}`, `safety_mode` `CONTEXTUAL`, `logprobs` `false`. Anything else is
+  refused: routellm returns no citations, has no moderation layer and no logprobs.
+- **Refused:** `connectors`, `raw_prompting`, `search_queries_only` and other v1
+  fields, `thinking.token_budget`, unknown top-level or message keys, content
+  blocks other than `text` / `image_url` (a tool result also takes `document`).
+- **Documents:** have no chat field, so they ride in the prompt: one extra system
+  message after the leading system messages ("Use the following documents as
+  context..." then `<document id="...">` blocks of `key: value` lines; id is the
+  given one or `doc_<n>`). A `document` block in a tool result is rendered the
+  same way into the tool message text. Answers carry no `citations`.
+- **Notes:** `thinking: {"type": "enabled"}` is `reasoning_effort: medium`.
+  `finish_reason` is `COMPLETE`, `MAX_TOKENS` or `TOOL_CALL` (`ERROR` for a content
+  filter); `STOP_SEQUENCE` is never reported. `usage.billed_units` repeats the
+  upstream's token counts (nothing is billed by routellm). `tool_plan` is never
+  produced: text next to tool calls stays a text block, and `tool-plan-delta` is
+  never streamed. A stream failing after it began ends with a `message-end` of
+  `finish_reason: ERROR` and an `error` message.
+
 ### Bedrock Converse
 
 - **Mapped:** `system`, `messages[].content[]` (text, image, document, `toolUse`,
@@ -447,7 +492,6 @@ refused; answer `{"inputTokens": n}`, an estimate.
   under both. Trade-off: the OpenAI list is what most clients probe at startup, and
   serving both shapes would need dialect sniffing on that route, a framework change.
   Use `v1beta`.
-- **Cohere is not supported yet.**
 - **Non-generation endpoints are out of scope:** embeddings, audio, images. They
   have no chat-completions equivalent, so dialects do not translate them.
 - **Hosted and server-side tools** (web search, file search, computer use, MCP
