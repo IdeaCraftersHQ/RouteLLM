@@ -2,7 +2,7 @@
 
 An adapter lets a client that speaks another LLM API (Anthropic Messages,
 OpenAI Responses, Gemini, Ollama, Bedrock, Cohere, ...) use routellm
-unchanged. It translates the request into a `ChatCompletionRequest`, the
+unchanged. User-facing setup and field tables: [dialects.md](dialects.md). It translates the request into a `ChatCompletionRequest`, the
 framework runs it through the same pipeline as `/v1/chat/completions`, and
 the adapter translates the answer back.
 

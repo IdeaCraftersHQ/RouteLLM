@@ -16,6 +16,7 @@ Our core features include:
 - Easily extend the framework to include new routers and compare the performance of routers across multiple benchmarks.
 - **NEW**: Intent-based routing middleware that allows you to route queries to specialized models based on detected intents.
 - **NEW**: Advanced reliability and performance features including auto-retry, circuit breaker, semantic caching, load balancing, and canary testing.
+- **NEW**: Other LLM APIs as clients: Anthropic Messages (Claude Code), OpenAI Responses (Codex) and legacy Completions, Gemini (gemini-cli), Ollama, and AWS Bedrock (boto3, Claude Code Bedrock mode) reach the same routing pipeline unchanged. Setup recipes, field tables and known gaps: [API dialects](docs/dialects.md); writing a new one: [docs/adapters.md](docs/adapters.md).
 
 ## Advanced Features
 
