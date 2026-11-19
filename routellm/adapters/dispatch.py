@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from fastapi import Request
@@ -26,6 +27,9 @@ logger = logging.getLogger(__name__)
 
 #: Carries the routing decision on every adapter response, streamed or not.
 PATH_HEADER = "x-routellm-path"
+
+_HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
+_HEADER_VALUE = re.compile(r"[\x20-\x7e]*")
 
 _TYPES = {
     400: "invalid_request_error",
@@ -146,15 +150,44 @@ async def serve(adapter: Adapter, route: Route, http_request: Request, pipeline:
         options.setdefault("include_usage", True)
         call.request = request = request.model_copy(update={"stream_options": options})
 
-    response = await pipeline.run_chat_completion(request, http_request, framing=_framing(call))
+    extra = {}
+    if request.stream:
+        try:
+            extra = _stream_headers(adapter, call)
+        except Exception as exc:
+            logger.error(f"adapter {adapter.name} returned invalid stream headers: {exc}")
+            error = error_info(500, {"message": "Internal server error"})
+            return _refusal(adapter, call, 500, error, "invalid_stream_headers", outcome="failed")
+
+    response = await pipeline.run_chat_completion(
+        request, http_request, framing=_framing(call, extra)
+    )
     return _reshape(adapter, call, response)
 
 
-def _framing(call: Call):
+def _stream_headers(adapter: Adapter, call: Call) -> dict[str, str]:
+    """The adapter's extra stream headers, checked so none can inject another.
+
+    Raises `ValueError` naming the offending header, never its value.
+    """
+    headers = {}
+    for name, value in (adapter.stream_headers(call) or {}).items():
+        if not isinstance(name, str) or not _HEADER_NAME.fullmatch(name):
+            raise ValueError("invalid stream header name")
+        if not isinstance(value, str) or not _HEADER_VALUE.fullmatch(value):
+            raise ValueError(f"invalid value for stream header {name}")
+        if name.lower() != PATH_HEADER:
+            headers[name] = value
+    return headers
+
+
+def _framing(call: Call, extra: dict[str, str] | None = None):
     adapter = call.adapter
 
     def framing(res, request_id, done, path) -> StreamFrame:
-        headers = {PATH_HEADER: json.dumps(path, separators=(",", ":"))} if path else {}
+        headers = dict(extra or {})
+        if path:
+            headers[PATH_HEADER] = json.dumps(path, separators=(",", ":"))
         content = _stream(adapter, call, res, request_id, done)
         return StreamFrame(content, adapter.stream_media_type(call), headers)
 
