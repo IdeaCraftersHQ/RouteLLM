@@ -11,15 +11,22 @@ Not covered: Claude Code in Bedrock mode does not use Converse. It sends
 `/model/{id}/invoke-with-response-stream` (and `/invoke`, `/count-tokens`)
 with an Anthropic Messages body; those routes are not mounted here.
 
-Auth. Requests are SigV4 signed or carry a Bedrock API key. The signature is
-NOT verified: this server holds no AWS secrets. The caller is identified by
-the access key id in `Authorization: AWS4-HMAC-SHA256 Credential=<id>/...`
-(or the `X-Amz-Credential` query parameter), which is looked up as an
-ordinary key: list `sha256(<access key id>)` in the keys file. An access
-key id is an identifier, not a secret, so anyone who knows it can use the
-principal: prefer the bearer token (`AWS_BEARER_TOKEN_BEDROCK`, sent as
-`Authorization: Bearer <token>`), which is a real secret, and keep SigV4
-principals on a trusted network.
+Auth: bearer only by default. Send `Authorization: Bearer <token>` (the
+`AWS_BEARER_TOKEN_BEDROCK` value, which boto3 uses over TLS); the token is
+looked up as an ordinary key in the keys file. A request signed with SigV4
+and carrying no bearer token is a 401 `UnrecognizedClientException`: this
+server stores only hashes of keys, so it cannot recompute a signature, and
+an access key id is not a secret (it shows up in logs, URLs and error
+messages), so trusting it would let anyone who has seen one impersonate its
+principal.
+
+Operator opt-in, off by default: set `ROUTELLM_BEDROCK_ALLOW_UNVERIFIED_SIGV4`
+to `1`, `true` or `yes` (read on every request) and the access key id of a
+SigV4 `Authorization` header is looked up as the key (list
+`sha256(<access key id>)`). The signature is still NOT verified. Use it only
+on a network where every caller is trusted. Credentials are never read from
+the URL: a presigned `X-Amz-Credential` query parameter is ignored in both
+modes.
 
 Mapped
     system[].text                       one system message
@@ -67,6 +74,7 @@ frame and no `messageStop`.
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from collections.abc import AsyncIterator, Mapping
@@ -125,6 +133,8 @@ _ERROR_TYPES = {
     503: "ServiceUnavailableException",
     504: "ModelTimeoutException",
 }
+#: Operator opt-in: trust the access key id of an unverified SigV4 header.
+UNVERIFIED_SIGV4_ENV = "ROUTELLM_BEDROCK_ALLOW_UNVERIFIED_SIGV4"
 _SIGV4 = re.compile(r"^AWS4-HMAC-SHA256\s.*?Credential=([^/,\s]+)/", re.IGNORECASE)
 
 _REQUEST = {
@@ -340,14 +350,13 @@ class BedrockConverse(Adapter):
     )
 
     def credential(self, headers: Mapping[str, str], query: Mapping[str, str]) -> str | None:
-        found = _SIGV4.match(headers.get("authorization") or "")
-        if found:
-            return found.group(1)
         token = bearer(headers)
         if token:
             return token
-        presigned = query.get("X-Amz-Credential")
-        return presigned.split("/")[0] if presigned else None
+        if os.environ.get(UNVERIFIED_SIGV4_ENV, "").strip().lower() in ("1", "true", "yes"):
+            found = _SIGV4.match(headers.get("authorization") or "")
+            return found.group(1) if found else None
+        return None
 
     # -- request ---------------------------------------------------------------
 

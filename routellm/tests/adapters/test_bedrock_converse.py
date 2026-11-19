@@ -114,7 +114,7 @@ class BedrockDriver(Driver):
 
     def authorize(self, http: Http, key: str | None) -> Http:
         if key is not None:
-            http.headers["authorization"] = SIGV4.format(key=key, sig="0" * 64)
+            http.headers["authorization"] = f"Bearer {key}"
         return http
 
     def parse(self, response: httpx.Response, scenario: Scenario) -> Outcome:
@@ -423,32 +423,62 @@ def test_documented_refusals_cover_every_unsupported_top_level_field():
 # -- credentials ---------------------------------------------------------------------
 
 
-def test_credential_is_the_access_key_id_of_a_sigv4_header():
+FLAG = "ROUTELLM_BEDROCK_ALLOW_UNVERIFIED_SIGV4"
+PRESIGNED = {"X-Amz-Credential": "AKIAQ/20260101/us-east-1/bedrock/aws4_request"}
+
+
+def test_credential_is_the_bearer_token_by_default(monkeypatch):
+    monkeypatch.delenv(FLAG, raising=False)
     adapter = BedrockConverse()
-    sigv4 = SIGV4.format(key="AKIAEXAMPLE", sig="ab")
-    assert adapter.credential({"authorization": sigv4}, {}) == "AKIAEXAMPLE"
     assert adapter.credential({"authorization": "Bearer tok"}, {}) == "tok"
-    assert (
-        adapter.credential(
-            {}, {"X-Amz-Credential": "AKIAQ/20260101/us-east-1/bedrock/aws4_request"}
-        )
-        == "AKIAQ"
-    )
+    assert adapter.credential({"authorization": SIGV4.format(key="AKIAX", sig="ab")}, {}) is None
     assert adapter.credential({}, {}) is None
 
 
-def test_bearer_token_and_sigv4_both_authenticate(harness):
-    harness.upstream.mode = "echo"
-    body = {"messages": [USER]}
+def test_sigv4_access_key_id_only_behind_the_opt_in(monkeypatch):
+    adapter = BedrockConverse()
+    sigv4 = {"authorization": SIGV4.format(key="AKIAEXAMPLE", sig="ab")}
+    for off in ("", "0", "false", "no"):
+        monkeypatch.setenv(FLAG, off)
+        assert adapter.credential(sigv4, {}) is None
+    for on in ("1", "true", "yes"):
+        monkeypatch.setenv(FLAG, on)
+        assert adapter.credential(sigv4, {}) == "AKIAEXAMPLE"
+        assert adapter.credential({"authorization": "Bearer tok"}, {}) == "tok"
+
+
+def test_credentials_never_come_from_the_url(monkeypatch):
+    adapter = BedrockConverse()
+    for value in (None, "1"):
+        if value:
+            monkeypatch.setenv(FLAG, value)
+        else:
+            monkeypatch.delenv(FLAG, raising=False)
+        assert adapter.credential({}, PRESIGNED) is None
+        assert adapter.credential({"authorization": "Bearer tok"}, PRESIGNED) == "tok"
+
+
+def test_sigv4_alone_is_refused_on_the_wire(harness):
     url = f"{harness.base}/model/default/converse"
-    for header in (f"Bearer {KEY}", SIGV4.format(key=KEY, sig="00")):
-        response = httpx.post(url, json=body, headers={"authorization": header})
-        assert response.status_code == 200, response.text
-    wrong = httpx.post(
-        url, json=body, headers={"authorization": SIGV4.format(key="AKIAWRONG", sig="00")}
-    )
+    body = {"messages": [USER]}
+    sigv4 = {"authorization": SIGV4.format(key=KEY, sig="00")}
+    for kwargs in (
+        {"headers": sigv4},
+        {"params": {**PRESIGNED, "X-Amz-Credential": f"{KEY}/d/r/s/aws4_request"}},
+    ):
+        response = httpx.post(url, json=body, **kwargs)
+        assert response.status_code == 401
+        assert response.headers["x-amzn-errortype"] == "UnrecognizedClientException"
+    assert not harness.upstream.hits
+
+
+def test_bearer_token_authenticates(harness):
+    harness.upstream.mode = "echo"
+    url = f"{harness.base}/model/default/converse"
+    ok = httpx.post(url, json={"messages": [USER]}, headers={"authorization": f"Bearer {KEY}"})
+    assert ok.status_code == 200, ok.text
+    wrong = httpx.post(url, json={"messages": [USER]}, headers={"authorization": "Bearer nope"})
     assert wrong.status_code == 401
-    assert wrong.headers["x-amzn-errortype"] == "UnrecognizedClientException"
 
 
 # -- the wire ---------------------------------------------------------------------------
@@ -459,7 +489,7 @@ def converse(harness, body, stream=False, model="default"):
     return httpx.post(
         f"{harness.base}/model/{model}/{verb}",
         json=body,
-        headers={"authorization": SIGV4.format(key=KEY, sig="00")},
+        headers={"authorization": f"Bearer {KEY}"},
         timeout=60,
     )
 
@@ -628,7 +658,7 @@ def runtime(harness):
     boto3 = pytest.importorskip("boto3")
     from botocore.config import Config
 
-    return boto3.client(
+    client = boto3.client(
         "bedrock-runtime",
         endpoint_url=harness.base,
         region_name="us-east-1",
@@ -636,6 +666,14 @@ def runtime(harness):
         aws_secret_access_key="not-checked",
         config=Config(retries={"max_attempts": 1, "mode": "standard"}),
     )
+
+    # boto3 refuses bearer auth over plain http; sign as usual, then send the
+    # bearer header the adapter requires (what a TLS client does natively).
+    def bearer_header(request, **_):
+        request.headers["Authorization"] = f"Bearer {KEY}"
+
+    client.meta.events.register("before-send.bedrock-runtime.*", bearer_header)
+    return client
 
 
 def test_boto3_converse(harness, runtime):
